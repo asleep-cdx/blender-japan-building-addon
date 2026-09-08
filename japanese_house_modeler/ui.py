@@ -4,7 +4,7 @@ import bpy
 
 
 class JHM_PT_house_modeler(bpy.types.Panel):
-    """Build 01 UI for new-wall defaults and selected-wall data."""
+    """UI for new-wall defaults and selected-wall data."""
 
     bl_label = "日本住宅モデラー"
     bl_idname = "JHM_PT_house_modeler"
@@ -22,7 +22,7 @@ class JHM_PT_house_modeler(bpy.types.Panel):
         new_wall_box.prop(defaults, "wall_height", text="壁高さ (mm)")
         new_wall_box.separator()
         new_wall_box.operator(
-            "jhm.wall_creation_not_implemented", text="＋ 壁", icon="ADD"
+            "jhm.create_wall", text="＋ 壁", icon="ADD"
         )
 
         layout.separator()
@@ -30,7 +30,8 @@ class JHM_PT_house_modeler(bpy.types.Panel):
         selected_box.label(text="選択中の壁")
         active_object = context.active_object
         if active_object and active_object.jhm_wall.is_wall:
-            selected_box.prop(active_object.jhm_wall, "wall_thickness", text="壁厚 (mm)")
-            selected_box.prop(active_object.jhm_wall, "wall_height", text="壁高さ (mm)")
+            wall = active_object.jhm_wall
+            selected_box.label(text=f"壁厚: {wall.wall_thickness:.1f} mm")
+            selected_box.label(text=f"壁高さ: {wall.wall_height:.1f} mm")
         else:
-            selected_box.label(text="Wall SystemはBuild 02で実装予定です。")
+            selected_box.label(text="Wallを選択してください。")

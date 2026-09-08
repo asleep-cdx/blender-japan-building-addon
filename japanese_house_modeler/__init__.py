@@ -1,4 +1,4 @@
-"""日本住宅モデラー Build 01 add-on package."""
+"""日本住宅モデラー add-on package."""
 
 bl_info = {
     "name": "日本住宅モデラー",
@@ -6,7 +6,7 @@ bl_info = {
     "version": (0, 1, 0),
     "blender": (5, 2, 0),
     "location": "View3D > Sidebar > 日本住宅",
-    "description": "Foundation UI for a future Japanese house wall system",
+    "description": "Create centreline-based walls for Japanese house modelling",
     "category": "3D View",
 }
 
@@ -16,7 +16,7 @@ from . import operators, properties, ui
 _CLASSES = (
     properties.JHM_NewWallDefaults,
     properties.JHM_WallProperties,
-    operators.JHM_OT_wall_creation_not_implemented,
+    operators.JHM_OT_create_wall,
     ui.JHM_PT_house_modeler,
 )
 
