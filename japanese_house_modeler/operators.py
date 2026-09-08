@@ -11,6 +11,10 @@ from mathutils import Vector
 
 _MIN_WALL_LENGTH_M = 1e-6
 _PLANE_INTERSECTION_EPSILON = 1e-10
+_ANGLE_STEP_RAD = math.radians(15.0)
+_PREVIEW_LINE_WIDTH_PX = 1.5
+_PREVIEW_MARKER_RADIUS_PX = 5.5
+_PREVIEW_MARKER_SEGMENTS = 32
 
 
 class JHM_OT_create_wall(bpy.types.Operator):
@@ -41,8 +45,10 @@ class JHM_OT_create_wall(bpy.types.Operator):
         self._wall_height_mm = defaults.wall_height
         self._start_point = None
         self._end_candidate = None
+        self._last_raw_endpoint = None
+        self._shift_held = bool(event.shift)
         self._draw_handle = bpy.types.SpaceView3D.draw_handler_add(
-            self._draw_preview, (), "WINDOW", "POST_VIEW"
+            self._draw_preview, (), "WINDOW", "POST_PIXEL"
         )
         context.window_manager.modal_handler_add(self)
         self._tag_redraw()
@@ -52,13 +58,19 @@ class JHM_OT_create_wall(bpy.types.Operator):
         if event.type in {"ESC", "RIGHTMOUSE"}:
             return self._finish({"CANCELLED"})
 
+        self._shift_held = bool(event.shift)
+
+        if event.type in {"LEFT_SHIFT", "RIGHT_SHIFT"}:
+            if self._start_point is not None and self._last_raw_endpoint is not None:
+                self._update_end_candidate(self._last_raw_endpoint)
+                self._tag_redraw()
+            return {"RUNNING_MODAL"}
+
         if event.type == "MOUSEMOVE":
             point, _ = self._xy_plane_point(event)
+            self._last_raw_endpoint = point
             if self._start_point is not None and point is not None:
-                snapped_endpoint = self.snap_endpoint_candidate(point)
-                self._end_candidate = self.resolve_endpoint_candidate(
-                    self._start_point, snapped_endpoint
-                )
+                self._update_end_candidate(point)
             else:
                 self._end_candidate = None
             self._tag_redraw()
@@ -73,16 +85,15 @@ class JHM_OT_create_wall(bpy.types.Operator):
                 )
                 return {"RUNNING_MODAL"}
 
+            self._last_raw_endpoint = point
+
             if self._start_point is None:
                 self._start_point = point
                 self._end_candidate = point
                 self._tag_redraw()
                 return {"RUNNING_MODAL"}
 
-            snapped_endpoint = self.snap_endpoint_candidate(point)
-            endpoint = self.resolve_endpoint_candidate(
-                self._start_point, snapped_endpoint
-            )
+            endpoint = self._resolve_final_endpoint(point)
             if not self._is_valid_wall_length(self._start_point, endpoint):
                 self.report({"WARNING"}, "壁の長さが短すぎます。")
                 return {"RUNNING_MODAL"}
@@ -119,13 +130,34 @@ class JHM_OT_create_wall(bpy.types.Operator):
         return Vector((point.x, point.y, 0.0)), None
 
     def snap_endpoint_candidate(self, raw_endpoint):
-        """Build 02-A intentionally has no snapping; Build 02-C can extend this."""
+        """Build 02-B intentionally has no snapping; Build 02-C can extend this."""
         return raw_endpoint
 
     def resolve_endpoint_candidate(self, start_point, raw_endpoint):
-        """Leave candidates unconstrained; Build 02-B can add drawing constraints."""
-        del start_point
-        return raw_endpoint
+        """Apply a 15-degree world-XY angle constraint while Shift is held."""
+        if not self._shift_held:
+            return raw_endpoint
+
+        delta = raw_endpoint - start_point
+        if delta.length <= _MIN_WALL_LENGTH_M:
+            return raw_endpoint
+
+        raw_angle = math.atan2(delta.y, delta.x)
+        constrained_angle = round(raw_angle / _ANGLE_STEP_RAD) * _ANGLE_STEP_RAD
+        axis = Vector(
+            (math.cos(constrained_angle), math.sin(constrained_angle), 0.0)
+        )
+        projected_length = delta.dot(axis)
+        return start_point + axis * projected_length
+
+    def _resolve_final_endpoint(self, raw_endpoint):
+        snapped_endpoint = self.snap_endpoint_candidate(raw_endpoint)
+        return self.resolve_endpoint_candidate(
+            self._start_point, snapped_endpoint
+        )
+
+    def _update_end_candidate(self, raw_endpoint):
+        self._end_candidate = self._resolve_final_endpoint(raw_endpoint)
 
     def _is_valid_wall_length(self, start_point, endpoint):
         """This is a geometry-degeneracy threshold, not a building minimum size."""
@@ -203,37 +235,51 @@ class JHM_OT_create_wall(bpy.types.Operator):
     def _draw_preview(self):
         if self._start_point is None or self._end_candidate is None:
             return
-        geometry = self._wall_geometry(self._start_point, self._end_candidate)
-        if geometry is None:
+        if not self._is_valid_wall_length(self._start_point, self._end_candidate):
             return
 
-        vertices, _faces = geometry
-        triangles = (
-            (0, 3, 2), (0, 2, 1),
-            (4, 5, 6), (4, 6, 7),
-            (0, 1, 5), (0, 5, 4),
-            (1, 2, 6), (1, 6, 5),
-            (2, 3, 7), (2, 7, 6),
-            (3, 0, 4), (3, 4, 7),
+        start_2d = view3d_utils.location_3d_to_region_2d(
+            self._region, self._region_data, self._start_point
         )
-        edges = (
-            (0, 1), (1, 2), (2, 3), (3, 0),
-            (4, 5), (5, 6), (6, 7), (7, 4),
-            (0, 4), (1, 5), (2, 6), (3, 7),
+        end_2d = view3d_utils.location_3d_to_region_2d(
+            self._region, self._region_data, self._end_candidate
         )
+        if start_2d is None or end_2d is None:
+            return
+
         try:
             shader = gpu.shader.from_builtin("UNIFORM_COLOR")
             gpu.state.blend_set("ALPHA")
+            gpu.state.line_width_set(_PREVIEW_LINE_WIDTH_PX)
+
             shader.bind()
-            shader.uniform_float("color", (0.2, 0.65, 1.0, 0.25))
-            batch_for_shader(
-                shader, "TRIS", {"pos": vertices}, indices=triangles
-            ).draw(shader)
             shader.uniform_float("color", (0.1, 0.4, 0.9, 1.0))
-            batch_for_shader(shader, "LINES", {"pos": vertices}, indices=edges).draw(shader)
+            batch_for_shader(
+                shader,
+                "LINES",
+                {"pos": [tuple(start_2d), tuple(end_2d)]},
+            ).draw(shader)
+
+            for center in (start_2d, end_2d):
+                marker_points = []
+                for index in range(_PREVIEW_MARKER_SEGMENTS + 1):
+                    angle = (math.tau * index) / _PREVIEW_MARKER_SEGMENTS
+                    marker_points.append(
+                        (
+                            center.x + math.cos(angle) * _PREVIEW_MARKER_RADIUS_PX,
+                            center.y + math.sin(angle) * _PREVIEW_MARKER_RADIUS_PX,
+                        )
+                    )
+
+                batch_for_shader(
+                    shader,
+                    "LINE_STRIP",
+                    {"pos": marker_points},
+                ).draw(shader)
         except Exception:
             self._remove_draw_handler()
         finally:
+            gpu.state.line_width_set(1.0)
             gpu.state.blend_set("NONE")
 
     def _tag_redraw(self):
