@@ -752,3 +752,132 @@ class JHM_OT_move_wall_endpoint(bpy.types.Operator):
     _tag_redraw = JHM_OT_create_wall._tag_redraw
     _finish = JHM_OT_create_wall._finish
     _remove_draw_handler = JHM_OT_create_wall._remove_draw_handler
+
+
+class JHM_OT_edit_wall_dimensions(bpy.types.Operator):
+    """Regenerate a managed wall after editing its saved dimensions."""
+
+    bl_idname = "jhm.edit_wall_dimensions"
+    bl_label = "壁寸法を変更"
+    bl_description = "選択中の壁の壁厚と壁高さを変更します"
+    bl_options = {"REGISTER", "UNDO"}
+
+    wall_thickness: bpy.props.FloatProperty(
+        name="壁厚 (mm)",
+        min=0.1,
+        max=10000.0,
+        precision=1,
+    )
+    wall_height: bpy.props.FloatProperty(
+        name="壁高さ (mm)",
+        min=0.1,
+        max=100000.0,
+        precision=1,
+    )
+    target: bpy.props.PointerProperty(
+        type=bpy.types.Object,
+        options={"HIDDEN"},
+    )
+
+    @classmethod
+    def poll(cls, context):
+        active_object = context.active_object
+        wall = getattr(active_object, "jhm_wall", None)
+        return (
+            context.area is not None
+            and context.area.type == "VIEW_3D"
+            and context.mode == "OBJECT"
+            and active_object is not None
+            and wall is not None
+            and wall.is_wall
+        )
+
+    def invoke(self, context, event):
+        wall_object = context.active_object
+        if not JHM_OT_move_wall_endpoint._has_identity_transform(wall_object):
+            self.report(
+                {"WARNING"},
+                "このWallにはObject Transformがあります。壁寸法編集の対象外です。",
+            )
+            return {"CANCELLED"}
+
+        wall = wall_object.jhm_wall
+        self.target = wall_object
+        self.wall_thickness = wall.wall_thickness
+        self.wall_height = wall.wall_height
+        return context.window_manager.invoke_props_dialog(self)
+
+    def draw(self, context):
+        layout = self.layout
+        layout.prop(self, "wall_thickness")
+        layout.prop(self, "wall_height")
+
+    def execute(self, context):
+        wall_object = self.target
+        try:
+            wall = wall_object.jhm_wall if wall_object is not None else None
+            is_available = (
+                wall_object is not None
+                and bpy.data.objects.get(wall_object.name) is wall_object
+                and wall is not None
+                and wall.is_wall
+            )
+        except ReferenceError:
+            is_available = False
+        if not is_available:
+            self.report({"ERROR"}, "編集対象のWallが見つかりません。")
+            return {"CANCELLED"}
+        if context.mode != "OBJECT":
+            self.report({"WARNING"}, "Object Modeで壁寸法を編集してください。")
+            return {"CANCELLED"}
+        if not JHM_OT_move_wall_endpoint._has_identity_transform(wall_object):
+            self.report(
+                {"WARNING"},
+                "このWallにはObject Transformがあります。壁寸法編集の対象外です。",
+            )
+            return {"CANCELLED"}
+
+        old_thickness = wall.wall_thickness
+        old_height = wall.wall_height
+        if (
+            self.wall_thickness == old_thickness
+            and self.wall_height == old_height
+        ):
+            return {"FINISHED"}
+
+        saved_start = Vector(wall.start)
+        saved_end = Vector(wall.end)
+        self._wall_thickness_mm = self.wall_thickness
+        self._wall_height_mm = self.wall_height
+        geometry = JHM_OT_create_wall._wall_geometry(self, saved_start, saved_end)
+        if geometry is None:
+            self.report({"ERROR"}, "壁の寸法が不正です。")
+            return {"CANCELLED"}
+
+        old_mesh = wall_object.data
+        new_mesh = None
+        try:
+            vertices, faces = geometry
+            new_mesh = bpy.data.meshes.new(old_mesh.name)
+            new_mesh.from_pydata(vertices, [], faces)
+            for material in old_mesh.materials:
+                new_mesh.materials.append(material)
+            new_mesh.update()
+            wall_object.data = new_mesh
+            wall.wall_thickness = self.wall_thickness
+            wall.wall_height = self.wall_height
+        except Exception as error:
+            if new_mesh is not None and wall_object.data is new_mesh:
+                wall_object.data = old_mesh
+            wall.wall_thickness = old_thickness
+            wall.wall_height = old_height
+            if new_mesh is not None and new_mesh.users == 0:
+                bpy.data.meshes.remove(new_mesh)
+            self.report({"ERROR"}, f"壁寸法を更新できませんでした: {error}")
+            return {"CANCELLED"}
+
+        if old_mesh.users == 0:
+            bpy.data.meshes.remove(old_mesh)
+        wall_object.select_set(True)
+        context.view_layer.objects.active = wall_object
+        return {"FINISHED"}

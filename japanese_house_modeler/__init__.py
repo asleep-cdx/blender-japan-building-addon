@@ -18,6 +18,7 @@ _CLASSES = (
     properties.JHM_WallProperties,
     operators.JHM_OT_create_wall,
     operators.JHM_OT_move_wall_endpoint,
+    operators.JHM_OT_edit_wall_dimensions,
     ui.JHM_PT_house_modeler,
 )
 
