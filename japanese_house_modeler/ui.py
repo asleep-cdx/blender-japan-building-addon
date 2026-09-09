@@ -2,6 +2,8 @@
 
 import bpy
 
+from .connections import valid_connection_count
+
 
 class JHM_PT_house_modeler(bpy.types.Panel):
     """UI for new-wall defaults and selected-wall data."""
@@ -33,6 +35,13 @@ class JHM_PT_house_modeler(bpy.types.Panel):
             wall = active_object.jhm_wall
             selected_box.label(text=f"壁厚: {wall.wall_thickness:.1f} mm")
             selected_box.label(text=f"壁高さ: {wall.wall_height:.1f} mm")
+            selected_box.separator()
+            selected_box.label(
+                text=f"始点接続: {valid_connection_count(active_object, 'START')}"
+            )
+            selected_box.label(
+                text=f"終点接続: {valid_connection_count(active_object, 'END')}"
+            )
             selected_box.separator()
             selected_box.operator(
                 "jhm.edit_wall_dimensions", text="壁寸法を変更"

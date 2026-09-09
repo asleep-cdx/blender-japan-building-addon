@@ -15,6 +15,7 @@ from . import operators, properties, ui
 
 _CLASSES = (
     properties.JHM_NewWallDefaults,
+    properties.JHM_WallConnection,
     properties.JHM_WallProperties,
     operators.JHM_OT_create_wall,
     operators.JHM_OT_move_wall_endpoint,

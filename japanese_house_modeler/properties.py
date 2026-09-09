@@ -33,6 +33,24 @@ class JHM_NewWallDefaults(bpy.types.PropertyGroup):
     )
 
 
+class JHM_WallConnection(bpy.types.PropertyGroup):
+    """One persistent link to another managed Wall endpoint."""
+
+    target_object: bpy.props.PointerProperty(
+        name="接続先Wall",
+        type=bpy.types.Object,
+        options={"HIDDEN"},
+    )
+    target_endpoint: bpy.props.EnumProperty(
+        name="接続先端点",
+        items=(
+            ("START", "始点", "接続先Wallの始点"),
+            ("END", "終点", "接続先Wallの終点"),
+        ),
+        options={"HIDDEN"},
+    )
+
+
 class JHM_WallProperties(bpy.types.PropertyGroup):
     """Per-object wall data, deliberately separate from new-wall defaults.
 
@@ -78,4 +96,12 @@ class JHM_WallProperties(bpy.types.PropertyGroup):
         min=_MIN_HEIGHT_MM,
         max=_MAX_HEIGHT_MM,
         precision=1,
+    )
+    start_connections: bpy.props.CollectionProperty(
+        type=JHM_WallConnection,
+        options={"HIDDEN"},
+    )
+    end_connections: bpy.props.CollectionProperty(
+        type=JHM_WallConnection,
+        options={"HIDDEN"},
     )

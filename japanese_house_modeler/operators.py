@@ -8,6 +8,13 @@ from bpy_extras import view3d_utils
 from gpu_extras.batch import batch_for_shader
 from mathutils import Vector
 
+from .connections import (
+    attach_to_junction,
+    detach_endpoint,
+    restore_topology,
+    snapshot_topology,
+)
+
 
 _MIN_WALL_LENGTH_M = 1e-6
 _PLANE_INTERSECTION_EPSILON = 1e-10
@@ -56,6 +63,10 @@ class JHM_OT_create_wall(bpy.types.Operator):
         self._end_candidate = None
         self._last_raw_endpoint = None
         self._snap_candidate = None
+        self._snap_target_object = None
+        self._snap_target_endpoint = None
+        self._start_snap_target_object = None
+        self._start_snap_target_endpoint = None
         self._x_align_reference = None
         self._y_align_reference = None
         self._start_snapped = False
@@ -108,6 +119,8 @@ class JHM_OT_create_wall(bpy.types.Operator):
             if self._start_point is None:
                 self._start_point = self._resolve_start_candidate(point).copy()
                 self._start_snapped = self._snap_candidate is not None
+                self._start_snap_target_object = self._snap_target_object
+                self._start_snap_target_endpoint = self._snap_target_endpoint
                 self._end_candidate = self._start_point.copy()
                 self._tag_redraw()
                 return {"RUNNING_MODAL"}
@@ -151,6 +164,8 @@ class JHM_OT_create_wall(bpy.types.Operator):
     def snap_endpoint_candidate(self, raw_endpoint):
         """Return the closest visible saved Wall endpoint within 16 screen pixels."""
         self._snap_candidate = None
+        self._snap_target_object = None
+        self._snap_target_endpoint = None
         raw_2d = view3d_utils.location_3d_to_region_2d(
             self._region, self._region_data, raw_endpoint
         )
@@ -158,13 +173,20 @@ class JHM_OT_create_wall(bpy.types.Operator):
             return raw_endpoint
 
         closest_distance = _SNAP_DISTANCE_PX
-        for endpoint, endpoint_2d in self._visible_wall_endpoints():
+        for (
+            wall_object,
+            endpoint_name,
+            endpoint,
+            endpoint_2d,
+        ) in self._visible_wall_endpoints():
             distance = (endpoint_2d - raw_2d).length
             if distance <= _SNAP_DISTANCE_PX and (
                 self._snap_candidate is None or distance < closest_distance
             ):
                 closest_distance = distance
                 self._snap_candidate = endpoint.copy()
+                self._snap_target_object = wall_object
+                self._snap_target_endpoint = endpoint_name
 
         if self._snap_candidate is not None:
             return self._snap_candidate
@@ -183,7 +205,10 @@ class JHM_OT_create_wall(bpy.types.Operator):
             ):
                 continue
 
-            for saved_endpoint in (wall.start, wall.end):
+            for endpoint_name, saved_endpoint in (
+                ("START", wall.start),
+                ("END", wall.end),
+            ):
                 endpoint = Vector(saved_endpoint)
                 endpoint_2d = view3d_utils.location_3d_to_region_2d(
                     self._region, self._region_data, endpoint
@@ -196,7 +221,7 @@ class JHM_OT_create_wall(bpy.types.Operator):
                 ):
                     continue
 
-                yield endpoint, endpoint_2d
+                yield wall_object, endpoint_name, endpoint, endpoint_2d
 
     def _clear_alignment(self):
         self._x_align_reference = None
@@ -223,7 +248,7 @@ class JHM_OT_create_wall(bpy.types.Operator):
     def _resolve_free_alignment(self, raw_endpoint):
         best_x = None
         best_y = None
-        for endpoint, _ in self._visible_wall_endpoints():
+        for _, _, endpoint, _ in self._visible_wall_endpoints():
             x_candidate = Vector((endpoint.x, raw_endpoint.y, 0.0))
             y_candidate = Vector((raw_endpoint.x, endpoint.y, 0.0))
             x_distance = self._screen_distance(raw_endpoint, x_candidate)
@@ -266,7 +291,7 @@ class JHM_OT_create_wall(bpy.types.Operator):
         constrained = start_point + axis * projected_length
 
         best = None
-        for endpoint, _ in self._visible_wall_endpoints():
+        for _, _, endpoint, _ in self._visible_wall_endpoints():
             for coordinate, component, reference_value in (
                 ("x", axis.x, endpoint.x),
                 ("y", axis.y, endpoint.y),
@@ -354,7 +379,9 @@ class JHM_OT_create_wall(bpy.types.Operator):
 
         mesh = None
         wall_object = None
+        topology = None
         try:
+            topology = snapshot_topology()
             vertices, faces = geometry
             mesh = bpy.data.meshes.new("Wall")
             mesh.from_pydata(vertices, [], faces)
@@ -369,11 +396,28 @@ class JHM_OT_create_wall(bpy.types.Operator):
             wall.wall_thickness = self._wall_thickness_mm
             wall.wall_height = self._wall_height_mm
 
+            if self._start_snap_target_object is not None:
+                attach_to_junction(
+                    wall_object,
+                    "START",
+                    self._start_snap_target_object,
+                    self._start_snap_target_endpoint,
+                )
+            if self._snap_target_object is not None:
+                attach_to_junction(
+                    wall_object,
+                    "END",
+                    self._snap_target_object,
+                    self._snap_target_endpoint,
+                )
+
             for selected in context.selected_objects:
                 selected.select_set(False)
             wall_object.select_set(True)
             context.view_layer.objects.active = wall_object
         except Exception as error:
+            if topology is not None:
+                restore_topology(topology)
             if wall_object is not None:
                 bpy.data.objects.remove(wall_object, do_unlink=True)
             elif mesh is not None:
@@ -624,6 +668,8 @@ class JHM_OT_move_wall_endpoint(bpy.types.Operator):
         self._wall_height_mm = wall.wall_height
         self._last_raw_endpoint = None
         self._snap_candidate = None
+        self._snap_target_object = None
+        self._snap_target_endpoint = None
         self._x_align_reference = None
         self._y_align_reference = None
         self._start_snapped = False
@@ -687,7 +733,9 @@ class JHM_OT_move_wall_endpoint(bpy.types.Operator):
         wall = wall_object.jhm_wall
         old_mesh = wall_object.data
         new_mesh = None
+        topology = None
         try:
+            topology = snapshot_topology()
             vertices, faces = geometry
             new_mesh = bpy.data.meshes.new(old_mesh.name)
             new_mesh.from_pydata(vertices, [], faces)
@@ -701,6 +749,14 @@ class JHM_OT_move_wall_endpoint(bpy.types.Operator):
             else:
                 wall.start = tuple(self._saved_start)
                 wall.end = tuple(candidate)
+            detach_endpoint(wall_object, self.endpoint)
+            if self._snap_target_object is not None:
+                attach_to_junction(
+                    wall_object,
+                    self.endpoint,
+                    self._snap_target_object,
+                    self._snap_target_endpoint,
+                )
         except Exception as error:
             if wall_object.data is new_mesh:
                 wall_object.data = old_mesh
@@ -708,6 +764,8 @@ class JHM_OT_move_wall_endpoint(bpy.types.Operator):
                 bpy.data.meshes.remove(new_mesh)
             wall.start = tuple(self._saved_start)
             wall.end = tuple(self._saved_end)
+            if topology is not None:
+                restore_topology(topology)
             self.report({"ERROR"}, f"壁を更新できませんでした: {error}")
             return self._finish({"CANCELLED"})
 
