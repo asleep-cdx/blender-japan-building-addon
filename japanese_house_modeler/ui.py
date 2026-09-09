@@ -4,6 +4,7 @@ import bpy
 
 from .connections import valid_connection_count
 from .junctions import classification_label, classify_junction
+from .joints import joint_status_label
 
 
 class JHM_PT_house_modeler(bpy.types.Panel):
@@ -44,6 +45,9 @@ class JHM_PT_house_modeler(bpy.types.Panel):
                 text="始点形状: "
                 + classification_label(classify_junction(active_object, "START"))
             )
+            selected_box.label(
+                text="始点接合: " + joint_status_label(active_object, "START")
+            )
             selected_box.separator()
             selected_box.label(
                 text=f"終点接続: {valid_connection_count(active_object, 'END')}"
@@ -52,9 +56,15 @@ class JHM_PT_house_modeler(bpy.types.Panel):
                 text="終点形状: "
                 + classification_label(classify_junction(active_object, "END"))
             )
+            selected_box.label(
+                text="終点接合: " + joint_status_label(active_object, "END")
+            )
             selected_box.separator()
             selected_box.operator(
                 "jhm.edit_wall_dimensions", text="壁寸法を変更"
+            )
+            selected_box.operator(
+                "jhm.rebuild_wall_joints", text="接合を再生成"
             )
             selected_box.separator()
             move_start = selected_box.operator(

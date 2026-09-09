@@ -14,6 +14,7 @@ from .connections import (
     restore_topology,
     snapshot_topology,
 )
+from .joints import affected_walls, merge_affected, regenerate_wall_meshes
 
 
 _MIN_WALL_LENGTH_M = 1e-6
@@ -415,11 +416,16 @@ class JHM_OT_create_wall(bpy.types.Operator):
                 selected.select_set(False)
             wall_object.select_set(True)
             context.view_layer.objects.active = wall_object
+            # Keep the atomic batch as the transaction's final fallible mutation.
+            regenerate_wall_meshes(affected_walls(wall_object))
         except Exception as error:
             if topology is not None:
                 restore_topology(topology)
             if wall_object is not None:
+                failed_mesh = wall_object.data
                 bpy.data.objects.remove(wall_object, do_unlink=True)
+                if failed_mesh.users == 0:
+                    bpy.data.meshes.remove(failed_mesh)
             elif mesh is not None:
                 bpy.data.meshes.remove(mesh)
             self.report({"ERROR"}, f"壁を生成できませんでした: {error}")
@@ -724,25 +730,16 @@ class JHM_OT_move_wall_endpoint(bpy.types.Operator):
     def _commit_endpoint(self, context, candidate):
         start_point = candidate if self.endpoint == "START" else self._saved_start
         end_point = self._saved_end if self.endpoint == "START" else candidate
-        geometry = self._wall_geometry(start_point, end_point)
-        if geometry is None:
+        if not self._is_valid_wall_length(start_point, end_point):
             self.report({"WARNING"}, "壁の寸法が不正です。")
             return {"RUNNING_MODAL"}
 
         wall_object = self._wall_object
         wall = wall_object.jhm_wall
-        old_mesh = wall_object.data
-        new_mesh = None
         topology = None
         try:
             topology = snapshot_topology()
-            vertices, faces = geometry
-            new_mesh = bpy.data.meshes.new(old_mesh.name)
-            new_mesh.from_pydata(vertices, [], faces)
-            for material in old_mesh.materials:
-                new_mesh.materials.append(material)
-            new_mesh.update()
-            wall_object.data = new_mesh
+            old_members = affected_walls(wall_object, (self.endpoint,))
             if self.endpoint == "START":
                 wall.start = tuple(candidate)
                 wall.end = tuple(self._saved_end)
@@ -757,11 +754,14 @@ class JHM_OT_move_wall_endpoint(bpy.types.Operator):
                     self._snap_target_object,
                     self._snap_target_endpoint,
                 )
+            # The moved core direction also changes a miter at the opposite end.
+            new_members = affected_walls(wall_object)
+            wall_object.select_set(True)
+            context.view_layer.objects.active = wall_object
+            regenerate_wall_meshes(
+                merge_affected(old_members, new_members, [wall_object])
+            )
         except Exception as error:
-            if wall_object.data is new_mesh:
-                wall_object.data = old_mesh
-            if new_mesh is not None:
-                bpy.data.meshes.remove(new_mesh)
             wall.start = tuple(self._saved_start)
             wall.end = tuple(self._saved_end)
             if topology is not None:
@@ -769,10 +769,6 @@ class JHM_OT_move_wall_endpoint(bpy.types.Operator):
             self.report({"ERROR"}, f"壁を更新できませんでした: {error}")
             return self._finish({"CANCELLED"})
 
-        if old_mesh.users == 0:
-            bpy.data.meshes.remove(old_mesh)
-        wall_object.select_set(True)
-        context.view_layer.objects.active = wall_object
         return self._finish({"FINISHED"})
 
     def _wall_is_available(self):
@@ -903,39 +899,51 @@ class JHM_OT_edit_wall_dimensions(bpy.types.Operator):
         ):
             return {"FINISHED"}
 
-        saved_start = Vector(wall.start)
-        saved_end = Vector(wall.end)
-        self._wall_thickness_mm = self.wall_thickness
-        self._wall_height_mm = self.wall_height
-        geometry = JHM_OT_create_wall._wall_geometry(self, saved_start, saved_end)
-        if geometry is None:
-            self.report({"ERROR"}, "壁の寸法が不正です。")
-            return {"CANCELLED"}
-
-        old_mesh = wall_object.data
-        new_mesh = None
         try:
-            vertices, faces = geometry
-            new_mesh = bpy.data.meshes.new(old_mesh.name)
-            new_mesh.from_pydata(vertices, [], faces)
-            for material in old_mesh.materials:
-                new_mesh.materials.append(material)
-            new_mesh.update()
-            wall_object.data = new_mesh
             wall.wall_thickness = self.wall_thickness
             wall.wall_height = self.wall_height
+            wall_object.select_set(True)
+            context.view_layer.objects.active = wall_object
+            regenerate_wall_meshes(affected_walls(wall_object))
         except Exception as error:
-            if new_mesh is not None and wall_object.data is new_mesh:
-                wall_object.data = old_mesh
             wall.wall_thickness = old_thickness
             wall.wall_height = old_height
-            if new_mesh is not None and new_mesh.users == 0:
-                bpy.data.meshes.remove(new_mesh)
             self.report({"ERROR"}, f"壁寸法を更新できませんでした: {error}")
             return {"CANCELLED"}
 
-        if old_mesh.users == 0:
-            bpy.data.meshes.remove(old_mesh)
-        wall_object.select_set(True)
-        context.view_layer.objects.active = wall_object
+        return {"FINISHED"}
+
+
+class JHM_OT_rebuild_wall_joints(bpy.types.Operator):
+    """Repair selected Wall joints from canonical data and topology."""
+
+    bl_idname = "jhm.rebuild_wall_joints"
+    bl_label = "接合を再生成"
+    bl_description = "選択中の壁と接続壁の接合Meshを再生成します"
+    bl_options = {"REGISTER", "UNDO"}
+
+    @classmethod
+    def poll(cls, context):
+        active_object = context.active_object
+        wall = getattr(active_object, "jhm_wall", None)
+        return (
+            context.mode == "OBJECT"
+            and active_object is not None
+            and wall is not None
+            and wall.is_wall
+        )
+
+    def execute(self, context):
+        wall_object = context.active_object
+        if not JHM_OT_move_wall_endpoint._has_identity_transform(wall_object):
+            self.report(
+                {"WARNING"},
+                "このWallにはObject Transformがあります。接合を再生成できません。",
+            )
+            return {"CANCELLED"}
+        try:
+            regenerate_wall_meshes(affected_walls(wall_object))
+        except Exception as error:
+            self.report({"ERROR"}, f"接合を再生成できませんでした: {error}")
+            return {"CANCELLED"}
         return {"FINISHED"}
