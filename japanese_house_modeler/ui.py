@@ -33,5 +33,14 @@ class JHM_PT_house_modeler(bpy.types.Panel):
             wall = active_object.jhm_wall
             selected_box.label(text=f"壁厚: {wall.wall_thickness:.1f} mm")
             selected_box.label(text=f"壁高さ: {wall.wall_height:.1f} mm")
+            selected_box.separator()
+            move_start = selected_box.operator(
+                "jhm.move_wall_endpoint", text="始点を移動"
+            )
+            move_start.endpoint = "START"
+            move_end = selected_box.operator(
+                "jhm.move_wall_endpoint", text="終点を移動"
+            )
+            move_end.endpoint = "END"
         else:
             selected_box.label(text="Wallを選択してください。")

@@ -21,6 +21,7 @@ _SNAP_HIGHLIGHT_RADIUS_PX = 9.0
 _SNAP_HIGHLIGHT_LINE_WIDTH_PX = 2.5
 _ALIGN_GUIDE_LINE_WIDTH_PX = 1.0
 _AXIS_EPSILON = 1e-10
+_TRANSFORM_EPSILON = 1e-6
 
 
 class JHM_OT_create_wall(bpy.types.Operator):
@@ -172,6 +173,8 @@ class JHM_OT_create_wall(bpy.types.Operator):
     def _visible_wall_endpoints(self):
         """Yield saved endpoints which are visible in this viewport."""
         for wall_object in self._view_layer.objects:
+            if wall_object is getattr(self, "_excluded_wall_object", None):
+                continue
             wall = getattr(wall_object, "jhm_wall", None)
             if wall is None or not wall.is_wall:
                 continue
@@ -552,3 +555,200 @@ class JHM_OT_create_wall(bpy.types.Operator):
         if self._draw_handle is not None:
             bpy.types.SpaceView3D.draw_handler_remove(self._draw_handle, "WINDOW")
             self._draw_handle = None
+
+
+class JHM_OT_move_wall_endpoint(bpy.types.Operator):
+    """Move one saved endpoint of an existing managed wall."""
+
+    bl_idname = "jhm.move_wall_endpoint"
+    bl_label = "壁の端点を移動"
+    bl_description = "選択中の壁の端点を次のクリック位置へ移動します"
+    bl_options = {"REGISTER", "UNDO"}
+
+    endpoint: bpy.props.EnumProperty(
+        items=(
+            ("START", "始点", "壁の始点を移動"),
+            ("END", "終点", "壁の終点を移動"),
+        ),
+        default="END",
+        options={"HIDDEN"},
+    )
+
+    @classmethod
+    def poll(cls, context):
+        active_object = context.active_object
+        wall = getattr(active_object, "jhm_wall", None)
+        return (
+            context.area is not None
+            and context.area.type == "VIEW_3D"
+            and active_object is not None
+            and wall is not None
+            and wall.is_wall
+        )
+
+    def invoke(self, context, event):
+        wall_object = context.active_object
+        if context.mode != "OBJECT":
+            self.report({"WARNING"}, "Object Modeで端点を編集してください。")
+            return {"CANCELLED"}
+        if not self._has_identity_transform(wall_object):
+            self.report(
+                {"WARNING"},
+                "このWallにはObject Transformがあります。Build 03-Aの端点編集対象外です。",
+            )
+            return {"CANCELLED"}
+
+        self._area = context.area
+        self._region = next(
+            (region for region in self._area.regions if region.type == "WINDOW"), None
+        )
+        self._region_data = context.space_data.region_3d
+        self._space_data = context.space_data
+        self._view_layer = context.view_layer
+        if self._region is None or self._region_data is None:
+            self.report({"ERROR"}, "3D Viewportの表示領域を取得できません。")
+            return {"CANCELLED"}
+
+        wall = wall_object.jhm_wall
+        self._wall_object = wall_object
+        self._excluded_wall_object = wall_object
+        self._saved_start = Vector(wall.start)
+        self._saved_end = Vector(wall.end)
+        self._start_point = (
+            self._saved_end.copy() if self.endpoint == "START" else self._saved_start.copy()
+        )
+        self._end_candidate = (
+            self._saved_start.copy() if self.endpoint == "START" else self._saved_end.copy()
+        )
+        self._wall_thickness_mm = wall.wall_thickness
+        self._wall_height_mm = wall.wall_height
+        self._last_raw_endpoint = None
+        self._snap_candidate = None
+        self._x_align_reference = None
+        self._y_align_reference = None
+        self._start_snapped = False
+        self._shift_held = bool(event.shift)
+        self._draw_handle = bpy.types.SpaceView3D.draw_handler_add(
+            self._draw_preview, (), "WINDOW", "POST_PIXEL"
+        )
+        context.window_manager.modal_handler_add(self)
+        self._tag_redraw()
+        return {"RUNNING_MODAL"}
+
+    def modal(self, context, event):
+        if not self._wall_is_available():
+            self.report({"WARNING"}, "編集中のWallが見つかりません。")
+            return self._finish({"CANCELLED"})
+
+        if event.type in {"ESC", "RIGHTMOUSE"}:
+            return self._finish({"CANCELLED"})
+
+        self._shift_held = bool(event.shift)
+        if event.type in {"LEFT_SHIFT", "RIGHT_SHIFT"}:
+            if self._last_raw_endpoint is not None:
+                self._update_end_candidate(self._last_raw_endpoint)
+                self._tag_redraw()
+            return {"RUNNING_MODAL"}
+
+        if event.type == "MOUSEMOVE":
+            point, _ = self._xy_plane_point(event)
+            if point is not None:
+                self._last_raw_endpoint = point
+                self._update_end_candidate(point)
+                self._tag_redraw()
+            return {"RUNNING_MODAL"}
+
+        if event.type == "LEFTMOUSE" and event.value == "PRESS":
+            point, error = self._xy_plane_point(event)
+            if point is None:
+                self.report({"WARNING"}, error or "XY平面上の座標を取得できません。")
+                return {"RUNNING_MODAL"}
+
+            self._last_raw_endpoint = point
+            candidate = self._resolve_final_endpoint(point)
+            self._end_candidate = candidate
+            if not self._is_valid_wall_length(self._start_point, candidate):
+                self.report({"WARNING"}, "壁の長さが短すぎます。")
+                self._tag_redraw()
+                return {"RUNNING_MODAL"}
+            return self._commit_endpoint(context, candidate)
+
+        return {"RUNNING_MODAL"}
+
+    def _commit_endpoint(self, context, candidate):
+        start_point = candidate if self.endpoint == "START" else self._saved_start
+        end_point = self._saved_end if self.endpoint == "START" else candidate
+        geometry = self._wall_geometry(start_point, end_point)
+        if geometry is None:
+            self.report({"WARNING"}, "壁の寸法が不正です。")
+            return {"RUNNING_MODAL"}
+
+        wall_object = self._wall_object
+        wall = wall_object.jhm_wall
+        old_mesh = wall_object.data
+        new_mesh = None
+        try:
+            vertices, faces = geometry
+            new_mesh = bpy.data.meshes.new(old_mesh.name)
+            new_mesh.from_pydata(vertices, [], faces)
+            for material in old_mesh.materials:
+                new_mesh.materials.append(material)
+            new_mesh.update()
+            wall_object.data = new_mesh
+            if self.endpoint == "START":
+                wall.start = tuple(candidate)
+                wall.end = tuple(self._saved_end)
+            else:
+                wall.start = tuple(self._saved_start)
+                wall.end = tuple(candidate)
+        except Exception as error:
+            if wall_object.data is new_mesh:
+                wall_object.data = old_mesh
+            if new_mesh is not None:
+                bpy.data.meshes.remove(new_mesh)
+            wall.start = tuple(self._saved_start)
+            wall.end = tuple(self._saved_end)
+            self.report({"ERROR"}, f"壁を更新できませんでした: {error}")
+            return self._finish({"CANCELLED"})
+
+        if old_mesh.users == 0:
+            bpy.data.meshes.remove(old_mesh)
+        wall_object.select_set(True)
+        context.view_layer.objects.active = wall_object
+        return self._finish({"FINISHED"})
+
+    def _wall_is_available(self):
+        try:
+            return bpy.data.objects.get(self._wall_object.name) is self._wall_object
+        except ReferenceError:
+            return False
+
+    @staticmethod
+    def _has_identity_transform(wall_object):
+        matrix = wall_object.matrix_basis
+        for row in range(4):
+            for column in range(4):
+                expected = 1.0 if row == column else 0.0
+                if abs(matrix[row][column] - expected) > _TRANSFORM_EPSILON:
+                    return False
+        return True
+
+    # Reuse Build 02-D's candidate resolution, geometry, and GPU drawing unchanged.
+    _xy_plane_point = JHM_OT_create_wall._xy_plane_point
+    snap_endpoint_candidate = JHM_OT_create_wall.snap_endpoint_candidate
+    _visible_wall_endpoints = JHM_OT_create_wall._visible_wall_endpoints
+    _clear_alignment = JHM_OT_create_wall._clear_alignment
+    _screen_distance = JHM_OT_create_wall._screen_distance
+    _resolve_free_alignment = JHM_OT_create_wall._resolve_free_alignment
+    resolve_endpoint_candidate = JHM_OT_create_wall.resolve_endpoint_candidate
+    _resolve_final_endpoint = JHM_OT_create_wall._resolve_final_endpoint
+    _update_end_candidate = JHM_OT_create_wall._update_end_candidate
+    _is_valid_wall_length = JHM_OT_create_wall._is_valid_wall_length
+    _wall_geometry = JHM_OT_create_wall._wall_geometry
+    _draw_preview = JHM_OT_create_wall._draw_preview
+    _draw_alignment_guides = JHM_OT_create_wall._draw_alignment_guides
+    _draw_snap_highlight = JHM_OT_create_wall._draw_snap_highlight
+    _draw_marker_ring = JHM_OT_create_wall._draw_marker_ring
+    _tag_redraw = JHM_OT_create_wall._tag_redraw
+    _finish = JHM_OT_create_wall._finish
+    _remove_draw_handler = JHM_OT_create_wall._remove_draw_handler
