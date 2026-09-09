@@ -18,7 +18,7 @@ class JHM_NewWallDefaults(bpy.types.PropertyGroup):
     wall_thickness: bpy.props.FloatProperty(
         name="壁厚",
         description="新規壁のデフォルト壁厚（mm）",
-        default=105.0,
+        default=130.0,
         min=_MIN_THICKNESS_MM,
         max=_MAX_THICKNESS_MM,
         precision=1,
@@ -66,7 +66,7 @@ class JHM_WallProperties(bpy.types.PropertyGroup):
     wall_thickness: bpy.props.FloatProperty(
         name="壁厚",
         description="選択中の壁の壁厚（mm）",
-        default=105.0,
+        default=130.0,
         min=_MIN_THICKNESS_MM,
         max=_MAX_THICKNESS_MM,
         precision=1,
