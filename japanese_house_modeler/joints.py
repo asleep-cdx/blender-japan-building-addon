@@ -26,6 +26,8 @@ _CROSS_PARAMETER_TOLERANCE_M = 1.0e-9
 _MAX_CROSS_TRIM_FACTOR = 10.0
 _STEP_ORTHOGONAL_TOLERANCE = 1.0e-6
 _TRANSFORM_EPSILON = 1.0e-6
+_ANGLED_CLIP_TOLERANCE_M = 1.0e-9
+_MAX_ANGLED_TRIM_FACTOR = 10.0
 
 
 def _xy(value):
@@ -423,6 +425,303 @@ def calculate_cross_step_solution(wall_object, endpoint):
     return through, tuple(profiles), junction, host_axis
 
 
+def world_to_endpoint_local(point, origin, direction, normal):
+    """Project a world XY point into an endpoint's (s, q) basis."""
+    offset = point[0] - origin[0], point[1] - origin[1]
+    return (offset[0] * direction[0] + offset[1] * direction[1],
+            offset[0] * normal[0] + offset[1] * normal[1])
+
+
+def endpoint_local_to_world(point, origin, direction, normal):
+    """Transform an endpoint-local (s, q) point to world XY."""
+    return (origin[0] + point[0] * direction[0] + point[1] * normal[0],
+            origin[1] + point[0] * direction[1] + point[1] * normal[1])
+
+
+def canonical_rectangle(wall_object, endpoint):
+    """Return the canonical, CCW rectangle beginning at an endpoint."""
+    data = endpoint_data(wall_object, endpoint)
+    if data is None:
+        return None
+    origin, direction, normal, half = data
+    length = _distance(_xy(wall_object.jhm_wall.start), _xy(wall_object.jhm_wall.end))
+    return tuple(endpoint_local_to_world(point, origin, direction, normal) for point in (
+        (0.0, half), (0.0, -half), (length, -half), (length, half)
+    ))
+
+
+def segment_intersection_parameters(first, second, third, fourth,
+                                    tolerance=_ANGLED_CLIP_TOLERANCE_M):
+    """Return all split parameters on two segments, including overlap ends."""
+    r = second[0] - first[0], second[1] - first[1]
+    s = fourth[0] - third[0], fourth[1] - third[1]
+    denominator = r[0] * s[1] - r[1] * s[0]
+    offset = third[0] - first[0], third[1] - first[1]
+    numerator = offset[0] * r[1] - offset[1] * r[0]
+    rr, ss = r[0] * r[0] + r[1] * r[1], s[0] * s[0] + s[1] * s[1]
+    if rr <= tolerance * tolerance or ss <= tolerance * tolerance:
+        return (), ()
+    if abs(denominator) <= tolerance:
+        if abs(numerator) > tolerance:
+            return (), ()
+        first_values = sorted(((point[0] - first[0]) * r[0] +
+                               (point[1] - first[1]) * r[1]) / rr
+                              for point in (third, fourth))
+        low, high = max(0.0, first_values[0]), min(1.0, first_values[1])
+        if low > high + tolerance:
+            return (), ()
+        first_hits = (low,) if abs(low - high) <= tolerance else (low, high)
+        points = [_add(first, r, value) for value in first_hits]
+        second_hits = tuple(((point[0] - third[0]) * s[0] +
+                             (point[1] - third[1]) * s[1]) / ss for point in points)
+        return tuple(first_hits), second_hits
+    t = (offset[0] * s[1] - offset[1] * s[0]) / denominator
+    u = (offset[0] * r[1] - offset[1] * r[0]) / denominator
+    if -tolerance <= t <= 1.0 + tolerance and -tolerance <= u <= 1.0 + tolerance:
+        return (min(1.0, max(0.0, t)),), (min(1.0, max(0.0, u)),)
+    return (), ()
+
+
+def _dedupe_parameters(values, tolerance=_ANGLED_CLIP_TOLERANCE_M):
+    result = []
+    for value in sorted(values):
+        value = min(1.0, max(0.0, value))
+        if not result or abs(value - result[-1]) > tolerance:
+            result.append(value)
+    return tuple(result)
+
+
+def split_segment(first, second, parameters):
+    """Split one segment in deterministic parameter order."""
+    direction = second[0] - first[0], second[1] - first[1]
+    values = _dedupe_parameters((0.0, 1.0, *parameters))
+    return tuple((_add(first, direction, values[index]),
+                  _add(first, direction, values[index + 1]))
+                 for index in range(len(values) - 1)
+                 if values[index + 1] - values[index] > _ANGLED_CLIP_TOLERANCE_M)
+
+
+def _point_polygon_classification(point, polygon):
+    """Return -1 outside, 0 boundary, or 1 inside for a simple polygon."""
+    inside = False
+    for index, first in enumerate(polygon):
+        second = polygon[(index + 1) % len(polygon)]
+        if (abs(_cross(first, second, point)) <= _ANGLED_CLIP_TOLERANCE_M and
+                min(first[0], second[0]) - _ANGLED_CLIP_TOLERANCE_M <= point[0] <=
+                max(first[0], second[0]) + _ANGLED_CLIP_TOLERANCE_M and
+                min(first[1], second[1]) - _ANGLED_CLIP_TOLERANCE_M <= point[1] <=
+                max(first[1], second[1]) + _ANGLED_CLIP_TOLERANCE_M):
+            return 0
+        if ((first[1] > point[1]) != (second[1] > point[1]) and
+                point[0] < (second[0] - first[0]) * (point[1] - first[1]) /
+                (second[1] - first[1]) + first[0]):
+            inside = not inside
+    return 1 if inside else -1
+
+
+def _trace_cycles(edges):
+    """Trace a directed 1-in/1-out boundary graph, rejecting ambiguity."""
+    def key(point):
+        scale = _ANGLED_CLIP_TOLERANCE_M
+        return round(point[0] / scale), round(point[1] / scale)
+    points, outgoing, incoming = {}, {}, {}
+    for first, second in edges:
+        a, b = key(first), key(second)
+        if a == b:
+            continue
+        points.setdefault(a, first); points.setdefault(b, second)
+        if a in outgoing and outgoing[a] != b:
+            return None
+        outgoing[a] = b
+        incoming[b] = incoming.get(b, 0) + 1
+    if not outgoing or any(incoming.get(vertex, 0) != 1 for vertex in outgoing):
+        return None
+    cycles, unused = [], set(outgoing)
+    while unused:
+        start = min(unused)
+        cycle, current = [], start
+        while current in unused:
+            unused.remove(current); cycle.append(points[current])
+            current = outgoing.get(current)
+            if current is None:
+                return None
+        if current != start or not validate_lower_polygon(cycle):
+            return None
+        cycles.append(tuple(cycle))
+    return tuple(cycles)
+
+
+def rectangle_difference_cycles(guest, hosts):
+    """Planar arrangement for one rectangle minus exactly two rectangles."""
+    polygons = (tuple(guest), tuple(hosts[0]), tuple(hosts[1]))
+    raw = [(polygon[index], polygon[(index + 1) % 4])
+           for polygon in polygons for index in range(4)]
+    splits = [[0.0, 1.0] for _edge in raw]
+    for first in range(len(raw)):
+        for second in range(first + 1, len(raw)):
+            first_hits, second_hits = segment_intersection_parameters(
+                *raw[first], *raw[second])
+            splits[first].extend(first_hits); splits[second].extend(second_hits)
+    candidates = []
+    for edge, values in zip(raw, splits):
+        candidates.extend(split_segment(*edge, values))
+    probe = 1.0e-7
+    directed = {}
+    def visible(point):
+        return (_point_polygon_classification(point, polygons[0]) >= 0 and
+                all(_point_polygon_classification(point, host) < 0 for host in polygons[1:]))
+    for first, second in candidates:
+        dx, dy = second[0] - first[0], second[1] - first[1]
+        length = math.hypot(dx, dy)
+        midpoint = (first[0] + second[0]) * 0.5, (first[1] + second[1]) * 0.5
+        normal = -dy / length, dx / length
+        left = visible(_add(midpoint, normal, probe))
+        right = visible(_add(midpoint, normal, -probe))
+        if left == right:
+            continue
+        edge = (first, second) if left else (second, first)
+        key = tuple(round(value / _ANGLED_CLIP_TOLERANCE_M)
+                    for point in edge for value in point)
+        directed[key] = edge
+    return _trace_cycles(tuple(directed.values()))
+
+
+def _simplify_profile(points):
+    result = []
+    for point in points:
+        if result and _distance(result[-1], point) <= _ANGLED_CLIP_TOLERANCE_M:
+            continue
+        while len(result) >= 2 and abs(_cross(result[-2], result[-1], point)) <= _ANGLED_CLIP_TOLERANCE_M:
+            result.pop()
+        result.append(point)
+    return tuple(result)
+
+
+def _polygon_touches_segment(polygon, first, second):
+    """Return whether a polygon boundary uses or touches a tagged segment."""
+    return any(segment_intersection_parameters(
+        polygon[index], polygon[(index + 1) % len(polygon)], first, second
+    )[0] for index in range(len(polygon)))
+
+
+def segment_touches_polygon(first, second, polygon):
+    """Return whether any part of a segment reaches a polygon or its boundary."""
+    if (_point_polygon_classification(first, polygon) >= 0 or
+            _point_polygon_classification(second, polygon) >= 0):
+        return True
+    return _polygon_touches_segment(polygon, first, second)
+
+
+def clip_guest_profile(guest_member, host_members):
+    """Return the far-connected component's local-plus to local-minus cut path."""
+    data = endpoint_data(*guest_member)
+    if data is None or len(host_members) != 2:
+        return None
+    origin, direction, normal, half = data
+    length = _distance(_xy(guest_member[0].jhm_wall.start), _xy(guest_member[0].jhm_wall.end))
+    guest = canonical_rectangle(*guest_member)
+    hosts = tuple(canonical_rectangle(*member) for member in host_members)
+    if guest is None or any(host is None for host in hosts):
+        return None
+    scale = max(half, *(endpoint_data(*member)[3] for member in host_members))
+    limit = scale * _MAX_ANGLED_TRIM_FACTOR
+    cycles = rectangle_difference_cycles(guest, hosts)
+    if not cycles:
+        return None
+    far_probe = endpoint_local_to_world((length - 1.0e-7, 0.0), origin, direction, normal)
+    selected = [cycle for cycle in cycles if _point_polygon_classification(far_probe, cycle) >= 0]
+    if len(selected) != 1:
+        return None
+    polygon = selected[0]
+    # Any other boundary cycle inside the far component would be an unsupported hole.
+    if any(_point_polygon_classification(cycle[0], polygon) == 1
+           for cycle in cycles if cycle is not polygon):
+        return None
+    # canonical_rectangle indexes 2 -> 3 are the Host far-end face.  Reject
+    # only when that tagged face actually participates in, or touches, the
+    # selected far-connected difference boundary.
+    if any(_polygon_touches_segment(polygon, host[2], host[3]) for host in hosts):
+        return None
+    local = [world_to_endpoint_local(point, origin, direction, normal) for point in polygon]
+    plus = [index for index, point in enumerate(local) if abs(point[1] - half) <= 1.0e-7]
+    minus = [index for index, point in enumerate(local) if abs(point[1] + half) <= 1.0e-7]
+    if not plus or not minus:
+        return None
+    plus_index = min(plus, key=lambda index: local[index][0])
+    minus_index = min(minus, key=lambda index: local[index][0])
+    path, index = [], plus_index
+    while True:
+        path.append(polygon[index])
+        if index == minus_index:
+            break
+        index = (index + 1) % len(polygon)
+        if len(path) > len(polygon):
+            return None
+    profile = _simplify_profile(path)
+    local_profile = [world_to_endpoint_local(point, origin, direction, normal) for point in profile]
+    if (len(profile) < 2 or any(point[0] >= length - _MIN_WALL_LENGTH_M or
+                                point[0] < -_T_PARAMETER_TOLERANCE_M or point[0] > limit
+                                for point in local_profile)):
+        return None
+    # The complete canonical far edge must remain visible.  Endpoint
+    # classification plus exact edge intersections catches crossings, touches,
+    # tangencies, and collinear overlaps without relying on sampling.
+    far_edge = (endpoint_local_to_world((length, -half), origin, direction, normal),
+                endpoint_local_to_world((length, half), origin, direction, normal))
+    if any(segment_touches_polygon(*far_edge, host) for host in hosts):
+        return None
+    return profile
+
+
+def calculate_t_oblique_solution(wall_object, endpoint):
+    """Resolve an unequal-main oblique T by canonical rectangle clipping."""
+    classification = classify_junction(wall_object, endpoint)
+    roles = t_junction_roles(wall_object, endpoint)
+    if classification.key != T_JUNCTION or classification.member_count != 3 or roles is None:
+        return None
+    mains, branch = tuple(roles[0]), roles[1]
+    members = (*mains, branch)
+    data = [endpoint_data(*member) for member in members]
+    if any(item is None for item in data) or any(not has_identity_transform(member[0]) for member in members):
+        return None
+    junction = data[0][0]
+    if any(_distance(item[0], junction) > _JOINT_POSITION_TOLERANCE_M for item in data[1:]):
+        return None
+    cross = data[0][1][0] * data[1][1][1] - data[0][1][1] * data[1][1][0]
+    dot = data[0][1][0] * data[1][1][0] + data[0][1][1] * data[1][1][1]
+    axis = _canonical_axis(data[0][1], data[1][1])
+    if abs(cross) > _T_MAIN_COLLINEAR_TOLERANCE or dot >= 0.0 or axis is None:
+        return None
+    if abs(data[0][3] - data[1][3]) * 2000.0 <= _T_MAIN_THICKNESS_TOLERANCE_MM:
+        return None
+    axis_dot = abs(data[2][1][0] * axis[0] + data[2][1][1] * axis[1])
+    if axis_dot <= _STEP_ORTHOGONAL_TOLERANCE or 1.0 - axis_dot <= _LINE_PARALLEL_EPSILON:
+        return None
+    profile = clip_guest_profile(branch, mains)
+    return (mains, branch, profile, junction, axis) if profile is not None else None
+
+
+def calculate_cross_oblique_solution(wall_object, endpoint):
+    """Resolve an unequal-through oblique Cross as one atomic clip solution."""
+    role_data = _cross_role_data(wall_object, endpoint)
+    if role_data is None:
+        return None
+    (through, _host, host_axis), (butts, _butt, butt_axis), junction = role_data
+    halves = [endpoint_data(*member)[3] for member in through]
+    if abs(halves[0] - halves[1]) * 2000.0 <= _CROSS_THROUGH_THICKNESS_TOLERANCE_MM:
+        return None
+    axis_dot = abs(host_axis[0] * butt_axis[0] + host_axis[1] * butt_axis[1])
+    if axis_dot <= _STEP_ORTHOGONAL_TOLERANCE or 1.0 - axis_dot <= _LINE_PARALLEL_EPSILON:
+        return None
+    profiles = []
+    for member in butts:
+        profile = clip_guest_profile(member, through)
+        if profile is None:
+            return None
+        profiles.append((member, profile))
+    return through, tuple(profiles), junction, host_axis
+
+
 def endpoint_joint_profile(wall_object, endpoint):
     """Return an ordered local-plus to local-minus endpoint profile and status."""
     square = square_endpoint_pair(wall_object, endpoint)
@@ -438,6 +737,8 @@ def endpoint_joint_profile(wall_object, endpoint):
         if solution is None:
             solution = calculate_t_step_solution(wall_object, endpoint)
         if solution is None:
+            solution = calculate_t_oblique_solution(wall_object, endpoint)
+        if solution is None:
             return square, "FALLBACK"
         main_members, branch_member, branch_pair, _host_origin, _host_direction = solution
         current = (wall_object, endpoint)
@@ -450,6 +751,8 @@ def endpoint_joint_profile(wall_object, endpoint):
         solution = calculate_cross_solution(wall_object, endpoint)
         if solution is None:
             solution = calculate_cross_step_solution(wall_object, endpoint)
+        if solution is None:
+            solution = calculate_cross_oblique_solution(wall_object, endpoint)
         if solution is None:
             return square, "FALLBACK"
         through_members, butt_trims, _junction, _host_axis = solution

@@ -291,10 +291,15 @@ class TJunctionMathTests(unittest.TestCase):
         self.assertEqual(sorted({round(point[1], 3) for point in profile}), [0.065, 0.1])
         self.assertEqual(tuple(map(len, joints.build_wall_geometry(branch))), (12, 8))
 
-    def test_unequal_main_oblique_branch_falls_back_for_all(self):
+    def test_unequal_main_oblique_branch_uses_far_component_clip(self):
         members = self.make_t(angle=45.0, main_thickness=(130.0, 200.0))
-        self.assertTrue(all(joints.endpoint_joint_pair(wall, "START")[1] == "FALLBACK"
-                            for wall in members))
+        self.assertEqual(tuple(joints.endpoint_joint_pair(wall, "START")[1] for wall in members),
+                         ("T_MAIN", "T_MAIN", "T_BRANCH"))
+        profile, status = joints.endpoint_joint_profile(members[2], "START")
+        self.assertEqual(status, "T_BRANCH")
+        self.assertGreaterEqual(len(profile), 3)
+        self.assertTrue(all(math.isfinite(value) for point in profile for value in point))
+        self.assertIsNotNone(joints.build_wall_geometry(members[2]))
 
     def test_step_t_reversal_endpoints_and_length_safety(self):
         first, second, branch = self.make_t(
@@ -453,10 +458,16 @@ class CrossMathTests(unittest.TestCase):
         self.assertEqual(self.statuses(unequal_butts),
                          ("CROSS_THROUGH", "CROSS_THROUGH", "CROSS_BUTT", "CROSS_BUTT"))
 
-    def test_unequal_through_oblique_cross_falls_back(self):
+    def test_unequal_through_oblique_cross_clips_both_butts(self):
         walls = self.make_cross(angles=(0.0, 180.0, 45.0, 225.0),
                                 thicknesses=(130.0, 200.0, 130.0, 130.0))
-        self.assertEqual(self.statuses(walls), ("FALLBACK",) * 4)
+        self.assertEqual(self.statuses(walls),
+                         ("CROSS_THROUGH", "CROSS_THROUGH", "CROSS_BUTT", "CROSS_BUTT"))
+        for wall in walls[2:]:
+            profile, status = joints.endpoint_joint_profile(wall, "START")
+            self.assertEqual(status, "CROSS_BUTT")
+            self.assertTrue(all(math.isfinite(value) for point in profile for value in point))
+            self.assertIsNotNone(joints.build_wall_geometry(wall))
 
     def test_step_cross_start_end_order_caller_and_length_safety(self):
         endpoints = ("END", "START", "END", "START")
@@ -537,6 +548,161 @@ class PolygonAndExtrusionTests(unittest.TestCase):
         statuses = joints._resolved_endpoint_pairs(walls[2])[2]
         self.assertIn(statuses["START"], {"CROSS_BUTT", "FALLBACK"})
         self.assertIn(statuses["END"], {"MITER", "FALLBACK"})
+
+
+class AngledClippingFoundationTests(unittest.TestCase):
+    def test_world_local_roundtrip(self):
+        origin, direction = (1.2, -0.4), (math.sqrt(.5), math.sqrt(.5))
+        normal = -direction[1], direction[0]
+        world = joints.endpoint_local_to_world((.7, -.2), origin, direction, normal)
+        local = joints.world_to_endpoint_local(world, origin, direction, normal)
+        assert_points_equal(self, local, (.7, -.2))
+
+    def test_canonical_rectangle_start_end_invariance(self):
+        start_wall = Wall((0, 0), (2, 1), 130)
+        end_wall = Wall((2, 1), (0, 0), 130)
+        first = sorted(joints.canonical_rectangle(start_wall, "START"))
+        second = sorted(joints.canonical_rectangle(end_wall, "END"))
+        for a, b in zip(first, second):
+            assert_points_equal(self, a, b)
+
+    def test_segment_proper_crossing_and_endpoint_touch(self):
+        self.assertEqual(joints.segment_intersection_parameters(
+            (0, 0), (2, 0), (1, -1), (1, 1)), ((.5,), (.5,)))
+        self.assertEqual(joints.segment_intersection_parameters(
+            (0, 0), (1, 0), (1, 0), (1, 1)), ((1.0,), (0.0,)))
+
+    def test_segment_collinear_overlap_and_parallel_no_hit(self):
+        self.assertEqual(joints.segment_intersection_parameters(
+            (0, 0), (2, 0), (1, 0), (3, 0)), ((.5, 1.0), (0.0, .5)))
+        self.assertEqual(joints.segment_intersection_parameters(
+            (0, 0), (2, 0), (0, 1), (2, 1)), ((), ()))
+
+    def test_guest_far_edge_midspan_crossing_is_detected(self):
+        far_edge = ((2, -1), (2, 1))
+        host = ((1, .2), (1, -.2), (3, -.2), (3, .2))
+        self.assertEqual(joints._point_polygon_classification(far_edge[0], host), -1)
+        self.assertEqual(joints._point_polygon_classification(far_edge[1], host), -1)
+        self.assertTrue(joints.segment_touches_polygon(*far_edge, host))
+
+    def test_split_order_and_duplicate_collapse(self):
+        pieces = joints.split_segment((0, 0), (1, 0), (.75, .25, .25 + 1e-12))
+        self.assertEqual(tuple(round(piece[0][0], 2) for piece in pieces), (0, .25, .75))
+        self.assertEqual(tuple(round(piece[1][0], 2) for piece in pieces), (.25, .75, 1))
+
+    def test_internal_host_seam_is_eliminated_and_cycle_is_simple(self):
+        guest = ((0, .1), (0, -.1), (2, -.1), (2, .1))
+        hosts = (((-.2, .2), (-.2, -.2), (0, -.2), (0, .2)),
+                 ((0, .3), (0, -.3), (.2, -.3), (.2, .3)))
+        cycles = joints.rectangle_difference_cycles(guest, hosts)
+        self.assertEqual(len(cycles), 1)
+        self.assertTrue(joints.validate_lower_polygon(cycles[0]))
+        self.assertFalse(any(abs(a[0]) < 1e-10 and abs(b[0]) < 1e-10
+                             for cycle in cycles for a, b in zip(cycle, cycle[1:] + cycle[:1])))
+
+    def test_far_component_discards_disconnected_sliver(self):
+        guest = ((0, .1), (0, -.1), (2, -.1), (2, .1))
+        # The first host spans the guest and splits it; only the right cycle owns far probe.
+        hosts = (((.3, .2), (.3, -.2), (.5, -.2), (.5, .2)),
+                 ((-.2, .2), (-.2, -.2), (0, -.2), (0, .2)))
+        cycles = joints.rectangle_difference_cycles(guest, hosts)
+        self.assertEqual(len(cycles), 2)
+        far = [cycle for cycle in cycles
+               if joints._point_polygon_classification((1.9, 0), cycle) >= 0]
+        self.assertEqual(len(far), 1)
+        self.assertGreater(min(point[0] for point in far[0]), .49)
+
+    def test_nested_boundary_is_detected_as_unsupported_hole(self):
+        guest = ((0, 1), (0, -1), (3, -1), (3, 1))
+        hosts = (((1, .3), (1, -.3), (2, -.3), (2, .3)),
+                 ((-2, .2), (-2, -.2), (-1, -.2), (-1, .2)))
+        cycles = joints.rectangle_difference_cycles(guest, hosts)
+        outer = next(cycle for cycle in cycles
+                     if joints._point_polygon_classification((2.8, 0), cycle) >= 0)
+        holes = [cycle for cycle in cycles if cycle is not outer and
+                 joints._point_polygon_classification(cycle[0], outer) == 1]
+        self.assertEqual(len(holes), 1)
+
+    def test_t_oblique_angles_reversal_and_shallow_limit(self):
+        maker = TJunctionMathTests()
+        for angle, thicknesses in ((135, (130, 200)), (15, (200, 130))):
+            walls = maker.make_t(angle=angle, main_thickness=thicknesses)
+            self.assertEqual(joints.endpoint_joint_pair(walls[2], "START")[1], "T_BRANCH")
+        shallow = maker.make_t(angle=2.5, main_thickness=(130, 200))
+        self.assertTrue(all(joints.endpoint_joint_pair(wall, "START")[1] == "FALLBACK"
+                            for wall in shallow))
+
+    def test_t_oblique_start_end_order_and_caller_independence(self):
+        maker = TJunctionMathTests()
+        endpoints = ("END", "START", "END")
+        walls = maker.make_t(angle=45, main_thickness=(130, 200), endpoints=endpoints)
+        order = list(reversed(list(zip(walls, endpoints))))
+        for wall, member_endpoint in order:
+            wall.members[member_endpoint] = list(order)
+        profiles = []
+        for wall, member_endpoint in order:
+            solution = joints.calculate_t_oblique_solution(wall, member_endpoint)
+            self.assertIsNotNone(solution)
+            profiles.append(solution[2])
+        self.assertEqual(profiles[0], profiles[1])
+
+    def test_cross_oblique_15_shallow_and_unsafe_atomicity(self):
+        maker = CrossMathTests()
+        valid = maker.make_cross(angles=(0, 180, 15, 195), thicknesses=(130, 200, 130, 200))
+        self.assertEqual(maker.statuses(valid).count("CROSS_BUTT"), 2)
+        shallow = maker.make_cross(angles=(0, 180, 2.5, 182.5),
+                                   thicknesses=(130, 200, 130, 130))
+        self.assertEqual(maker.statuses(shallow), ("FALLBACK",) * 4)
+        unsafe = maker.make_cross(angles=(0, 180, 45, 225),
+                                  thicknesses=(130, 200, 130, 130),
+                                  lengths=(.1, 2, 2, 2))
+        self.assertEqual(maker.statuses(unsafe), ("FALLBACK",) * 4)
+
+    def test_cross_oblique_sub_meter_hosts_succeed_when_far_faces_are_unused(self):
+        maker = CrossMathTests()
+        walls = maker.make_cross(angles=(0, 180, 45, 225),
+                                 thicknesses=(130, 200, 130, 130),
+                                 lengths=(.5, .5, 2, 2))
+        self.assertEqual(maker.statuses(walls),
+                         ("CROSS_THROUGH", "CROSS_THROUGH",
+                          "CROSS_BUTT", "CROSS_BUTT"))
+
+    def test_cross_roles_do_not_flip_with_thickness_or_permutation(self):
+        maker = CrossMathTests()
+        endpoints = ("END", "START", "END", "START")
+        walls = maker.make_cross(angles=(0, 180, 45, 225), endpoints=endpoints,
+                                 thicknesses=(200, 130, 200, 130))
+        expected = {walls[0], walls[1]}
+        orders = (list(zip(walls, endpoints)), list(reversed(list(zip(walls, endpoints)))))
+        for order in orders:
+            for wall, member_endpoint in order:
+                wall.members[member_endpoint] = list(order)
+            for wall, member_endpoint in order:
+                solution = joints.calculate_cross_oblique_solution(wall, member_endpoint)
+                self.assertEqual({member[0] for member in solution[0]}, expected)
+
+    def test_guest_and_host_far_end_safety(self):
+        maker = TJunctionMathTests()
+        short_guest = maker.make_t(angle=45, main_thickness=(130, 200), branch_length=.12)
+        self.assertTrue(all(joints.endpoint_joint_pair(wall, "START")[1] == "FALLBACK"
+                            for wall in short_guest))
+        far_face_unused = maker.make_t(angle=45, main_thickness=(130, 200))
+        far_face_unused[0].jhm_wall.end = (.5, 0, 0)
+        self.assertEqual(tuple(joints.endpoint_joint_pair(wall, "START")[1]
+                               for wall in far_face_unused),
+                         ("T_MAIN", "T_MAIN", "T_BRANCH"))
+
+    def test_host_far_face_contact_causes_shared_t_fallback(self):
+        walls = TJunctionMathTests().make_t(angle=45, main_thickness=(130, 200))
+        walls[0].jhm_wall.end = (.1, 0, 0)
+        host_rectangle = joints.canonical_rectangle(walls[0], "START")
+        guest_rectangle = joints.canonical_rectangle(walls[2], "START")
+        self.assertTrue(any(joints.segment_intersection_parameters(
+            guest_rectangle[index], guest_rectangle[(index + 1) % 4],
+            host_rectangle[2], host_rectangle[3]
+        )[0] for index in range(4)))
+        self.assertTrue(all(joints.endpoint_joint_pair(wall, "START")[1] == "FALLBACK"
+                            for wall in walls))
 
 
 if __name__ == "__main__":
