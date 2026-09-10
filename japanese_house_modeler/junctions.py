@@ -139,6 +139,40 @@ def classify_junction(wall_object, endpoint):
     return classify_directions(directions)
 
 
+def t_junction_roles(wall_object, endpoint):
+    """Return the unique straight pair and branch for a three-member T.
+
+    The result is derived on every call and deliberately retains no role state.
+    Pair selection examines all combinations, so it is independent of the order
+    in which the connection topology happens to enumerate its members.
+    """
+    try:
+        members = list(junction_members(wall_object, endpoint))
+    except (AttributeError, ReferenceError, TypeError, ValueError):
+        return None
+    if len(members) != 3:
+        return None
+    directions = [endpoint_direction(obj, member_endpoint) for obj, member_endpoint in members]
+    if any(direction is None for direction in directions):
+        return None
+    opposite_pairs = []
+    for first in range(3):
+        for second in range(first + 1, 3):
+            angle = pair_angle(directions[first], directions[second])
+            if angle is not None and _is_opposite(angle):
+                opposite_pairs.append((first, second))
+    if len(opposite_pairs) != 1:
+        return None
+    first, second = opposite_pairs[0]
+    branch = next(index for index in range(3) if index not in (first, second))
+    if any(
+        _is_same_direction(pair_angle(directions[branch], directions[index]))
+        for index in (first, second)
+    ):
+        return None
+    return (members[first], members[second]), members[branch]
+
+
 _DISPLAY_NAMES = {
     ISOLATED: "未接続",
     CONTINUATION: "直線継続",

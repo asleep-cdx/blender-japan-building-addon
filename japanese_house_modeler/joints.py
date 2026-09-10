@@ -5,7 +5,10 @@ import math
 import bpy
 
 from .connections import is_valid_wall_object, junction_members
-from .junctions import CONTINUATION, CORNER, ISOLATED, classify_junction
+from .junctions import (
+    CONTINUATION, CORNER, ISOLATED, T_JUNCTION, classify_junction,
+    t_junction_roles,
+)
 
 
 _MIN_WALL_LENGTH_M = 1.0e-6
@@ -13,6 +16,10 @@ _JOINT_POSITION_TOLERANCE_M = 1.0e-6
 _LINE_PARALLEL_EPSILON = 1.0e-10
 _POLYGON_AREA_EPSILON = 1.0e-12
 _MAX_MITER_FACTOR = 10.0
+_MAX_T_TRIM_FACTOR = 10.0
+_T_MAIN_THICKNESS_TOLERANCE_MM = 1.0e-6
+_T_PARAMETER_TOLERANCE_M = 1.0e-9
+_T_MAIN_COLLINEAR_TOLERANCE = 1.0e-6
 _TRANSFORM_EPSILON = 1.0e-6
 
 
@@ -106,6 +113,78 @@ def calculate_miter_pair(first_object, first_endpoint, second_object, second_end
     return plus, minus
 
 
+def calculate_t_solution(wall_object, endpoint):
+    """Resolve one shared T solution; return roles and branch pair, or None."""
+    classification = classify_junction(wall_object, endpoint)
+    if classification.key != T_JUNCTION or classification.member_count != 3:
+        return None
+    roles = t_junction_roles(wall_object, endpoint)
+    if roles is None:
+        return None
+    main_members, branch_member = roles
+    main_members = tuple(main_members)
+    all_members = (*main_members, branch_member)
+    data = [endpoint_data(*member) for member in all_members]
+    if any(item is None for item in data):
+        return None
+    if any(not has_identity_transform(member[0]) for member in all_members):
+        return None
+    main_a, main_b, branch = data
+    junction = main_a[0]
+    if any(_distance(item[0], junction) > _JOINT_POSITION_TOLERANCE_M for item in data[1:]):
+        return None
+    try:
+        thickness_a = float(main_members[0][0].jhm_wall.wall_thickness)
+        thickness_b = float(main_members[1][0].jhm_wall.wall_thickness)
+    except (AttributeError, ReferenceError, TypeError, ValueError):
+        return None
+    if abs(thickness_a - thickness_b) > _T_MAIN_THICKNESS_TOLERANCE_MM:
+        return None
+
+    # Classification deliberately accepts a one-degree opposite tolerance, but
+    # mesh construction needs one geometric host line.  Only an effectively
+    # collinear, oppositely directed main pair has a reference-independent outer
+    # boundary; near-opposite classified T junctions therefore safely fall back.
+    main_cross = (
+        main_a[1][0] * main_b[1][1] - main_a[1][1] * main_b[1][0]
+    )
+    main_dot = main_a[1][0] * main_b[1][0] + main_a[1][1] * main_b[1][1]
+    if abs(main_cross) > _T_MAIN_COLLINEAR_TOLERANCE or main_dot >= 0.0:
+        return None
+
+    _main_point, main_direction, main_normal, main_half = main_a
+    branch_point, branch_direction, branch_normal, branch_half = branch
+    side_dot = branch_direction[0] * main_normal[0] + branch_direction[1] * main_normal[1]
+    if not math.isfinite(side_dot) or abs(side_dot) <= _LINE_PARALLEL_EPSILON:
+        return None
+    host_origin = _add(junction, main_normal, main_half if side_dot > 0.0 else -main_half)
+    trim_points = []
+    parameters = []
+    for side in (branch_half, -branch_half):
+        side_origin = _add(branch_point, branch_normal, side)
+        trim = line_intersection(side_origin, branch_direction, host_origin, main_direction)
+        if trim is None:
+            return None
+        parameter = (
+            (trim[0] - side_origin[0]) * branch_direction[0]
+            + (trim[1] - side_origin[1]) * branch_direction[1]
+        )
+        trim_points.append(trim)
+        parameters.append(parameter)
+
+    limit = max(main_half, branch_half) * _MAX_T_TRIM_FACTOR
+    branch_length = _distance(
+        _xy(branch_member[0].jhm_wall.start), _xy(branch_member[0].jhm_wall.end)
+    )
+    if (
+        any(parameter < -_T_PARAMETER_TOLERANCE_M for parameter in parameters)
+        or any(_distance(trim, junction) > limit for trim in trim_points)
+        or any(parameter >= branch_length - _MIN_WALL_LENGTH_M for parameter in parameters)
+    ):
+        return None
+    return main_members, branch_member, tuple(trim_points), host_origin, main_direction
+
+
 def endpoint_joint_pair(wall_object, endpoint):
     """Return the effective endpoint pair and its derived UI status key."""
     square = square_endpoint_pair(wall_object, endpoint)
@@ -116,6 +195,17 @@ def endpoint_joint_pair(wall_object, endpoint):
         return square, "ISOLATED"
     if classification.key == CONTINUATION and classification.member_count == 2:
         return square, "CONTINUATION"
+    if classification.key == T_JUNCTION and classification.member_count == 3:
+        solution = calculate_t_solution(wall_object, endpoint)
+        if solution is None:
+            return square, "FALLBACK"
+        main_members, branch_member, branch_pair, _host_origin, _host_direction = solution
+        current = (wall_object, endpoint)
+        if any(member[0] is current[0] and member[1] == current[1] for member in main_members):
+            return square, "T_MAIN"
+        if branch_member[0] is current[0] and branch_member[1] == current[1]:
+            return branch_pair, "T_BRANCH"
+        return square, "FALLBACK"
     if classification.key != CORNER or classification.member_count != 2:
         return square, "UNSUPPORTED"
     members = junction_members(wall_object, endpoint)
@@ -136,6 +226,8 @@ def joint_status_label(wall_object, endpoint):
         "ISOLATED": "未接続",
         "CONTINUATION": "直線",
         "MITER": "マイター",
+        "T_MAIN": "T字主壁",
+        "T_BRANCH": "T字枝壁",
         "FALLBACK": "安全フォールバック",
         "UNSUPPORTED": "未対応",
     }[status]
@@ -162,8 +254,12 @@ def _resolved_endpoint_pairs(wall_object):
         )
 
     if not valid():
+        # A shared unsafe T is rejected earlier for all three members.  This
+        # branch is intentionally Wall-local: a safe branch trim can still be
+        # incompatible with this Wall's independently resolved opposite-end
+        # joint, in which case only this visual endpoint is squared off.
         for endpoint in ("START", "END"):
-            if statuses[endpoint] != "MITER":
+            if statuses[endpoint] not in {"MITER", "T_BRANCH"}:
                 continue
             pairs[endpoint] = squares[endpoint]
             statuses[endpoint] = "FALLBACK"
@@ -172,7 +268,7 @@ def _resolved_endpoint_pairs(wall_object):
     if not valid():
         pairs = squares
         for endpoint in statuses:
-            if statuses[endpoint] == "MITER":
+            if statuses[endpoint] in {"MITER", "T_BRANCH"}:
                 statuses[endpoint] = "FALLBACK"
     return pairs["START"], pairs["END"], statuses
 

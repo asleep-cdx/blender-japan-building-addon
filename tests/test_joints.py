@@ -1,4 +1,4 @@
-"""Pure/mock coverage for Build 04-C joint mathematics."""
+"""Pure/mock coverage for Build 04-C and 04-D joint mathematics."""
 
 import importlib.util
 import math
@@ -28,14 +28,12 @@ connections.is_valid_wall_object = lambda wall: True
 connections.junction_members = lambda wall, endpoint: wall.members[endpoint]
 sys.modules[connections.__name__] = connections
 
-junctions = types.ModuleType(f"{PACKAGE}.junctions")
-junctions.CONTINUATION = "CONTINUATION"
-junctions.CORNER = "CORNER"
-junctions.ISOLATED = "ISOLATED"
-junctions.classify_junction = lambda wall, endpoint: types.SimpleNamespace(
-    key=wall.classification[endpoint], member_count=len(wall.members[endpoint])
+junctions_spec = importlib.util.spec_from_file_location(
+    f"{PACKAGE}.junctions", ROOT / PACKAGE / "junctions.py"
 )
-sys.modules[junctions.__name__] = junctions
+junctions = importlib.util.module_from_spec(junctions_spec)
+sys.modules[junctions_spec.name] = junctions
+junctions_spec.loader.exec_module(junctions)
 
 spec = importlib.util.spec_from_file_location(
     f"{PACKAGE}.joints", ROOT / PACKAGE / "joints.py"
@@ -75,6 +73,13 @@ def connect(first, first_endpoint, second, second_endpoint, key="CORNER"):
     second.members[second_endpoint] = list(reversed(members))
     first.classification[first_endpoint] = key
     second.classification[second_endpoint] = key
+
+
+def connect_t(*members):
+    topology = list(members)
+    for index, (wall, endpoint) in enumerate(members):
+        wall.members[endpoint] = topology[index:] + topology[:index]
+        wall.classification[endpoint] = "T_JUNCTION"
 
 
 def assert_points_equal(test, first, second):
@@ -150,6 +155,147 @@ class MiterMathTests(unittest.TestCase):
         lower = [vertex[:2] for vertex in geometry[0][:4]]
         self.assertTrue(joints.validate_lower_polygon(lower))
         self.assertGreater(abs(sum(lower[index][0] * lower[(index + 1) % 4][1] - lower[(index + 1) % 4][0] * lower[index][1] for index in range(4))), 0)
+
+
+class TJunctionMathTests(unittest.TestCase):
+    def make_t(self, angle=90.0, main_thickness=(130.0, 130.0), branch_thickness=130.0,
+               branch_length=2.0, endpoints=("START", "START", "START"),
+               main_angle=180.0):
+        radians = math.radians(angle)
+        # Each endpoint direction points inward from the shared canonical origin.
+        def wall_for(direction, endpoint, thickness, length=2.0):
+            far = (direction[0] * length, direction[1] * length)
+            return Wall((0, 0), far, thickness) if endpoint == "START" else Wall(far, (0, 0), thickness)
+        first = wall_for((1, 0), endpoints[0], main_thickness[0])
+        main_radians = math.radians(main_angle)
+        second = wall_for(
+            (math.cos(main_radians), math.sin(main_radians)),
+            endpoints[1], main_thickness[1],
+        )
+        branch = wall_for((math.cos(radians), math.sin(radians)), endpoints[2], branch_thickness, branch_length)
+        connect_t((first, endpoints[0]), (second, endpoints[1]), (branch, endpoints[2]))
+        return first, second, branch
+
+    def test_90_degree_roles_and_trim_on_host_boundary(self):
+        first, second, branch = self.make_t()
+        roles = junctions.t_junction_roles(branch, "START")
+        self.assertEqual({member[0] for member in roles[0]}, {first, second})
+        self.assertIs(roles[1][0], branch)
+        pair, status = joints.endpoint_joint_pair(branch, "START")
+        self.assertEqual(status, "T_BRANCH")
+        self.assertTrue(all(abs(point[1] - 0.065) < 1.0e-10 for point in pair))
+        self.assertEqual(joints.endpoint_joint_pair(first, "START")[1], "T_MAIN")
+        self.assertEqual(joints.endpoint_joint_pair(second, "START")[1], "T_MAIN")
+
+    def test_exact_180_degree_main_pair_is_valid(self):
+        first, second, branch = self.make_t(main_angle=180.0)
+        self.assertEqual(junctions.classify_junction(first, "START").key, "T_JUNCTION")
+        self.assertEqual(joints.endpoint_joint_pair(first, "START")[1], "T_MAIN")
+        self.assertEqual(joints.endpoint_joint_pair(second, "START")[1], "T_MAIN")
+        self.assertEqual(joints.endpoint_joint_pair(branch, "START")[1], "T_BRANCH")
+
+    def test_classified_179_5_degree_main_pair_safely_falls_back(self):
+        members = self.make_t(main_angle=179.5)
+        self.assertTrue(
+            all(junctions.classify_junction(wall, "START").key == "T_JUNCTION" for wall in members)
+        )
+        self.assertTrue(
+            all(joints.endpoint_joint_pair(wall, "START")[1] == "FALLBACK" for wall in members)
+        )
+
+    def test_roles_are_member_order_independent(self):
+        first, second, branch = self.make_t()
+        expected = {first, second}
+        for order in (
+            [(first, "START"), (second, "START"), (branch, "START")],
+            [(branch, "START"), (first, "START"), (second, "START")],
+            [(second, "START"), (branch, "START"), (first, "START")],
+        ):
+            for wall, endpoint in order:
+                wall.members[endpoint] = list(order)
+            roles = junctions.t_junction_roles(branch, "START")
+            self.assertEqual({member[0] for member in roles[0]}, expected)
+            self.assertIs(roles[1][0], branch)
+
+    def test_start_end_combinations_and_main_reference_invariance(self):
+        for endpoints in (("START", "END", "START"), ("END", "START", "END")):
+            first, second, branch = self.make_t(endpoints=endpoints)
+            first_solution = joints.calculate_t_solution(first, endpoints[0])
+            second_solution = joints.calculate_t_solution(second, endpoints[1])
+            self.assertIsNotNone(first_solution)
+            for first_point, second_point in zip(first_solution[2], second_solution[2]):
+                assert_points_equal(self, first_point, second_point)
+            assert_points_equal(self, first_solution[3], second_solution[3])
+            self.assertAlmostEqual(
+                abs(first_solution[4][0] * second_solution[4][0] + first_solution[4][1] * second_solution[4][1]),
+                1.0,
+                places=10,
+            )
+            self.assertEqual(joints.endpoint_joint_pair(branch, endpoints[2])[1], "T_BRANCH")
+
+    def test_exact_main_reversal_preserves_trim_and_host_boundary(self):
+        first, second, branch = self.make_t()
+        original = joints.calculate_t_solution(branch, "START")
+        reversed_members = [(second, "START"), (first, "START"), (branch, "START")]
+        for wall, member_endpoint in reversed_members:
+            wall.members[member_endpoint] = list(reversed_members)
+        reversed_solution = joints.calculate_t_solution(branch, "START")
+        self.assertIsNotNone(original)
+        self.assertIsNotNone(reversed_solution)
+        for original_point, reversed_point in zip(original[2], reversed_solution[2]):
+            assert_points_equal(self, original_point, reversed_point)
+        assert_points_equal(self, original[3], reversed_solution[3])
+        self.assertAlmostEqual(
+            abs(original[4][0] * reversed_solution[4][0] + original[4][1] * reversed_solution[4][1]),
+            1.0,
+            places=10,
+        )
+
+    def test_45_and_15_degree_branches_are_valid(self):
+        for angle in (45.0, 15.0):
+            _first, _second, branch = self.make_t(angle=angle)
+            self.assertEqual(joints.endpoint_joint_pair(branch, "START")[1], "T_BRANCH")
+
+    def test_shallow_branch_falls_back_for_every_member(self):
+        members = self.make_t(angle=2.5)
+        self.assertTrue(all(joints.endpoint_joint_pair(wall, "START")[1] == "FALLBACK" for wall in members))
+
+    def test_branch_may_be_thicker_than_equal_mains(self):
+        first, second, branch = self.make_t(branch_thickness=200.0)
+        self.assertEqual(joints.endpoint_joint_pair(branch, "START")[1], "T_BRANCH")
+        self.assertEqual(joints.endpoint_joint_pair(first, "START")[1], "T_MAIN")
+        self.assertEqual(joints.endpoint_joint_pair(second, "START")[1], "T_MAIN")
+
+    def test_unequal_main_thickness_falls_back_for_all(self):
+        members = self.make_t(main_thickness=(130.0, 200.0))
+        self.assertTrue(all(joints.endpoint_joint_pair(wall, "START")[1] == "FALLBACK" for wall in members))
+
+    def test_position_mismatch_falls_back_for_all(self):
+        members = self.make_t()
+        members[2].jhm_wall.start = (2.0e-6, 0.0, 0.0)
+        self.assertTrue(all(joints.endpoint_joint_pair(wall, "START")[1] == "FALLBACK" for wall in members))
+
+    def test_non_identity_transform_falls_back(self):
+        members = self.make_t()
+        members[1].matrix_basis = tuple(
+            tuple(2.0 if row == column == 0 else (1.0 if row == column else 0.0) for column in range(4))
+            for row in range(4)
+        )
+        self.assertTrue(all(joints.endpoint_joint_pair(wall, "START")[1] == "FALLBACK" for wall in members))
+
+    def test_very_short_branch_falls_back(self):
+        members = self.make_t(branch_length=0.04)
+        self.assertTrue(all(joints.endpoint_joint_pair(wall, "START")[1] == "FALLBACK" for wall in members))
+
+    def test_t_branch_with_opposite_corner_builds_or_safely_falls_back(self):
+        _first, _second, branch = self.make_t(branch_length=1.0)
+        corner = Wall((0.0, 1.0), (1.0, 1.0))
+        connect(branch, "END", corner, "START")
+        geometry = joints.build_wall_geometry(branch)
+        self.assertIsNotNone(geometry)
+        statuses = joints._resolved_endpoint_pairs(branch)[2]
+        self.assertIn(statuses["START"], {"T_BRANCH", "FALLBACK"})
+        self.assertIn(statuses["END"], {"MITER", "FALLBACK"})
 
 
 if __name__ == "__main__":
