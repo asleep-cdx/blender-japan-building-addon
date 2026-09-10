@@ -6,8 +6,8 @@ import bpy
 
 from .connections import is_valid_wall_object, junction_members
 from .junctions import (
-    CONTINUATION, CORNER, ISOLATED, T_JUNCTION, classify_junction,
-    t_junction_roles,
+    CONTINUATION, CORNER, CROSS, ISOLATED, T_JUNCTION, classify_junction,
+    cross_junction_pairs, t_junction_roles,
 )
 
 
@@ -20,6 +20,10 @@ _MAX_T_TRIM_FACTOR = 10.0
 _T_MAIN_THICKNESS_TOLERANCE_MM = 1.0e-6
 _T_PARAMETER_TOLERANCE_M = 1.0e-9
 _T_MAIN_COLLINEAR_TOLERANCE = 1.0e-6
+_CROSS_PAIR_COLLINEAR_TOLERANCE = 1.0e-6
+_CROSS_THROUGH_THICKNESS_TOLERANCE_MM = 1.0e-6
+_CROSS_PARAMETER_TOLERANCE_M = 1.0e-9
+_MAX_CROSS_TRIM_FACTOR = 10.0
 _TRANSFORM_EPSILON = 1.0e-6
 
 
@@ -185,6 +189,120 @@ def calculate_t_solution(wall_object, endpoint):
     return main_members, branch_member, tuple(trim_points), host_origin, main_direction
 
 
+def _canonical_axis(first_direction, second_direction):
+    """Derive one order/sign-independent unit axis from opposite directions."""
+    axes = []
+    for direction in (first_direction, second_direction):
+        x, y = direction
+        if x < 0.0 or (abs(x) <= _LINE_PARALLEL_EPSILON and y < 0.0):
+            x, y = -x, -y
+        axes.append((x, y))
+    combined = axes[0][0] + axes[1][0], axes[0][1] + axes[1][1]
+    length = math.hypot(*combined)
+    if not math.isfinite(length) or length <= _LINE_PARALLEL_EPSILON:
+        return None
+    return combined[0] / length, combined[1] / length
+
+
+def calculate_cross_solution(wall_object, endpoint):
+    """Resolve roles and both butt trims as one all-or-nothing Cross solution."""
+    classification = classify_junction(wall_object, endpoint)
+    if classification.key != CROSS or classification.member_count != 4:
+        return None
+    pairs = cross_junction_pairs(wall_object, endpoint)
+    if pairs is None:
+        return None
+    members = tuple(member for pair in pairs for member in pair)
+    data_by_member = [(member, endpoint_data(*member)) for member in members]
+    if any(data is None for _member, data in data_by_member):
+        return None
+    if any(not has_identity_transform(member[0]) for member in members):
+        return None
+    junction = data_by_member[0][1][0]
+    if any(
+        _distance(data[0], junction) > _JOINT_POSITION_TOLERANCE_M
+        for _member, data in data_by_member[1:]
+    ):
+        return None
+
+    pair_data = []
+    for pair in pairs:
+        first = endpoint_data(*pair[0])
+        second = endpoint_data(*pair[1])
+        cross = first[1][0] * second[1][1] - first[1][1] * second[1][0]
+        dot = first[1][0] * second[1][0] + first[1][1] * second[1][1]
+        if abs(cross) > _CROSS_PAIR_COLLINEAR_TOLERANCE or dot >= 0.0:
+            return None
+        axis = _canonical_axis(first[1], second[1])
+        if axis is None:
+            return None
+        pair_data.append((pair, first, axis))
+
+    axis_cross = (
+        pair_data[0][2][0] * pair_data[1][2][1]
+        - pair_data[0][2][1] * pair_data[1][2][0]
+    )
+    if abs(axis_cross) <= _CROSS_PAIR_COLLINEAR_TOLERANCE:
+        return None
+
+    # Maximise world-X alignment, then canonical y (and x) to settle geometric
+    # ties such as +45/-45 degrees without consulting object or member identity.
+    through_index = max(
+        range(2), key=lambda index: (
+            abs(pair_data[index][2][0]),
+            pair_data[index][2][1],
+            pair_data[index][2][0],
+        )
+    )
+    through_members, host, host_axis = pair_data[through_index]
+    butt_members, _butt_reference, _butt_axis = pair_data[1 - through_index]
+    try:
+        through_thicknesses = [
+            float(member[0].jhm_wall.wall_thickness) for member in through_members
+        ]
+    except (AttributeError, ReferenceError, TypeError, ValueError):
+        return None
+    if abs(through_thicknesses[0] - through_thicknesses[1]) > (
+        _CROSS_THROUGH_THICKNESS_TOLERANCE_MM
+    ):
+        return None
+
+    _host_point, host_direction, host_normal, host_half = host
+    trims = []
+    for member in butt_members:
+        butt = endpoint_data(*member)
+        butt_point, butt_direction, butt_normal, butt_half = butt
+        side_dot = butt_direction[0] * host_normal[0] + butt_direction[1] * host_normal[1]
+        if not math.isfinite(side_dot) or abs(side_dot) <= _LINE_PARALLEL_EPSILON:
+            return None
+        host_origin = _add(
+            junction, host_normal, host_half if side_dot > 0.0 else -host_half
+        )
+        trim_points = []
+        parameters = []
+        for side in (butt_half, -butt_half):
+            side_origin = _add(butt_point, butt_normal, side)
+            trim = line_intersection(side_origin, butt_direction, host_origin, host_direction)
+            if trim is None:
+                return None
+            parameter = (
+                (trim[0] - side_origin[0]) * butt_direction[0]
+                + (trim[1] - side_origin[1]) * butt_direction[1]
+            )
+            trim_points.append(trim)
+            parameters.append(parameter)
+        limit = max(host_half, butt_half) * _MAX_CROSS_TRIM_FACTOR
+        wall_length = _distance(_xy(member[0].jhm_wall.start), _xy(member[0].jhm_wall.end))
+        if (
+            any(parameter < -_CROSS_PARAMETER_TOLERANCE_M for parameter in parameters)
+            or any(_distance(trim, junction) > limit for trim in trim_points)
+            or any(parameter >= wall_length - _MIN_WALL_LENGTH_M for parameter in parameters)
+        ):
+            return None
+        trims.append((member, tuple(trim_points)))
+    return through_members, tuple(trims), junction, host_axis
+
+
 def endpoint_joint_pair(wall_object, endpoint):
     """Return the effective endpoint pair and its derived UI status key."""
     square = square_endpoint_pair(wall_object, endpoint)
@@ -205,6 +323,18 @@ def endpoint_joint_pair(wall_object, endpoint):
             return square, "T_MAIN"
         if branch_member[0] is current[0] and branch_member[1] == current[1]:
             return branch_pair, "T_BRANCH"
+        return square, "FALLBACK"
+    if classification.key == CROSS and classification.member_count == 4:
+        solution = calculate_cross_solution(wall_object, endpoint)
+        if solution is None:
+            return square, "FALLBACK"
+        through_members, butt_trims, _junction, _host_axis = solution
+        current = (wall_object, endpoint)
+        if any(member[0] is current[0] and member[1] == current[1] for member in through_members):
+            return square, "CROSS_THROUGH"
+        for member, trim_pair in butt_trims:
+            if member[0] is current[0] and member[1] == current[1]:
+                return trim_pair, "CROSS_BUTT"
         return square, "FALLBACK"
     if classification.key != CORNER or classification.member_count != 2:
         return square, "UNSUPPORTED"
@@ -228,6 +358,8 @@ def joint_status_label(wall_object, endpoint):
         "MITER": "マイター",
         "T_MAIN": "T字主壁",
         "T_BRANCH": "T字枝壁",
+        "CROSS_THROUGH": "十字通し壁",
+        "CROSS_BUTT": "十字突合せ壁",
         "FALLBACK": "安全フォールバック",
         "UNSUPPORTED": "未対応",
     }[status]
@@ -254,12 +386,12 @@ def _resolved_endpoint_pairs(wall_object):
         )
 
     if not valid():
-        # A shared unsafe T is rejected earlier for all three members.  This
+        # A shared unsafe T/Cross is rejected earlier for all members.  This
         # branch is intentionally Wall-local: a safe branch trim can still be
         # incompatible with this Wall's independently resolved opposite-end
         # joint, in which case only this visual endpoint is squared off.
         for endpoint in ("START", "END"):
-            if statuses[endpoint] not in {"MITER", "T_BRANCH"}:
+            if statuses[endpoint] not in {"MITER", "T_BRANCH", "CROSS_BUTT"}:
                 continue
             pairs[endpoint] = squares[endpoint]
             statuses[endpoint] = "FALLBACK"
@@ -268,7 +400,7 @@ def _resolved_endpoint_pairs(wall_object):
     if not valid():
         pairs = squares
         for endpoint in statuses:
-            if statuses[endpoint] in {"MITER", "T_BRANCH"}:
+            if statuses[endpoint] in {"MITER", "T_BRANCH", "CROSS_BUTT"}:
                 statuses[endpoint] = "FALLBACK"
     return pairs["START"], pairs["END"], statuses
 

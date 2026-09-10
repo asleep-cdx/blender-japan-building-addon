@@ -82,6 +82,21 @@ def connect_t(*members):
         wall.classification[endpoint] = "T_JUNCTION"
 
 
+def connect_cross(*members):
+    topology = list(members)
+    for index, (wall, endpoint) in enumerate(members):
+        wall.members[endpoint] = topology[index:] + topology[:index]
+
+
+def wall_from_junction(angle, endpoint="START", thickness=130.0, length=2.0,
+                       origin=(0.0, 0.0)):
+    radians = math.radians(angle)
+    far = (origin[0] + length * math.cos(radians),
+           origin[1] + length * math.sin(radians))
+    return (Wall(origin, far, thickness) if endpoint == "START"
+            else Wall(far, origin, thickness))
+
+
 def assert_points_equal(test, first, second):
     test.assertAlmostEqual(first[0], second[0], places=10)
     test.assertAlmostEqual(first[1], second[1], places=10)
@@ -295,6 +310,140 @@ class TJunctionMathTests(unittest.TestCase):
         self.assertIsNotNone(geometry)
         statuses = joints._resolved_endpoint_pairs(branch)[2]
         self.assertIn(statuses["START"], {"T_BRANCH", "FALLBACK"})
+        self.assertIn(statuses["END"], {"MITER", "FALLBACK"})
+
+
+class CrossMathTests(unittest.TestCase):
+    def make_cross(self, angles=(0.0, 180.0, 90.0, 270.0),
+                   endpoints=("START",) * 4, thicknesses=(130.0,) * 4,
+                   lengths=(2.0,) * 4):
+        walls = tuple(
+            wall_from_junction(angle, endpoint, thickness, length)
+            for angle, endpoint, thickness, length
+            in zip(angles, endpoints, thicknesses, lengths)
+        )
+        connect_cross(*(zip(walls, endpoints)))
+        return walls
+
+    def statuses(self, walls, endpoints=None):
+        endpoints = endpoints or ("START",) * 4
+        return tuple(
+            joints.endpoint_joint_pair(wall, endpoint)[1]
+            for wall, endpoint in zip(walls, endpoints)
+        )
+
+    def test_standard_cross_unique_partition_and_roles(self):
+        walls = self.make_cross()
+        pairs = junctions.cross_junction_pairs(walls[0], "START")
+        self.assertEqual(len(pairs), 2)
+        self.assertEqual({member[0] for member in pairs[0]} |
+                         {member[0] for member in pairs[1]}, set(walls))
+        self.assertEqual(self.statuses(walls),
+                         ("CROSS_THROUGH", "CROSS_THROUGH", "CROSS_BUTT", "CROSS_BUTT"))
+
+    def test_member_order_caller_and_start_end_do_not_change_roles(self):
+        endpoints = ("START", "END", "END", "START")
+        walls = self.make_cross(endpoints=endpoints)
+        expected = {walls[0], walls[1]}
+        orders = (
+            list(zip(walls, endpoints)),
+            [(walls[2], endpoints[2]), (walls[0], endpoints[0]),
+             (walls[3], endpoints[3]), (walls[1], endpoints[1])],
+        )
+        for order in orders:
+            for wall, member_endpoint in order:
+                wall.members[member_endpoint] = list(order)
+            for caller, caller_endpoint in order:
+                solution = joints.calculate_cross_solution(caller, caller_endpoint)
+                self.assertEqual(set(solution[0]), {
+                    (wall, endpoint) for wall, endpoint in zip(walls[:2], endpoints[:2])
+                })
+                self.assertEqual(
+                    {member[0] for member in solution[0]}, expected
+                )
+
+    def test_geometric_tie_break_is_deterministic(self):
+        walls = self.make_cross(angles=(45.0, 225.0, -45.0, 135.0))
+        # Equal X closeness is settled by canonical y: +45 is through.
+        self.assertEqual(self.statuses(walls),
+                         ("CROSS_THROUGH", "CROSS_THROUGH", "CROSS_BUTT", "CROSS_BUTT"))
+        order = [(walls[3], "START"), (walls[1], "START"),
+                 (walls[0], "START"), (walls[2], "START")]
+        for wall in walls:
+            wall.members["START"] = list(order)
+        self.assertEqual(self.statuses(walls),
+                         ("CROSS_THROUGH", "CROSS_THROUGH", "CROSS_BUTT", "CROSS_BUTT"))
+
+    def test_ambiguous_collinear_cross_falls_back(self):
+        walls = self.make_cross(angles=(0.0, 180.0, 0.0, 180.0))
+        self.assertEqual(junctions.classify_junction(walls[0], "START").key, "CROSS")
+        self.assertIsNone(junctions.cross_junction_pairs(walls[0], "START"))
+        self.assertEqual(self.statuses(walls), ("FALLBACK",) * 4)
+
+    def test_exact_pairs_valid_but_classified_near_opposite_falls_back(self):
+        exact = self.make_cross()
+        self.assertIsNotNone(joints.calculate_cross_solution(exact[3], "START"))
+        near = self.make_cross(angles=(0.0, 179.5, 90.0, 270.0))
+        self.assertEqual(junctions.classify_junction(near[0], "START").key, "CROSS")
+        self.assertEqual(self.statuses(near), ("FALLBACK",) * 4)
+
+    def test_position_and_transform_fail_whole_solution(self):
+        mismatched = self.make_cross()
+        mismatched[3].jhm_wall.start = (2.0e-6, 0.0, 0.0)
+        self.assertEqual(self.statuses(mismatched), ("FALLBACK",) * 4)
+        transformed = self.make_cross()
+        transformed[1].matrix_basis = tuple(
+            tuple(2.0 if row == column == 0 else (1.0 if row == column else 0.0)
+                  for column in range(4)) for row in range(4)
+        )
+        self.assertEqual(self.statuses(transformed), ("FALLBACK",) * 4)
+
+    def test_90_degree_butts_stop_on_host_outer_boundaries(self):
+        walls = self.make_cross()
+        for wall in walls[2:]:
+            pair, status = joints.endpoint_joint_pair(wall, "START")
+            self.assertEqual(status, "CROSS_BUTT")
+            expected_y = 0.065 if wall is walls[2] else -0.065
+            self.assertTrue(all(abs(point[1] - expected_y) < 1.0e-10 for point in pair))
+
+    def test_crossing_angles_and_shallow_safety(self):
+        for angle in (45.0, 15.0):
+            walls = self.make_cross(angles=(0.0, 180.0, angle, angle + 180.0))
+            self.assertEqual(self.statuses(walls).count("CROSS_BUTT"), 2)
+        shallow = self.make_cross(angles=(0.0, 180.0, 2.5, 182.5))
+        self.assertEqual(self.statuses(shallow), ("FALLBACK",) * 4)
+
+    def test_through_must_match_but_butts_may_differ(self):
+        unequal_through = self.make_cross(thicknesses=(130.0, 200.0, 130.0, 130.0))
+        self.assertEqual(self.statuses(unequal_through), ("FALLBACK",) * 4)
+        unequal_butts = self.make_cross(thicknesses=(130.0, 130.0, 130.0, 200.0))
+        self.assertEqual(self.statuses(unequal_butts),
+                         ("CROSS_THROUGH", "CROSS_THROUGH", "CROSS_BUTT", "CROSS_BUTT"))
+
+    def test_very_short_butt_falls_back_for_all(self):
+        walls = self.make_cross(lengths=(2.0, 2.0, 0.04, 2.0))
+        self.assertEqual(self.statuses(walls), ("FALLBACK",) * 4)
+
+    def test_through_reference_reversal_preserves_trim_set(self):
+        walls = self.make_cross(angles=(0.0, 180.0, 45.0, 225.0))
+        original = joints.calculate_cross_solution(walls[0], "START")
+        order = [(walls[1], "START"), (walls[0], "START"),
+                 (walls[2], "START"), (walls[3], "START")]
+        for wall in walls:
+            wall.members["START"] = list(order)
+        reversed_solution = joints.calculate_cross_solution(walls[1], "START")
+        original_points = sorted(point for _member, pair in original[1] for point in pair)
+        reversed_points = sorted(point for _member, pair in reversed_solution[1] for point in pair)
+        for first, second in zip(original_points, reversed_points):
+            assert_points_equal(self, first, second)
+
+    def test_cross_butt_with_opposite_corner_builds_or_locally_falls_back(self):
+        walls = self.make_cross(lengths=(2.0, 2.0, 1.0, 2.0))
+        corner = Wall((0.0, 1.0), (1.0, 1.0))
+        connect(walls[2], "END", corner, "START")
+        self.assertIsNotNone(joints.build_wall_geometry(walls[2]))
+        statuses = joints._resolved_endpoint_pairs(walls[2])[2]
+        self.assertIn(statuses["START"], {"CROSS_BUTT", "FALLBACK"})
         self.assertIn(statuses["END"], {"MITER", "FALLBACK"})
 
 

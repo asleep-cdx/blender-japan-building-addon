@@ -173,6 +173,40 @@ def t_junction_roles(wall_object, endpoint):
     return (members[first], members[second]), members[branch]
 
 
+def cross_junction_pairs(wall_object, endpoint):
+    """Return the unique two-opposite-pair partition of a four-member Cross.
+
+    All three disjoint partitions are examined. Returning no result for both
+    zero and multiple candidates keeps ambiguous topology out of Mesh solving,
+    and makes the result independent of junction member enumeration order.
+    """
+    try:
+        members = list(junction_members(wall_object, endpoint))
+    except (AttributeError, ReferenceError, TypeError, ValueError):
+        return None
+    if len(members) != 4:
+        return None
+    directions = [endpoint_direction(obj, member_endpoint) for obj, member_endpoint in members]
+    if any(direction is None for direction in directions):
+        return None
+    candidates = []
+    for pairing in (
+        ((0, 1), (2, 3)),
+        ((0, 2), (1, 3)),
+        ((0, 3), (1, 2)),
+    ):
+        if all(
+            _is_opposite(pair_angle(directions[first], directions[second]))
+            for first, second in pairing
+        ):
+            candidates.append(pairing)
+    if len(candidates) != 1:
+        return None
+    return tuple(
+        (members[first], members[second]) for first, second in candidates[0]
+    )
+
+
 _DISPLAY_NAMES = {
     ISOLATED: "未接続",
     CONTINUATION: "直線継続",
