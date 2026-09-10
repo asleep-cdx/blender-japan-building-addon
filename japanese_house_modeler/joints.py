@@ -24,6 +24,7 @@ _CROSS_PAIR_COLLINEAR_TOLERANCE = 1.0e-6
 _CROSS_THROUGH_THICKNESS_TOLERANCE_MM = 1.0e-6
 _CROSS_PARAMETER_TOLERANCE_M = 1.0e-9
 _MAX_CROSS_TRIM_FACTOR = 10.0
+_STEP_ORTHOGONAL_TOLERANCE = 1.0e-6
 _TRANSFORM_EPSILON = 1.0e-6
 
 
@@ -204,8 +205,8 @@ def _canonical_axis(first_direction, second_direction):
     return combined[0] / length, combined[1] / length
 
 
-def calculate_cross_solution(wall_object, endpoint):
-    """Resolve roles and both butt trims as one all-or-nothing Cross solution."""
+def _cross_role_data(wall_object, endpoint):
+    """Validate a Cross and apply the single Build 04-E role policy."""
     classification = classify_junction(wall_object, endpoint)
     if classification.key != CROSS or classification.member_count != 4:
         return None
@@ -213,49 +214,45 @@ def calculate_cross_solution(wall_object, endpoint):
     if pairs is None:
         return None
     members = tuple(member for pair in pairs for member in pair)
-    data_by_member = [(member, endpoint_data(*member)) for member in members]
-    if any(data is None for _member, data in data_by_member):
+    data = [(member, endpoint_data(*member)) for member in members]
+    if any(item is None for _member, item in data):
         return None
     if any(not has_identity_transform(member[0]) for member in members):
         return None
-    junction = data_by_member[0][1][0]
-    if any(
-        _distance(data[0], junction) > _JOINT_POSITION_TOLERANCE_M
-        for _member, data in data_by_member[1:]
-    ):
+    junction = data[0][1][0]
+    if any(_distance(item[0], junction) > _JOINT_POSITION_TOLERANCE_M
+           for _member, item in data[1:]):
         return None
-
     pair_data = []
     for pair in pairs:
         first = endpoint_data(*pair[0])
         second = endpoint_data(*pair[1])
         cross = first[1][0] * second[1][1] - first[1][1] * second[1][0]
         dot = first[1][0] * second[1][0] + first[1][1] * second[1][1]
-        if abs(cross) > _CROSS_PAIR_COLLINEAR_TOLERANCE or dot >= 0.0:
-            return None
         axis = _canonical_axis(first[1], second[1])
-        if axis is None:
+        if (abs(cross) > _CROSS_PAIR_COLLINEAR_TOLERANCE
+                or dot >= 0.0 or axis is None):
             return None
-        pair_data.append((pair, first, axis))
-
-    axis_cross = (
-        pair_data[0][2][0] * pair_data[1][2][1]
-        - pair_data[0][2][1] * pair_data[1][2][0]
-    )
+        pair_data.append((tuple(pair), first, axis))
+    axis_cross = (pair_data[0][2][0] * pair_data[1][2][1]
+                  - pair_data[0][2][1] * pair_data[1][2][0])
     if abs(axis_cross) <= _CROSS_PAIR_COLLINEAR_TOLERANCE:
         return None
+    through_index = max(range(2), key=lambda index: (
+        abs(pair_data[index][2][0]), pair_data[index][2][1],
+        pair_data[index][2][0],
+    ))
+    through = pair_data[through_index]
+    butt = pair_data[1 - through_index]
+    return through, butt, junction
 
-    # Maximise world-X alignment, then canonical y (and x) to settle geometric
-    # ties such as +45/-45 degrees without consulting object or member identity.
-    through_index = max(
-        range(2), key=lambda index: (
-            abs(pair_data[index][2][0]),
-            pair_data[index][2][1],
-            pair_data[index][2][0],
-        )
-    )
-    through_members, host, host_axis = pair_data[through_index]
-    butt_members, _butt_reference, _butt_axis = pair_data[1 - through_index]
+
+def calculate_cross_solution(wall_object, endpoint):
+    """Resolve roles and both butt trims as one all-or-nothing Cross solution."""
+    role_data = _cross_role_data(wall_object, endpoint)
+    if role_data is None:
+        return None
+    (through_members, host, host_axis), (butt_members, _ref, _axis), junction = role_data
     try:
         through_thicknesses = [
             float(member[0].jhm_wall.wall_thickness) for member in through_members
@@ -303,8 +300,131 @@ def calculate_cross_solution(wall_object, endpoint):
     return through_members, tuple(trims), junction, host_axis
 
 
-def endpoint_joint_pair(wall_object, endpoint):
-    """Return the effective endpoint pair and its derived UI status key."""
+def _positive_negative_hosts(members, host_axis):
+    """Return hosts extending along canonical positive and negative axes."""
+    result = {}
+    for member in members:
+        data = endpoint_data(*member)
+        if data is None:
+            return None
+        coordinate = data[1][0] * host_axis[0] + data[1][1] * host_axis[1]
+        if coordinate > _STEP_ORTHOGONAL_TOLERANCE:
+            key = "positive"
+        elif coordinate < -_STEP_ORTHOGONAL_TOLERANCE:
+            key = "negative"
+        else:
+            return None
+        if key in result:
+            return None
+        result[key] = (member, data)
+    return (result.get("positive"), result.get("negative")) if len(result) == 2 else None
+
+
+def _step_profile(member, junction, host_axis, positive_half, negative_half):
+    data = endpoint_data(*member)
+    if data is None:
+        return None
+    _point, direction, normal, half = data
+    profile = []
+    for side in (half, -half):
+        side_point = _add(junction, normal, side)
+        coordinate = ((side_point[0] - junction[0]) * host_axis[0]
+                      + (side_point[1] - junction[1]) * host_axis[1])
+        if coordinate > _STEP_ORTHOGONAL_TOLERANCE:
+            depth = positive_half
+        elif coordinate < -_STEP_ORTHOGONAL_TOLERANCE:
+            depth = negative_half
+        else:
+            return None
+        profile.extend((_add(side_point, direction, depth),
+                        _add(junction, direction, depth)))
+    # The loop produces P+, C+, P-, C-; endpoint winding requires C- before P-.
+    profile = (profile[0], profile[1], profile[3], profile[2])
+    return profile if all(math.isfinite(v) for point in profile for v in point) else None
+
+
+def calculate_t_step_solution(wall_object, endpoint):
+    """Resolve an orthogonal unequal-main T as one shared step solution."""
+    classification = classify_junction(wall_object, endpoint)
+    roles = t_junction_roles(wall_object, endpoint)
+    if classification.key != T_JUNCTION or classification.member_count != 3 or roles is None:
+        return None
+    main_members, branch_member = tuple(roles[0]), roles[1]
+    members = (*main_members, branch_member)
+    data = [endpoint_data(*member) for member in members]
+    if any(item is None for item in data) or any(not has_identity_transform(m[0]) for m in members):
+        return None
+    junction = data[0][0]
+    if any(_distance(item[0], junction) > _JOINT_POSITION_TOLERANCE_M for item in data[1:]):
+        return None
+    cross = data[0][1][0] * data[1][1][1] - data[0][1][1] * data[1][1][0]
+    dot = data[0][1][0] * data[1][1][0] + data[0][1][1] * data[1][1][1]
+    host_axis = _canonical_axis(data[0][1], data[1][1])
+    if abs(cross) > _T_MAIN_COLLINEAR_TOLERANCE or dot >= 0.0 or host_axis is None:
+        return None
+    hosts = _positive_negative_hosts(main_members, host_axis)
+    if hosts is None:
+        return None
+    positive, negative = hosts
+    positive_half, negative_half = positive[1][3], negative[1][3]
+    if abs(positive_half - negative_half) * 2000.0 <= _T_MAIN_THICKNESS_TOLERANCE_MM:
+        return None
+    branch = data[2]
+    if abs(branch[1][0] * host_axis[0] + branch[1][1] * host_axis[1]) > _STEP_ORTHOGONAL_TOLERANCE:
+        return None
+    positive_length = _distance(
+        _xy(positive[0][0].jhm_wall.start), _xy(positive[0][0].jhm_wall.end)
+    )
+    negative_length = _distance(
+        _xy(negative[0][0].jhm_wall.start), _xy(negative[0][0].jhm_wall.end)
+    )
+    if positive_length <= branch[3] + _MIN_WALL_LENGTH_M:
+        return None
+    if negative_length <= branch[3] + _MIN_WALL_LENGTH_M:
+        return None
+    branch_length = _distance(_xy(branch_member[0].jhm_wall.start), _xy(branch_member[0].jhm_wall.end))
+    if branch_length <= max(positive_half, negative_half) + _MIN_WALL_LENGTH_M:
+        return None
+    profile = _step_profile(branch_member, junction, host_axis, positive_half, negative_half)
+    if profile is None:
+        return None
+    return main_members, branch_member, profile, junction, host_axis
+
+
+def calculate_cross_step_solution(wall_object, endpoint):
+    """Resolve an orthogonal unequal-through Cross as one shared step solution."""
+    role_data = _cross_role_data(wall_object, endpoint)
+    if role_data is None:
+        return None
+    (through, _host, host_axis), (butts, _butt, butt_axis), junction = role_data
+    hosts = _positive_negative_hosts(through, host_axis)
+    if hosts is None:
+        return None
+    positive, negative = hosts
+    positive_half, negative_half = positive[1][3], negative[1][3]
+    if abs(positive_half - negative_half) * 2000.0 <= _CROSS_THROUGH_THICKNESS_TOLERANCE_MM:
+        return None
+    if abs(host_axis[0] * butt_axis[0] + host_axis[1] * butt_axis[1]) > _STEP_ORTHOGONAL_TOLERANCE:
+        return None
+    profiles = []
+    for member in butts:
+        butt = endpoint_data(*member)
+        host_margin = butt[3] + _MIN_WALL_LENGTH_M
+        if any(_distance(_xy(host[0][0].jhm_wall.start), _xy(host[0][0].jhm_wall.end)) <= host_margin
+               for host in (positive, negative)):
+            return None
+        length = _distance(_xy(member[0].jhm_wall.start), _xy(member[0].jhm_wall.end))
+        if length <= max(positive_half, negative_half) + _MIN_WALL_LENGTH_M:
+            return None
+        profile = _step_profile(member, junction, host_axis, positive_half, negative_half)
+        if profile is None:
+            return None
+        profiles.append((member, profile))
+    return through, tuple(profiles), junction, host_axis
+
+
+def endpoint_joint_profile(wall_object, endpoint):
+    """Return an ordered local-plus to local-minus endpoint profile and status."""
     square = square_endpoint_pair(wall_object, endpoint)
     if square is None:
         return None, "FALLBACK"
@@ -316,6 +436,8 @@ def endpoint_joint_pair(wall_object, endpoint):
     if classification.key == T_JUNCTION and classification.member_count == 3:
         solution = calculate_t_solution(wall_object, endpoint)
         if solution is None:
+            solution = calculate_t_step_solution(wall_object, endpoint)
+        if solution is None:
             return square, "FALLBACK"
         main_members, branch_member, branch_pair, _host_origin, _host_direction = solution
         current = (wall_object, endpoint)
@@ -326,6 +448,8 @@ def endpoint_joint_pair(wall_object, endpoint):
         return square, "FALLBACK"
     if classification.key == CROSS and classification.member_count == 4:
         solution = calculate_cross_solution(wall_object, endpoint)
+        if solution is None:
+            solution = calculate_cross_step_solution(wall_object, endpoint)
         if solution is None:
             return square, "FALLBACK"
         through_members, butt_trims, _junction, _host_axis = solution
@@ -348,9 +472,17 @@ def endpoint_joint_pair(wall_object, endpoint):
     return (miter, "MITER") if miter is not None else (square, "FALLBACK")
 
 
+def endpoint_joint_pair(wall_object, endpoint):
+    """Compatibility view of a profile as its outer local-plus/minus pair."""
+    profile, status = endpoint_joint_profile(wall_object, endpoint)
+    if profile is None:
+        return None, status
+    return (profile[0], profile[-1]), status
+
+
 def joint_status_label(wall_object, endpoint):
     """Return a read-only Japanese label for the effective joint treatment."""
-    _start, _end, statuses = _resolved_endpoint_pairs(wall_object)
+    _start, _end, statuses = _resolved_endpoint_profiles(wall_object)
     status = statuses[endpoint]
     return {
         "ISOLATED": "未接続",
@@ -365,24 +497,24 @@ def joint_status_label(wall_object, endpoint):
     }[status]
 
 
-def _resolved_endpoint_pairs(wall_object):
-    """Resolve polygon-level fallback and report each endpoint's effective state."""
+def _resolved_endpoint_profiles(wall_object):
+    """Resolve variable profiles and Wall-local polygon fallback."""
     squares = {
         endpoint: square_endpoint_pair(wall_object, endpoint)
         for endpoint in ("START", "END")
     }
     requested = {
-        endpoint: endpoint_joint_pair(wall_object, endpoint)
+        endpoint: endpoint_joint_profile(wall_object, endpoint)
         for endpoint in ("START", "END")
     }
     if any(pair is None for pair in squares.values()):
         return None, None, {"START": "FALLBACK", "END": "FALLBACK"}
-    pairs = {endpoint: requested[endpoint][0] for endpoint in requested}
+    profiles = {endpoint: requested[endpoint][0] for endpoint in requested}
     statuses = {endpoint: requested[endpoint][1] for endpoint in requested}
 
     def valid():
         return validate_lower_polygon(
-            [pairs["START"][0], pairs["START"][1], pairs["END"][0], pairs["END"][1]]
+            list(profiles["START"]) + list(profiles["END"])
         )
 
     if not valid():
@@ -393,16 +525,24 @@ def _resolved_endpoint_pairs(wall_object):
         for endpoint in ("START", "END"):
             if statuses[endpoint] not in {"MITER", "T_BRANCH", "CROSS_BUTT"}:
                 continue
-            pairs[endpoint] = squares[endpoint]
+            profiles[endpoint] = squares[endpoint]
             statuses[endpoint] = "FALLBACK"
             if valid():
                 break
     if not valid():
-        pairs = squares
+        profiles = squares
         for endpoint in statuses:
             if statuses[endpoint] in {"MITER", "T_BRANCH", "CROSS_BUTT"}:
                 statuses[endpoint] = "FALLBACK"
-    return pairs["START"], pairs["END"], statuses
+    return profiles["START"], profiles["END"], statuses
+
+
+def _resolved_endpoint_pairs(wall_object):
+    """Compatibility wrapper exposing only each resolved profile's outer pair."""
+    start, end, statuses = _resolved_endpoint_profiles(wall_object)
+    if start is None or end is None:
+        return None, None, statuses
+    return (start[0], start[-1]), (end[0], end[-1]), statuses
 
 
 def _cross(first, second, third):
@@ -411,31 +551,54 @@ def _cross(first, second, third):
     )
 
 
-def _segments_cross(first, second, third, fourth):
-    a = _cross(first, second, third)
-    b = _cross(first, second, fourth)
-    c = _cross(third, fourth, first)
-    d = _cross(third, fourth, second)
-    return a * b < 0.0 and c * d < 0.0
+def _point_on_segment(point, first, second):
+    return (abs(_cross(first, second, point)) <= _JOINT_POSITION_TOLERANCE_M
+            and min(first[0], second[0]) - _JOINT_POSITION_TOLERANCE_M <= point[0]
+            <= max(first[0], second[0]) + _JOINT_POSITION_TOLERANCE_M
+            and min(first[1], second[1]) - _JOINT_POSITION_TOLERANCE_M <= point[1]
+            <= max(first[1], second[1]) + _JOINT_POSITION_TOLERANCE_M)
+
+
+def _segments_intersect(first, second, third, fourth):
+    a, b = _cross(first, second, third), _cross(first, second, fourth)
+    c, d = _cross(third, fourth, first), _cross(third, fourth, second)
+    tolerance = _JOINT_POSITION_TOLERANCE_M
+    if ((a > tolerance and b < -tolerance) or (a < -tolerance and b > tolerance)) and (
+            (c > tolerance and d < -tolerance) or (c < -tolerance and d > tolerance)):
+        return True
+    return ((abs(a) <= tolerance and _point_on_segment(third, first, second))
+            or (abs(b) <= tolerance and _point_on_segment(fourth, first, second))
+            or (abs(c) <= tolerance and _point_on_segment(first, third, fourth))
+            or (abs(d) <= tolerance and _point_on_segment(second, third, fourth)))
 
 
 def validate_lower_polygon(points):
     """Validate finiteness, area, and non-adjacent edge intersections."""
-    if len(points) != 4 or not all(
+    if len(points) < 3 or not all(
         math.isfinite(value) for point in points for value in point
     ):
         return False
+    count = len(points)
+    if any(_distance(points[index], points[(index + 1) % count])
+           <= _JOINT_POSITION_TOLERANCE_M for index in range(count)):
+        return False
     area = abs(
         sum(
-            point[0] * points[(index + 1) % 4][1]
-            - points[(index + 1) % 4][0] * point[1]
+            point[0] * points[(index + 1) % count][1]
+            - points[(index + 1) % count][0] * point[1]
             for index, point in enumerate(points)
         )
     ) * 0.5
-    return area > _POLYGON_AREA_EPSILON and not (
-        _segments_cross(points[0], points[1], points[2], points[3])
-        or _segments_cross(points[1], points[2], points[3], points[0])
-    )
+    if area <= _POLYGON_AREA_EPSILON:
+        return False
+    for first in range(count):
+        for second in range(first + 1, count):
+            if second == first + 1 or (first == 0 and second == count - 1):
+                continue
+            if _segments_intersect(points[first], points[(first + 1) % count],
+                                   points[second], points[(second + 1) % count]):
+                return False
+    return True
 
 
 def build_wall_geometry(wall_object):
@@ -447,18 +610,19 @@ def build_wall_geometry(wall_object):
         return None
     if not math.isfinite(height) or height <= 0.0 or thickness <= 0.0:
         return None
-    start_pair, end_pair, _statuses = _resolved_endpoint_pairs(wall_object)
-    if start_pair is None or end_pair is None:
+    start_profile, end_profile, _statuses = _resolved_endpoint_profiles(wall_object)
+    if start_profile is None or end_profile is None:
         return None
-    lower = [start_pair[0], start_pair[1], end_pair[0], end_pair[1]]
+    lower = list(start_profile) + list(end_profile)
     if not validate_lower_polygon(lower):
         return None
     vertices = [(point[0], point[1], 0.0) for point in lower]
     vertices.extend((point[0], point[1], height) for point in lower)
-    faces = (
-        (0, 3, 2, 1), (4, 5, 6, 7), (0, 1, 5, 4),
-        (1, 2, 6, 5), (2, 3, 7, 6), (3, 0, 4, 7),
-    )
+    count = len(lower)
+    faces = [tuple(reversed(range(count))), tuple(range(count, count * 2))]
+    faces.extend((index, (index + 1) % count, count + (index + 1) % count,
+                  count + index) for index in range(count))
+    faces = tuple(faces)
     return vertices, faces
 
 

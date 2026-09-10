@@ -281,9 +281,37 @@ class TJunctionMathTests(unittest.TestCase):
         self.assertEqual(joints.endpoint_joint_pair(first, "START")[1], "T_MAIN")
         self.assertEqual(joints.endpoint_joint_pair(second, "START")[1], "T_MAIN")
 
-    def test_unequal_main_thickness_falls_back_for_all(self):
-        members = self.make_t(main_thickness=(130.0, 200.0))
-        self.assertTrue(all(joints.endpoint_joint_pair(wall, "START")[1] == "FALLBACK" for wall in members))
+    def test_orthogonal_unequal_main_uses_step_profile(self):
+        first, second, branch = self.make_t(main_thickness=(130.0, 200.0))
+        self.assertEqual(joints.endpoint_joint_pair(first, "START")[1], "T_MAIN")
+        self.assertEqual(joints.endpoint_joint_pair(second, "START")[1], "T_MAIN")
+        profile, status = joints.endpoint_joint_profile(branch, "START")
+        self.assertEqual(status, "T_BRANCH")
+        self.assertEqual(len(profile), 4)
+        self.assertEqual(sorted({round(point[1], 3) for point in profile}), [0.065, 0.1])
+        self.assertEqual(tuple(map(len, joints.build_wall_geometry(branch))), (12, 8))
+
+    def test_unequal_main_oblique_branch_falls_back_for_all(self):
+        members = self.make_t(angle=45.0, main_thickness=(130.0, 200.0))
+        self.assertTrue(all(joints.endpoint_joint_pair(wall, "START")[1] == "FALLBACK"
+                            for wall in members))
+
+    def test_step_t_reversal_endpoints_and_length_safety(self):
+        first, second, branch = self.make_t(
+            main_thickness=(200.0, 130.0), branch_thickness=200.0,
+            endpoints=("END", "START", "END"),
+        )
+        profile, status = joints.endpoint_joint_profile(branch, "END")
+        self.assertEqual((status, len(profile)), ("T_BRANCH", 4))
+        self.assertEqual(sorted({round(abs(point[1]), 3) for point in profile}), [0.065, 0.1])
+        for lengths in ((0.09, 2.0, 2.0), (2.0, 0.09, 2.0), (2.0, 2.0, 0.09)):
+            walls = self.make_t(main_thickness=(130.0, 200.0), branch_thickness=200.0,
+                                branch_length=lengths[2])
+            for wall, length in zip(walls[:2], lengths[:2]):
+                direction = joints.endpoint_data(wall, "START")[1]
+                wall.jhm_wall.end = (direction[0] * length, direction[1] * length, 0.0)
+            self.assertTrue(all(joints.endpoint_joint_pair(wall, "START")[1] == "FALLBACK"
+                                for wall in walls))
 
     def test_position_mismatch_falls_back_for_all(self):
         members = self.make_t()
@@ -413,12 +441,76 @@ class CrossMathTests(unittest.TestCase):
         shallow = self.make_cross(angles=(0.0, 180.0, 2.5, 182.5))
         self.assertEqual(self.statuses(shallow), ("FALLBACK",) * 4)
 
-    def test_through_must_match_but_butts_may_differ(self):
+    def test_orthogonal_unequal_through_steps_and_butts_may_differ(self):
         unequal_through = self.make_cross(thicknesses=(130.0, 200.0, 130.0, 130.0))
-        self.assertEqual(self.statuses(unequal_through), ("FALLBACK",) * 4)
+        self.assertEqual(self.statuses(unequal_through),
+                         ("CROSS_THROUGH", "CROSS_THROUGH", "CROSS_BUTT", "CROSS_BUTT"))
+        for wall in unequal_through[2:]:
+            profile, status = joints.endpoint_joint_profile(wall, "START")
+            self.assertEqual((status, len(profile)), ("CROSS_BUTT", 4))
+            self.assertEqual(tuple(map(len, joints.build_wall_geometry(wall))), (12, 8))
         unequal_butts = self.make_cross(thicknesses=(130.0, 130.0, 130.0, 200.0))
         self.assertEqual(self.statuses(unequal_butts),
                          ("CROSS_THROUGH", "CROSS_THROUGH", "CROSS_BUTT", "CROSS_BUTT"))
+
+    def test_unequal_through_oblique_cross_falls_back(self):
+        walls = self.make_cross(angles=(0.0, 180.0, 45.0, 225.0),
+                                thicknesses=(130.0, 200.0, 130.0, 130.0))
+        self.assertEqual(self.statuses(walls), ("FALLBACK",) * 4)
+
+    def test_step_cross_start_end_order_caller_and_length_safety(self):
+        endpoints = ("END", "START", "END", "START")
+        walls = self.make_cross(endpoints=endpoints,
+                                thicknesses=(200.0, 130.0, 130.0, 200.0))
+        expected = ("CROSS_THROUGH", "CROSS_THROUGH", "CROSS_BUTT", "CROSS_BUTT")
+        for order in (list(zip(walls, endpoints)), list(reversed(list(zip(walls, endpoints))))):
+            for wall, member_endpoint in order:
+                wall.members[member_endpoint] = list(order)
+            self.assertEqual(self.statuses(walls, endpoints), expected)
+            for wall, member_endpoint in order:
+                self.assertIsNotNone(joints.calculate_cross_step_solution(wall, member_endpoint))
+        for lengths in ((0.05, 2.0, 2.0, 2.0), (2.0, 0.05, 2.0, 2.0),
+                        (2.0, 2.0, 0.09, 2.0)):
+            unsafe = self.make_cross(thicknesses=(130.0, 200.0, 130.0, 130.0),
+                                     lengths=lengths)
+            self.assertEqual(self.statuses(unsafe), ("FALLBACK",) * 4)
+
+
+class PolygonAndExtrusionTests(unittest.TestCase):
+    make_cross = CrossMathTests.make_cross
+    statuses = CrossMathTests.statuses
+
+    def test_variable_simple_polygons_and_invalid_contacts(self):
+        self.assertTrue(joints.validate_lower_polygon(
+            ((0, 1), (0, -1), (2, -1), (2, 1))))
+        self.assertTrue(joints.validate_lower_polygon(
+            ((.1, .1), (.1, 0), (.065, 0), (.065, -.1),
+             (1.9, -.1), (1.9, 0), (1.935, 0), (1.935, .1))))
+        self.assertFalse(joints.validate_lower_polygon(
+            ((0, 0), (2, 0), (1, 1), (1, 0), (0, 1))))
+        self.assertFalse(joints.validate_lower_polygon(
+            ((0, 0), (3, 0), (3, 1), (1, 1), (2, 1), (0, 1))))
+        self.assertFalse(joints.validate_lower_polygon(
+            ((0, 0), (1, 0), (1, 0), (1, 1), (0, 1))))
+
+    def test_generic_extrusion_counts_indices_and_finiteness(self):
+        wall = Wall((0, 0), (2, 0))
+        geometry = joints.build_wall_geometry(wall)
+        self.assertEqual(tuple(map(len, geometry)), (8, 6))
+        original = joints.endpoint_joint_profile
+        profiles = {
+            "START": (((.1, .1), (.1, 0), (.065, 0), (.065, -.1)), "T_BRANCH"),
+            "END": (((1.9, -.1), (1.9, 0), (1.935, 0), (1.935, .1)), "T_BRANCH"),
+        }
+        try:
+            joints.endpoint_joint_profile = lambda _wall, endpoint: profiles[endpoint]
+            geometry = joints.build_wall_geometry(wall)
+        finally:
+            joints.endpoint_joint_profile = original
+        self.assertEqual(tuple(map(len, geometry)), (16, 10))
+        vertices, faces = geometry
+        self.assertTrue(all(math.isfinite(value) for vertex in vertices for value in vertex))
+        self.assertTrue(all(0 <= index < len(vertices) for face in faces for index in face))
 
     def test_very_short_butt_falls_back_for_all(self):
         walls = self.make_cross(lengths=(2.0, 2.0, 0.04, 2.0))
