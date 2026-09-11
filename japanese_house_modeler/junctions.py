@@ -118,10 +118,13 @@ def classify_directions(directions):
         (((0, 2), (1, 3))),
         (((0, 3), (1, 2))),
     )
-    if any(
-        _is_opposite(angles[first_pair]) and _is_opposite(angles[second_pair])
-        for first_pair, second_pair in pairings
-    ):
+    candidates = []
+    for pairing in pairings:
+        first_pair, second_pair = pairing
+        if (_is_opposite(angles[first_pair])
+                and _is_opposite(angles[second_pair])):
+            candidates.append(pairing)
+    if len(candidates) == 1:
         return JunctionClassification(CROSS, member_count, None)
     return JunctionClassification(FOUR_WAY, member_count, None)
 

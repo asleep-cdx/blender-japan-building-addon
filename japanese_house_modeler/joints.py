@@ -6,7 +6,7 @@ import bpy
 
 from .connections import is_valid_wall_object, junction_members
 from .junctions import (
-    CONTINUATION, CORNER, CROSS, ISOLATED, T_JUNCTION, classify_junction,
+    CONTINUATION, CORNER, CROSS, INVALID, ISOLATED, T_JUNCTION, classify_junction,
     cross_junction_pairs, t_junction_roles,
 )
 
@@ -21,6 +21,7 @@ _T_MAIN_THICKNESS_TOLERANCE_MM = 1.0e-6
 _T_PARAMETER_TOLERANCE_M = 1.0e-9
 _T_MAIN_COLLINEAR_TOLERANCE = 1.0e-6
 _CROSS_PAIR_COLLINEAR_TOLERANCE = 1.0e-6
+_CONTINUATION_COLLINEAR_TOLERANCE = 1.0e-6
 _CROSS_THROUGH_THICKNESS_TOLERANCE_MM = 1.0e-6
 _CROSS_PARAMETER_TOLERANCE_M = 1.0e-9
 _MAX_CROSS_TRIM_FACTOR = 10.0
@@ -75,6 +76,35 @@ def square_endpoint_pair(wall_object, endpoint):
         return None
     point, _direction, normal, half_width = data
     return _add(point, normal, half_width), _add(point, normal, -half_width)
+
+
+def calculate_continuation_solution(wall_object, endpoint):
+    """Validate that a classified continuation is safe for real Mesh output."""
+    classification = classify_junction(wall_object, endpoint)
+    if classification.key != CONTINUATION or classification.member_count != 2:
+        return None
+    try:
+        members = tuple(junction_members(wall_object, endpoint))
+    except (AttributeError, ReferenceError, TypeError, ValueError):
+        return None
+    if len(members) != 2:
+        return None
+    data = [endpoint_data(*member) for member in members]
+    if any(item is None for item in data):
+        return None
+    if any(not has_identity_transform(member[0]) for member in members):
+        return None
+    if _distance(data[0][0], data[1][0]) > _JOINT_POSITION_TOLERANCE_M:
+        return None
+    first_direction, second_direction = data[0][1], data[1][1]
+    cross = (first_direction[0] * second_direction[1]
+             - first_direction[1] * second_direction[0])
+    dot = (first_direction[0] * second_direction[0]
+           + first_direction[1] * second_direction[1])
+    if (not math.isfinite(cross) or not math.isfinite(dot)
+            or abs(cross) > _CONTINUATION_COLLINEAR_TOLERANCE or dot >= 0.0):
+        return None
+    return members
 
 
 def line_intersection(point, direction, other_point, other_direction):
@@ -731,7 +761,10 @@ def endpoint_joint_profile(wall_object, endpoint):
     if classification.key == ISOLATED:
         return square, "ISOLATED"
     if classification.key == CONTINUATION and classification.member_count == 2:
-        return square, "CONTINUATION"
+        status = ("CONTINUATION" if calculate_continuation_solution(
+            wall_object, endpoint
+        ) is not None else "FALLBACK")
+        return square, status
     if classification.key == T_JUNCTION and classification.member_count == 3:
         solution = calculate_t_solution(wall_object, endpoint)
         if solution is None:
@@ -762,6 +795,8 @@ def endpoint_joint_profile(wall_object, endpoint):
         for member, trim_pair in butt_trims:
             if member[0] is current[0] and member[1] == current[1]:
                 return trim_pair, "CROSS_BUTT"
+        return square, "FALLBACK"
+    if classification.key == INVALID:
         return square, "FALLBACK"
     if classification.key != CORNER or classification.member_count != 2:
         return square, "UNSUPPORTED"

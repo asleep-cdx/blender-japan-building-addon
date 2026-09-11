@@ -42,6 +42,13 @@ joints = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = joints
 spec.loader.exec_module(joints)
 
+alignment_spec = importlib.util.spec_from_file_location(
+    f"{PACKAGE}.drawing_alignment", ROOT / PACKAGE / "drawing_alignment.py"
+)
+alignment = importlib.util.module_from_spec(alignment_spec)
+sys.modules[alignment_spec.name] = alignment
+alignment_spec.loader.exec_module(alignment)
+
 
 IDENTITY = tuple(
     tuple(1.0 if row == column else 0.0 for column in range(4))
@@ -407,11 +414,12 @@ class CrossMathTests(unittest.TestCase):
         self.assertEqual(self.statuses(walls),
                          ("CROSS_THROUGH", "CROSS_THROUGH", "CROSS_BUTT", "CROSS_BUTT"))
 
-    def test_ambiguous_collinear_cross_falls_back(self):
+    def test_ambiguous_collinear_four_way_is_unsupported(self):
         walls = self.make_cross(angles=(0.0, 180.0, 0.0, 180.0))
-        self.assertEqual(junctions.classify_junction(walls[0], "START").key, "CROSS")
+        self.assertEqual(junctions.classify_junction(walls[0], "START").key,
+                         "FOUR_WAY")
         self.assertIsNone(junctions.cross_junction_pairs(walls[0], "START"))
-        self.assertEqual(self.statuses(walls), ("FALLBACK",) * 4)
+        self.assertEqual(self.statuses(walls), ("UNSUPPORTED",) * 4)
 
     def test_exact_pairs_valid_but_classified_near_opposite_falls_back(self):
         exact = self.make_cross()
@@ -703,6 +711,146 @@ class AngledClippingFoundationTests(unittest.TestCase):
         )[0] for index in range(4)))
         self.assertTrue(all(joints.endpoint_joint_pair(wall, "START")[1] == "FALLBACK"
                             for wall in walls))
+
+
+class Build04HSpecialJunctionTests(unittest.TestCase):
+    @staticmethod
+    def connect_all(walls):
+        members = [(wall, "START") for wall in walls]
+        for wall in walls:
+            wall.members["START"] = list(members)
+
+    def test_cross_requires_one_unique_opposite_pairing(self):
+        unique = [wall_from_junction(angle) for angle in (0, 180, 90, 270)]
+        self.connect_all(unique)
+        self.assertEqual(junctions.classify_junction(unique[0], "START").key, "CROSS")
+        self.assertIsNotNone(junctions.cross_junction_pairs(unique[0], "START"))
+        duplicate = [wall_from_junction(angle) for angle in (0, 180, 0, 180)]
+        self.connect_all(duplicate)
+        self.assertEqual(junctions.classify_junction(duplicate[0], "START").key,
+                         "FOUR_WAY")
+        self.assertIsNone(junctions.cross_junction_pairs(duplicate[0], "START"))
+        arbitrary = [wall_from_junction(angle) for angle in (0, 180, 45, 90)]
+        self.connect_all(arbitrary)
+        self.assertEqual(junctions.classify_junction(arbitrary[0], "START").key,
+                         "FOUR_WAY")
+
+    def test_unsupported_types_use_square_profiles(self):
+        cases = ((0, 0), (0, 120, 240), (0, 180, 45, 90),
+                 (0, 72, 144, 216, 288))
+        expected = ("OVERLAP", "THREE_WAY", "FOUR_WAY", "MULTI")
+        for angles, key in zip(cases, expected):
+            with self.subTest(key=key):
+                walls = [wall_from_junction(angle) for angle in angles]
+                self.connect_all(walls)
+                for wall in walls:
+                    self.assertEqual(junctions.classify_junction(wall, "START").key, key)
+                    profile, status = joints.endpoint_joint_profile(wall, "START")
+                    self.assertEqual(status, "UNSUPPORTED")
+                    self.assertEqual(profile, joints.square_endpoint_pair(wall, "START"))
+                    self.assertIsNotNone(joints.build_wall_geometry(wall))
+
+    def test_continuation_mesh_safety_and_unequal_thickness(self):
+        for endpoints in (("START", "START"), ("START", "END")):
+            first = wall_from_junction(0, endpoints[0], thickness=130)
+            second = wall_from_junction(180, endpoints[1], thickness=200)
+            connect(first, endpoints[0], second, endpoints[1])
+            self.assertEqual(joints.endpoint_joint_profile(first, endpoints[0])[1],
+                             "CONTINUATION")
+            self.assertIsNotNone(joints.build_wall_geometry(first))
+        first, second = wall_from_junction(0), wall_from_junction(179.5)
+        connect(first, "START", second, "START")
+        self.assertEqual(junctions.classify_junction(first, "START").key,
+                         "CONTINUATION")
+        self.assertEqual(joints.endpoint_joint_profile(first, "START")[1], "FALLBACK")
+        first, second = wall_from_junction(0), wall_from_junction(180, origin=(2e-6, 0))
+        connect(first, "START", second, "START")
+        self.assertEqual(joints.endpoint_joint_profile(first, "START")[1], "FALLBACK")
+        second.jhm_wall.start = (0.0, 0.0, 0.0)
+        changed = [list(row) for row in IDENTITY]
+        changed[0][0] = 2.0
+        second.matrix_basis = tuple(tuple(row) for row in changed)
+        self.assertEqual(joints.endpoint_joint_profile(first, "START")[1], "FALLBACK")
+
+    def test_invalid_is_fallback_not_unsupported(self):
+        valid, invalid = wall_from_junction(0), Wall((0, 0), (0, 0))
+        connect(valid, "START", invalid, "START")
+        self.assertEqual(junctions.classify_junction(valid, "START").key, "INVALID")
+        profile, status = joints.endpoint_joint_profile(valid, "START")
+        self.assertEqual(status, "FALLBACK")
+        self.assertEqual(profile, joints.square_endpoint_pair(valid, "START"))
+
+    def test_supported_junctions_return_after_unsupported_member_is_removed(self):
+        t_walls = [wall_from_junction(angle) for angle in (0, 180, 90)]
+        self.connect_all(t_walls)
+        self.assertEqual(junctions.classify_junction(t_walls[0], "START").key,
+                         "T_JUNCTION")
+        extra = wall_from_junction(45)
+        self.connect_all(t_walls + [extra])
+        self.assertTrue(all(joints.endpoint_joint_profile(wall, "START")[1]
+                            == "UNSUPPORTED" for wall in t_walls + [extra]))
+        self.connect_all(t_walls)
+        self.assertEqual(joints.endpoint_joint_profile(t_walls[2], "START")[1],
+                         "T_BRANCH")
+
+        cross_walls = [wall_from_junction(angle) for angle in (0, 180, 90, 270)]
+        self.connect_all(cross_walls)
+        fifth = wall_from_junction(45)
+        self.connect_all(cross_walls + [fifth])
+        self.assertTrue(all(joints.endpoint_joint_profile(wall, "START")[1]
+                            == "UNSUPPORTED" for wall in cross_walls + [fifth]))
+        self.connect_all(cross_walls)
+        statuses = [joints.endpoint_joint_profile(wall, "START")[1]
+                    for wall in cross_walls]
+        self.assertEqual(statuses.count("CROSS_THROUGH"), 2)
+        self.assertEqual(statuses.count("CROSS_BUTT"), 2)
+
+
+class ExtensionAlignmentTests(unittest.TestCase):
+    def test_projects_both_sides_at_arbitrary_angles(self):
+        for degrees in (15, 45):
+            axis = (math.cos(math.radians(degrees)), math.sin(math.radians(degrees)))
+            end = (axis[0] * 2, axis[1] * 2)
+            before = alignment.project_to_wall_extension((-axis[0], -axis[1]),
+                                                          (0, 0), end)
+            after = alignment.project_to_wall_extension((axis[0] * 3, axis[1] * 3),
+                                                         (0, 0), end)
+            self.assertEqual(before.side, "START")
+            self.assertEqual(after.side, "END")
+            assert_points_equal(self, before.point, (-axis[0], -axis[1]))
+            assert_points_equal(self, after.point, (axis[0] * 3, axis[1] * 3))
+
+    def test_segment_and_boundary_are_not_extension_targets(self):
+        for point in ((0, 0), (1, 0), (2, 0)):
+            self.assertIsNone(alignment.project_to_wall_extension(
+                point, (0, 0), (2, 0)
+            ))
+
+    def test_invalid_canonical_data_is_rejected(self):
+        self.assertIsNone(alignment.project_to_wall_extension((1, 1), (0, 0), (0, 0)))
+        self.assertIsNone(alignment.project_to_wall_extension(
+            (1, 1), (math.nan, 0), (2, 0)
+        ))
+
+    def test_extension_tie_break_key_uses_only_canonical_geometry(self):
+        first = alignment.project_to_wall_extension((-1, 0.25), (0, 0), (2, 0))
+        second = alignment.project_to_wall_extension((-1, -0.25), (0, 0), (2, 0))
+        self.assertEqual(alignment.extension_geometry_key(first),
+                         alignment.extension_geometry_key(second))
+        diagonal = alignment.project_to_wall_extension((-1, -1), (0, 0), (2, 2))
+        self.assertNotEqual(alignment.extension_geometry_key(first),
+                            alignment.extension_geometry_key(diagonal))
+
+    def test_axis_candidate_combines_x_and_y_before_distance_comparison(self):
+        raw = (10, 20, 0)
+        candidate = alignment.combined_axis_alignment(
+            raw, x_reference=(4, 999, 0), y_reference=(999, 12, 0)
+        )
+        self.assertEqual(candidate, (4.0, 12.0, 0.0))
+        self.assertEqual(math.dist(raw, candidate), 10.0)
+        # An extension 9 px away beats the actual combined candidate even
+        # though it would not beat the individual 6 px X displacement.
+        self.assertLess(9.0, math.dist(raw, candidate))
 
 
 if __name__ == "__main__":

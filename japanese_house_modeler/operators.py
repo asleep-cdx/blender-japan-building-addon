@@ -14,7 +14,12 @@ from .connections import (
     restore_topology,
     snapshot_topology,
 )
-from .joints import affected_walls, merge_affected, regenerate_wall_meshes
+from .drawing_alignment import (
+    combined_axis_alignment, extension_geometry_key, project_to_wall_extension,
+)
+from .joints import (
+    affected_walls, has_identity_transform, merge_affected, regenerate_wall_meshes,
+)
 
 
 _MIN_WALL_LENGTH_M = 1e-6
@@ -70,6 +75,7 @@ class JHM_OT_create_wall(bpy.types.Operator):
         self._start_snap_target_endpoint = None
         self._x_align_reference = None
         self._y_align_reference = None
+        self._extension_align_reference = None
         self._start_snapped = False
         self._shift_held = bool(event.shift)
         self._draw_handle = bpy.types.SpaceView3D.draw_handler_add(
@@ -227,6 +233,29 @@ class JHM_OT_create_wall(bpy.types.Operator):
     def _clear_alignment(self):
         self._x_align_reference = None
         self._y_align_reference = None
+        self._extension_align_reference = None
+
+    def _visible_extension_walls(self):
+        """Yield visible identity-transform Walls with valid canonical axes."""
+        for wall_object in self._view_layer.objects:
+            if wall_object is getattr(self, "_excluded_wall_object", None):
+                continue
+            wall = getattr(wall_object, "jhm_wall", None)
+            if wall is None or not wall.is_wall or not has_identity_transform(wall_object):
+                continue
+            if not wall_object.visible_get(
+                view_layer=self._view_layer, viewport=self._space_data
+            ):
+                continue
+            try:
+                start, end = Vector(wall.start), Vector(wall.end)
+            except (AttributeError, TypeError, ValueError):
+                continue
+            axis = end - start
+            if (not all(math.isfinite(value) for value in (*start, *end))
+                    or axis.length <= _MIN_WALL_LENGTH_M):
+                continue
+            yield wall_object, start, end
 
     def _screen_distance(self, first, second):
         first_2d = view3d_utils.location_3d_to_region_2d(
@@ -261,14 +290,41 @@ class JHM_OT_create_wall(bpy.types.Operator):
                 if best_y is None or y_distance < best_y[0]:
                     best_y = (y_distance, endpoint.copy())
 
-        candidate = raw_endpoint.copy()
+        best_extension = None
+        for _wall_object, start, end in self._visible_extension_walls():
+            projection = project_to_wall_extension(raw_endpoint, start, end)
+            if projection is None:
+                continue
+            projected = Vector(projection.point)
+            distance = self._screen_distance(raw_endpoint, projected)
+            if distance is None or distance > _ALIGN_DISTANCE_PX:
+                continue
+            stable_key = extension_geometry_key(projection)
+            candidate = (distance, stable_key, projected,
+                         Vector(projection.reference_endpoint))
+            if best_extension is None or candidate[:2] < best_extension[:2]:
+                best_extension = candidate
+
+        axis_candidate = Vector(combined_axis_alignment(
+            raw_endpoint,
+            best_x[1] if best_x is not None else None,
+            best_y[1] if best_y is not None else None,
+        ))
+        axis_distance = (
+            self._screen_distance(raw_endpoint, axis_candidate)
+            if best_x is not None or best_y is not None
+            else None
+        )
+        if (best_extension is not None
+                and (axis_distance is None or best_extension[0] <= axis_distance)):
+            self._extension_align_reference = best_extension[3]
+            return best_extension[2]
+
         if best_x is not None:
             self._x_align_reference = best_x[1]
-            candidate.x = best_x[1].x
         if best_y is not None:
             self._y_align_reference = best_y[1]
-            candidate.y = best_y[1].y
-        return candidate
+        return axis_candidate
 
     def resolve_endpoint_candidate(self, start_point, raw_endpoint):
         """Combine alignment with the optional 15-degree Shift constraint."""
@@ -510,6 +566,8 @@ class JHM_OT_create_wall(bpy.types.Operator):
             references.append(self._x_align_reference)
         if self._y_align_reference is not None:
             references.append(self._y_align_reference)
+        if self._extension_align_reference is not None:
+            references.append(self._extension_align_reference)
         if not references:
             return
         owns_gpu_state = shader is None
@@ -678,6 +736,7 @@ class JHM_OT_move_wall_endpoint(bpy.types.Operator):
         self._snap_target_endpoint = None
         self._x_align_reference = None
         self._y_align_reference = None
+        self._extension_align_reference = None
         self._start_snapped = False
         self._shift_held = bool(event.shift)
         self._draw_handle = bpy.types.SpaceView3D.draw_handler_add(
@@ -791,6 +850,7 @@ class JHM_OT_move_wall_endpoint(bpy.types.Operator):
     _xy_plane_point = JHM_OT_create_wall._xy_plane_point
     snap_endpoint_candidate = JHM_OT_create_wall.snap_endpoint_candidate
     _visible_wall_endpoints = JHM_OT_create_wall._visible_wall_endpoints
+    _visible_extension_walls = JHM_OT_create_wall._visible_extension_walls
     _clear_alignment = JHM_OT_create_wall._clear_alignment
     _screen_distance = JHM_OT_create_wall._screen_distance
     _resolve_free_alignment = JHM_OT_create_wall._resolve_free_alignment
