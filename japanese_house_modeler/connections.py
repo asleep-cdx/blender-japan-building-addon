@@ -41,13 +41,30 @@ def is_valid_connection(connection):
         return False
 
 
+def is_reciprocal_connection(source_object, source_endpoint, connection):
+    """Validate one edge and directly find its reverse without recursion."""
+    if not is_valid_connection(connection):
+        return False
+    try:
+        target_object = connection.target_object
+        target_endpoint = connection.target_endpoint
+        return any(
+            reverse.target_object is source_object
+            and reverse.target_endpoint == source_endpoint
+            for reverse in connection_collection(target_object, target_endpoint)
+            if is_valid_connection(reverse)
+        )
+    except (ReferenceError, ValueError):
+        return False
+
+
 def valid_connection_count(wall_object, endpoint):
     """Count only live, managed Wall targets (safe for UI drawing)."""
     try:
         return sum(
             1
             for connection in connection_collection(wall_object, endpoint)
-            if is_valid_connection(connection)
+            if is_reciprocal_connection(wall_object, endpoint, connection)
         )
     except (ReferenceError, ValueError):
         return 0
@@ -57,6 +74,34 @@ def _purge_invalid(collection):
     for index in range(len(collection) - 1, -1, -1):
         if not is_valid_connection(collection[index]):
             collection.remove(index)
+
+
+def cleanup_untrusted_connections(wall_object, endpoints=("START", "END")):
+    """Remove stale, malformed and one-sided edges; return affected live peers."""
+    peers = []
+    for endpoint in endpoints:
+        collection = connection_collection(wall_object, endpoint)
+        for index in range(len(collection) - 1, -1, -1):
+            connection = collection[index]
+            if is_reciprocal_connection(wall_object, endpoint, connection):
+                target = connection.target_object
+                if target not in peers:
+                    peers.append(target)
+            else:
+                collection.remove(index)
+    return peers
+
+
+def topology_is_consistent(wall_object):
+    """Return whether all stored edges on a managed Wall are live and reciprocal."""
+    try:
+        return all(
+            is_reciprocal_connection(wall_object, endpoint, connection)
+            for endpoint in _ENDPOINTS
+            for connection in connection_collection(wall_object, endpoint)
+        )
+    except (ReferenceError, ValueError):
+        return False
 
 
 def _contains(collection, target_object, target_endpoint):
@@ -134,7 +179,9 @@ def transfer_endpoint_connections(source_object, source_endpoint,
     targets = [
         (connection.target_object, connection.target_endpoint)
         for connection in connection_collection(source_object, source_endpoint)
-        if is_valid_connection(connection)
+        if is_reciprocal_connection(
+            source_object, source_endpoint, connection
+        )
     ]
     detach_endpoint(source_object, source_endpoint)
     for target_object, target_endpoint in targets:
@@ -159,7 +206,7 @@ def junction_members(target_object, target_endpoint):
         members.append((wall_object, endpoint))
         collection = connection_collection(wall_object, endpoint)
         for connection in collection:
-            if is_valid_connection(connection):
+            if is_reciprocal_connection(wall_object, endpoint, connection):
                 pending.append(
                     (connection.target_object, connection.target_endpoint)
                 )

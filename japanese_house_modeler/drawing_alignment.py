@@ -6,6 +6,7 @@ from collections import namedtuple
 
 _MIN_WALL_LENGTH_M = 1.0e-6
 _EXTENSION_BOUNDARY_EPSILON_M = 1.0e-9
+_MIN_SPLIT_SEGMENT_M = 0.001
 
 ExtensionProjection = namedtuple(
     "ExtensionProjection", ("point", "reference_endpoint", "axis", "side")
@@ -38,10 +39,74 @@ def project_to_wall_segment(raw_point, start, end):
     return SegmentProjection(point, parameter, length, (*axis, 0.0))
 
 
+def is_safe_split_projection(projection, threshold=_MIN_SPLIT_SEGMENT_M):
+    """Require both child segments to be strictly longer than ``threshold``."""
+    try:
+        parameter = float(projection.parameter)
+        length = float(projection.length)
+        threshold = float(threshold)
+    except (AttributeError, TypeError, ValueError):
+        return False
+    return (all(math.isfinite(value) for value in (parameter, length, threshold))
+            and threshold >= 0.0
+            and parameter > threshold
+            and length - parameter > threshold)
+
+
+def constrained_direction(start, raw_point, step_degrees=15.0):
+    """Return the nearest angular-step forward unit direction in canonical XY."""
+    try:
+        dx = float(raw_point[0]) - float(start[0])
+        dy = float(raw_point[1]) - float(start[1])
+        step = math.radians(float(step_degrees))
+    except (IndexError, TypeError, ValueError):
+        return None
+    if not all(math.isfinite(value) for value in (dx, dy, step)) or step <= 0.0:
+        return None
+    if math.hypot(dx, dy) <= _MIN_WALL_LENGTH_M:
+        return None
+    angle = round(math.atan2(dy, dx) / step) * step
+    return math.cos(angle), math.sin(angle), 0.0
+
+
+def intersect_forward_ray_segment(origin, direction, start, end):
+    """Intersect a forward XY ray with a safely interior Wall segment."""
+    try:
+        ox, oy = float(origin[0]), float(origin[1])
+        rx, ry = float(direction[0]), float(direction[1])
+        sx, sy = float(start[0]), float(start[1])
+        ex, ey = float(end[0]), float(end[1])
+    except (IndexError, TypeError, ValueError):
+        return None
+    if not all(math.isfinite(v) for v in (ox, oy, rx, ry, sx, sy, ex, ey)):
+        return None
+    ray_length = math.hypot(rx, ry)
+    segment_length = math.hypot(ex - sx, ey - sy)
+    if ray_length <= _MIN_WALL_LENGTH_M or segment_length <= _MIN_WALL_LENGTH_M:
+        return None
+    rx, ry = rx / ray_length, ry / ray_length
+    dx, dy = ex - sx, ey - sy
+    cross = rx * dy - ry * dx
+    if abs(cross) <= _EXTENSION_BOUNDARY_EPSILON_M:
+        return None
+    qx, qy = sx - ox, sy - oy
+    ray_parameter = (qx * dy - qy * dx) / cross
+    segment_fraction = (qx * ry - qy * rx) / cross
+    if ray_parameter < 0.0:
+        return None
+    projection = SegmentProjection(
+        (ox + ray_parameter * rx, oy + ray_parameter * ry, 0.0),
+        segment_fraction * segment_length,
+        segment_length,
+        (dx / segment_length, dy / segment_length, 0.0),
+    )
+    return projection if is_safe_split_projection(projection) else None
+
+
 def canonical_split_segments(start, end, point):
     """Return deterministic START- and END-side canonical segment endpoints."""
     projection = project_to_wall_segment(point, start, end)
-    if projection is None:
+    if projection is None or not is_safe_split_projection(projection):
         return None
     return ((tuple(start), projection.point), (projection.point, tuple(end)))
 
@@ -84,6 +149,22 @@ def wall_axis_angle_degrees(start, end):
         return None
     angle = math.degrees(math.atan2(dy, dx)) % 180.0
     return 0.0 if math.isclose(angle, 180.0) else angle
+
+
+def wall_length_m(start, end):
+    """Derive Wall length only from canonical start/end XY coordinates."""
+    try:
+        dx = float(end[0]) - float(start[0])
+        dy = float(end[1]) - float(start[1])
+    except (IndexError, TypeError, ValueError):
+        return None
+    length = math.hypot(dx, dy)
+    return length if math.isfinite(length) and length > _MIN_WALL_LENGTH_M else None
+
+
+def endpoint_move_midpoint_valid(source, host, projection):
+    """Pure guard shared by endpoint-move preview and commit."""
+    return source is not host and is_safe_split_projection(projection)
 
 
 def project_to_wall_extension(raw_point, start, end):

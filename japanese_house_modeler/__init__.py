@@ -21,6 +21,8 @@ _CLASSES = (
     operators.JHM_OT_move_wall_endpoint,
     operators.JHM_OT_edit_wall_dimensions,
     operators.JHM_OT_rebuild_wall_joints,
+    operators.JHM_OT_repair_wall,
+    operators.JHM_OT_delete_wall,
     ui.JHM_PT_house_modeler,
 )
 

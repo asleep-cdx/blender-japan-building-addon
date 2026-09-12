@@ -9,20 +9,22 @@ from gpu_extras.batch import batch_for_shader
 from mathutils import Vector
 
 from .connections import (
-    attach_to_junction,
-    detach_endpoint,
+    attach_to_junction, cleanup_untrusted_connections,
+    detach_endpoint, is_valid_wall_object,
     restore_topology,
     snapshot_topology,
 )
 from .drawing_alignment import (
-    combined_axis_alignment, extension_geometry_key, project_to_wall_extension,
-    project_to_wall_segment, same_host_connection_forbidden,
+    combined_axis_alignment, constrained_direction, endpoint_move_midpoint_valid,
+    extension_geometry_key, intersect_forward_ray_segment, project_to_wall_extension,
+    is_safe_split_projection, project_to_wall_segment, same_host_connection_forbidden,
     select_unambiguous_candidate,
 )
 from .joints import (
     affected_walls, has_identity_transform, merge_affected, regenerate_wall_meshes,
 )
 from .wall_split import split_wall
+from .wall_state import drawing_candidate_eligible
 
 
 _MIN_WALL_LENGTH_M = 1e-6
@@ -227,7 +229,7 @@ class JHM_OT_create_wall(bpy.types.Operator):
         candidates = []
         for wall_object, start, end in self._visible_extension_walls():
             projection = project_to_wall_segment(raw_endpoint, start, end)
-            if projection is None:
+            if projection is None or not is_safe_split_projection(projection):
                 continue
             projected = Vector(projection.point)
             distance = self._screen_distance(raw_endpoint, projected)
@@ -243,6 +245,28 @@ class JHM_OT_create_wall(bpy.types.Operator):
         self._snap_target_endpoint = None
         return projected
 
+    def snap_constrained_segment_candidate(self, start_point, raw_endpoint):
+        """Snap to the unique host intersection on the current Shift ray."""
+        self._clear_segment_candidate()
+        direction = constrained_direction(start_point, raw_endpoint)
+        if direction is None:
+            return raw_endpoint
+        candidates = []
+        for wall_object, start, end in self._visible_extension_walls():
+            projection = intersect_forward_ray_segment(start_point, direction, start, end)
+            if projection is None:
+                continue
+            projected = Vector(projection.point)
+            distance = self._screen_distance(raw_endpoint, projected)
+            if distance is not None and distance <= _SEGMENT_SNAP_DISTANCE_PX:
+                candidates.append((distance, (wall_object, projection, projected)))
+        selected = select_unambiguous_candidate(candidates)
+        if selected is None:
+            return raw_endpoint
+        self._segment_target_object, self._segment_projection, projected = selected
+        self._segment_candidate = projected.copy()
+        return projected
+
     def _visible_wall_endpoints(self):
         """Yield saved endpoints which are visible in this viewport."""
         for wall_object in self._view_layer.objects:
@@ -251,8 +275,13 @@ class JHM_OT_create_wall(bpy.types.Operator):
             wall = getattr(wall_object, "jhm_wall", None)
             if wall is None or not wall.is_wall:
                 continue
-            if not wall_object.visible_get(
+            visible = wall_object.visible_get(
                 view_layer=self._view_layer, viewport=self._space_data
+            )
+            if not drawing_candidate_eligible(
+                True,
+                visible,
+                has_identity_transform(wall_object),
             ):
                 continue
 
@@ -285,10 +314,15 @@ class JHM_OT_create_wall(bpy.types.Operator):
             if wall_object is getattr(self, "_excluded_wall_object", None):
                 continue
             wall = getattr(wall_object, "jhm_wall", None)
-            if wall is None or not wall.is_wall or not has_identity_transform(wall_object):
+            if wall is None or not wall.is_wall:
                 continue
-            if not wall_object.visible_get(
+            visible = wall_object.visible_get(
                 view_layer=self._view_layer, viewport=self._space_data
+            )
+            if not drawing_candidate_eligible(
+                True,
+                visible,
+                has_identity_transform(wall_object),
             ):
                 continue
             try:
@@ -427,10 +461,14 @@ class JHM_OT_create_wall(bpy.types.Operator):
 
     def _resolve_final_endpoint(self, raw_endpoint):
         snapped_endpoint = self.snap_endpoint_candidate(raw_endpoint)
-        # Endpoint editing deliberately retains its Build 04-H behaviour.
         if (self._snap_candidate is None
                 and hasattr(self, "_start_segment_target_object")):
-            snapped_endpoint = self.snap_segment_candidate(raw_endpoint)
+            if self._shift_held:
+                snapped_endpoint = self.snap_constrained_segment_candidate(
+                    self._start_point, raw_endpoint
+                )
+            if self._segment_candidate is None:
+                snapped_endpoint = self.snap_segment_candidate(raw_endpoint)
         return self.resolve_endpoint_candidate(
             self._start_point, snapped_endpoint
         )
@@ -833,6 +871,10 @@ class JHM_OT_move_wall_endpoint(bpy.types.Operator):
         self._snap_candidate = None
         self._snap_target_object = None
         self._snap_target_endpoint = None
+        self._segment_candidate = None
+        self._segment_target_object = None
+        self._segment_projection = None
+        self._start_segment_target_object = None
         self._x_align_reference = None
         self._y_align_reference = None
         self._extension_align_reference = None
@@ -895,6 +937,9 @@ class JHM_OT_move_wall_endpoint(bpy.types.Operator):
         wall_object = self._wall_object
         wall = wall_object.jhm_wall
         topology = None
+        host = self._segment_target_object
+        host_old_end = tuple(host.jhm_wall.end) if host is not None else None
+        successor = None
         try:
             topology = snapshot_topology()
             old_members = affected_walls(wall_object, (self.endpoint,))
@@ -905,12 +950,21 @@ class JHM_OT_move_wall_endpoint(bpy.types.Operator):
                 wall.start = tuple(self._saved_start)
                 wall.end = tuple(candidate)
             detach_endpoint(wall_object, self.endpoint)
-            if self._snap_target_object is not None:
+            target_object = self._snap_target_object
+            target_endpoint = self._snap_target_endpoint
+            if host is not None:
+                if not endpoint_move_midpoint_valid(
+                    wall_object, host, self._segment_projection
+                ):
+                    raise ValueError("分割位置がWall端点に近すぎます。")
+                successor = split_wall(host, self._segment_projection.point)
+                target_object, target_endpoint = host, "END"
+            if target_object is not None:
                 attach_to_junction(
                     wall_object,
                     self.endpoint,
-                    self._snap_target_object,
-                    self._snap_target_endpoint,
+                    target_object,
+                    target_endpoint,
                 )
             # The moved core direction also changes a miter at the opposite end.
             new_members = affected_walls(wall_object)
@@ -924,6 +978,13 @@ class JHM_OT_move_wall_endpoint(bpy.types.Operator):
             wall.end = tuple(self._saved_end)
             if topology is not None:
                 restore_topology(topology)
+            if successor is not None and is_valid_wall_object(successor):
+                failed_mesh = successor.data
+                bpy.data.objects.remove(successor, do_unlink=True)
+                if failed_mesh.users == 0:
+                    bpy.data.meshes.remove(failed_mesh)
+            if host is not None and is_valid_wall_object(host):
+                host.jhm_wall.end = host_old_end
             self.report({"ERROR"}, f"壁を更新できませんでした: {error}")
             return self._finish({"CANCELLED"})
 
@@ -948,6 +1009,9 @@ class JHM_OT_move_wall_endpoint(bpy.types.Operator):
     # Reuse Build 02-D's candidate resolution, geometry, and GPU drawing unchanged.
     _xy_plane_point = JHM_OT_create_wall._xy_plane_point
     snap_endpoint_candidate = JHM_OT_create_wall.snap_endpoint_candidate
+    snap_segment_candidate = JHM_OT_create_wall.snap_segment_candidate
+    snap_constrained_segment_candidate = JHM_OT_create_wall.snap_constrained_segment_candidate
+    _clear_segment_candidate = JHM_OT_create_wall._clear_segment_candidate
     _visible_wall_endpoints = JHM_OT_create_wall._visible_wall_endpoints
     _visible_extension_walls = JHM_OT_create_wall._visible_extension_walls
     _clear_alignment = JHM_OT_create_wall._clear_alignment
@@ -1100,9 +1164,98 @@ class JHM_OT_rebuild_wall_joints(bpy.types.Operator):
                 "このWallにはObject Transformがあります。接合を再生成できません。",
             )
             return {"CANCELLED"}
+        topology = snapshot_topology()
         try:
-            regenerate_wall_meshes(affected_walls(wall_object))
+            peers = cleanup_untrusted_connections(wall_object)
+            regenerate_wall_meshes(merge_affected(
+                affected_walls(wall_object), peers, [wall_object]
+            ))
         except Exception as error:
+            restore_topology(topology)
             self.report({"ERROR"}, f"接合を再生成できませんでした: {error}")
             return {"CANCELLED"}
+        return {"FINISHED"}
+
+
+class JHM_OT_repair_wall(bpy.types.Operator):
+    """Explicitly restore transform, trusted topology and derived mesh."""
+
+    bl_idname = "jhm.repair_wall"
+    bl_label = "管理状態へ復元"
+    bl_options = {"REGISTER", "UNDO"}
+
+    @classmethod
+    def poll(cls, context):
+        return (context.mode == "OBJECT"
+                and is_valid_wall_object(context.active_object))
+
+    def invoke(self, context, event):
+        return context.window_manager.invoke_confirm(self, event)
+
+    def draw(self, context):
+        self.layout.label(
+            text="保存済みのWall情報から管理状態を復元します。"
+        )
+        self.layout.label(text="Object Transformや手動Mesh編集は破棄されます。")
+
+    def execute(self, context):
+        wall_object = context.active_object
+        topology = snapshot_topology()
+        old_matrix = wall_object.matrix_basis.copy()
+        try:
+            peers = cleanup_untrusted_connections(wall_object)
+            wall_object.matrix_basis.identity()
+            regenerate_wall_meshes(merge_affected(
+                affected_walls(wall_object), peers, [wall_object]
+            ))
+        except Exception as error:
+            wall_object.matrix_basis = old_matrix
+            restore_topology(topology)
+            self.report({"ERROR"}, f"管理状態を復元できませんでした: {error}")
+            return {"CANCELLED"}
+        return {"FINISHED"}
+
+
+class JHM_OT_delete_wall(bpy.types.Operator):
+    """Detach a managed Wall before deleting its object and mesh."""
+
+    bl_idname = "jhm.delete_wall"
+    bl_label = "壁を削除"
+    bl_options = {"REGISTER", "UNDO"}
+
+    @classmethod
+    def poll(cls, context):
+        return (context.mode == "OBJECT"
+                and is_valid_wall_object(context.active_object))
+
+    def invoke(self, context, event):
+        return context.window_manager.invoke_confirm(self, event)
+
+    def draw(self, context):
+        self.layout.label(text="選択中のWallを削除しますか？")
+
+    def execute(self, context):
+        wall_object = context.active_object
+        topology = snapshot_topology()
+        survivors = merge_affected(
+            affected_walls(wall_object, ("START",)),
+            affected_walls(wall_object, ("END",)),
+        )
+        survivors = [item for item in survivors if item is not wall_object]
+        try:
+            detach_endpoint(wall_object, "START")
+            detach_endpoint(wall_object, "END")
+            regenerate_wall_meshes(survivors)
+        except Exception as error:
+            restore_topology(topology)
+            try:
+                regenerate_wall_meshes(merge_affected(survivors, [wall_object]))
+            except Exception:
+                pass
+            self.report({"ERROR"}, f"Wallを安全に削除できませんでした: {error}")
+            return {"CANCELLED"}
+        mesh = wall_object.data
+        bpy.data.objects.remove(wall_object, do_unlink=True)
+        if mesh.users == 0:
+            bpy.data.meshes.remove(mesh)
         return {"FINISHED"}

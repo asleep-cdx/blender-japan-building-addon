@@ -69,6 +69,20 @@ class EndpointTransferTests(unittest.TestCase):
         self.assertIs(target.target_object, destination)
         self.assertEqual(target.target_endpoint, "END")
 
+    def test_one_sided_connection_is_not_promoted_during_transfer(self):
+        source, destination, peer = self.walls(3)
+        copied = source.jhm_wall.end_connections.add()
+        copied.target_object = peer
+        copied.target_endpoint = "START"
+
+        connections.transfer_endpoint_connections(
+            source, "END", destination, "END"
+        )
+
+        self.assertEqual(len(source.jhm_wall.end_connections), 0)
+        self.assertEqual(len(destination.jhm_wall.end_connections), 0)
+        self.assertEqual(len(peer.jhm_wall.start_connections), 0)
+
     def test_multiple_connections_preserve_peer_edges_and_no_duplicates(self):
         source, destination, first, second = self.walls(4)
         connections.add_reciprocal(source, "END", first, "START")
@@ -97,6 +111,37 @@ class EndpointTransferTests(unittest.TestCase):
         self.assertEqual(connections.valid_connection_count(source, "END"), 1)
         self.assertEqual(connections.valid_connection_count(destination, "END"), 0)
         self.assertIs(peer.jhm_wall.start_connections[0].target_object, source)
+
+    def test_reciprocal_edge_is_trusted(self):
+        source, peer = self.walls(2)
+        connections.add_reciprocal(source, "START", peer, "END")
+        edge = source.jhm_wall.start_connections[0]
+        self.assertTrue(connections.is_reciprocal_connection(source, "START", edge))
+        self.assertTrue(connections.topology_is_consistent(source))
+
+    def test_shift_duplicate_one_sided_edge_is_not_trusted_and_is_cleaned(self):
+        source, peer = self.walls(2)
+        edge = source.jhm_wall.start_connections.add()
+        edge.target_object = peer
+        edge.target_endpoint = "END"
+        self.assertFalse(connections.is_reciprocal_connection(source, "START", edge))
+        self.assertFalse(connections.topology_is_consistent(source))
+        connections.cleanup_untrusted_connections(source)
+        self.assertEqual(len(source.jhm_wall.start_connections), 0)
+
+    def test_cleanup_preserves_complete_peer_graph(self):
+        source, first, second, stale = self.walls(4)
+        connections.add_reciprocal(source, "END", first, "START")
+        connections.add_reciprocal(source, "END", second, "START")
+        connections.add_reciprocal(first, "START", second, "START")
+        bad = source.jhm_wall.end_connections.add()
+        bad.target_object = stale
+        bad.target_endpoint = "START"
+        bpy.data.objects.remove(stale)
+        connections.cleanup_untrusted_connections(source)
+        self.assertEqual(connections.valid_connection_count(source, "END"), 2)
+        self.assertEqual(connections.valid_connection_count(first, "START"), 2)
+        self.assertEqual(connections.valid_connection_count(second, "START"), 2)
 
 
 if __name__ == "__main__":
