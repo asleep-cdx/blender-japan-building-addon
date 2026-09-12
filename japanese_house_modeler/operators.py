@@ -16,10 +16,13 @@ from .connections import (
 )
 from .drawing_alignment import (
     combined_axis_alignment, extension_geometry_key, project_to_wall_extension,
+    project_to_wall_segment, same_host_connection_forbidden,
+    select_unambiguous_candidate,
 )
 from .joints import (
     affected_walls, has_identity_transform, merge_affected, regenerate_wall_meshes,
 )
+from .wall_split import split_wall
 
 
 _MIN_WALL_LENGTH_M = 1e-6
@@ -29,6 +32,7 @@ _PREVIEW_LINE_WIDTH_PX = 1.5
 _PREVIEW_MARKER_RADIUS_PX = 5.5
 _PREVIEW_MARKER_SEGMENTS = 32
 _SNAP_DISTANCE_PX = 16.0
+_SEGMENT_SNAP_DISTANCE_PX = 12.0
 _ALIGN_DISTANCE_PX = 10.0
 _SNAP_HIGHLIGHT_RADIUS_PX = 9.0
 _SNAP_HIGHLIGHT_LINE_WIDTH_PX = 2.5
@@ -73,6 +77,11 @@ class JHM_OT_create_wall(bpy.types.Operator):
         self._snap_target_endpoint = None
         self._start_snap_target_object = None
         self._start_snap_target_endpoint = None
+        self._segment_candidate = None
+        self._segment_target_object = None
+        self._segment_projection = None
+        self._start_segment_target_object = None
+        self._start_segment_projection = None
         self._x_align_reference = None
         self._y_align_reference = None
         self._extension_align_reference = None
@@ -108,6 +117,7 @@ class JHM_OT_create_wall(bpy.types.Operator):
                 else:
                     self._end_candidate = None
                     self._snap_candidate = None
+                    self._clear_segment_candidate()
                     self._clear_alignment()
             self._tag_redraw()
             return {"RUNNING_MODAL"}
@@ -125,9 +135,14 @@ class JHM_OT_create_wall(bpy.types.Operator):
 
             if self._start_point is None:
                 self._start_point = self._resolve_start_candidate(point).copy()
-                self._start_snapped = self._snap_candidate is not None
+                self._start_snapped = (
+                    self._snap_candidate is not None
+                    or self._segment_candidate is not None
+                )
                 self._start_snap_target_object = self._snap_target_object
                 self._start_snap_target_endpoint = self._snap_target_endpoint
+                self._start_segment_target_object = self._segment_target_object
+                self._start_segment_projection = self._segment_projection
                 self._end_candidate = self._start_point.copy()
                 self._tag_redraw()
                 return {"RUNNING_MODAL"}
@@ -173,6 +188,8 @@ class JHM_OT_create_wall(bpy.types.Operator):
         self._snap_candidate = None
         self._snap_target_object = None
         self._snap_target_endpoint = None
+        if hasattr(self, "_start_segment_target_object"):
+            self._clear_segment_candidate()
         raw_2d = view3d_utils.location_3d_to_region_2d(
             self._region, self._region_data, raw_endpoint
         )
@@ -198,6 +215,33 @@ class JHM_OT_create_wall(bpy.types.Operator):
         if self._snap_candidate is not None:
             return self._snap_candidate
         return raw_endpoint
+
+    def _clear_segment_candidate(self):
+        self._segment_candidate = None
+        self._segment_target_object = None
+        self._segment_projection = None
+
+    def snap_segment_candidate(self, raw_endpoint):
+        """Return a unique closest visible canonical segment interior."""
+        self._clear_segment_candidate()
+        candidates = []
+        for wall_object, start, end in self._visible_extension_walls():
+            projection = project_to_wall_segment(raw_endpoint, start, end)
+            if projection is None:
+                continue
+            projected = Vector(projection.point)
+            distance = self._screen_distance(raw_endpoint, projected)
+            if distance is not None and distance <= _SEGMENT_SNAP_DISTANCE_PX:
+                candidates.append((distance, (wall_object, projection, projected)))
+        selected = select_unambiguous_candidate(candidates)
+        if selected is None:
+            return raw_endpoint
+        self._segment_target_object, self._segment_projection, projected = selected
+        self._segment_candidate = projected.copy()
+        self._snap_candidate = None
+        self._snap_target_object = None
+        self._snap_target_endpoint = None
+        return projected
 
     def _visible_wall_endpoints(self):
         """Yield saved endpoints which are visible in this viewport."""
@@ -273,6 +317,9 @@ class JHM_OT_create_wall(bpy.types.Operator):
         self._clear_alignment()
         if self._snap_candidate is not None:
             return snapped
+        segmented = self.snap_segment_candidate(raw_endpoint)
+        if self._segment_candidate is not None:
+            return segmented
         return self._resolve_free_alignment(raw_endpoint)
 
     def _resolve_free_alignment(self, raw_endpoint):
@@ -329,7 +376,8 @@ class JHM_OT_create_wall(bpy.types.Operator):
     def resolve_endpoint_candidate(self, start_point, raw_endpoint):
         """Combine alignment with the optional 15-degree Shift constraint."""
         self._clear_alignment()
-        if self._snap_candidate is not None:
+        if (self._snap_candidate is not None
+                or getattr(self, "_segment_candidate", None) is not None):
             return raw_endpoint
 
         if not self._shift_held:
@@ -379,6 +427,10 @@ class JHM_OT_create_wall(bpy.types.Operator):
 
     def _resolve_final_endpoint(self, raw_endpoint):
         snapped_endpoint = self.snap_endpoint_candidate(raw_endpoint)
+        # Endpoint editing deliberately retains its Build 04-H behaviour.
+        if (self._snap_candidate is None
+                and hasattr(self, "_start_segment_target_object")):
+            snapped_endpoint = self.snap_segment_candidate(raw_endpoint)
         return self.resolve_endpoint_candidate(
             self._start_point, snapped_endpoint
         )
@@ -434,9 +486,18 @@ class JHM_OT_create_wall(bpy.types.Operator):
             self.report({"WARNING"}, "壁の寸法が不正です。")
             return {"RUNNING_MODAL"}
 
+        if same_host_connection_forbidden(
+            self._start_segment_target_object, self._segment_target_object,
+            self._start_snap_target_object, self._snap_target_object,
+        ):
+            self.report({"WARNING"}, "同じWall上の2点を結ぶ壁は作成できません。")
+            return {"RUNNING_MODAL"}
+
         mesh = None
         wall_object = None
         topology = None
+        successors = []
+        saved_host_ends = []
         try:
             topology = snapshot_topology()
             vertices, faces = geometry
@@ -453,19 +514,38 @@ class JHM_OT_create_wall(bpy.types.Operator):
             wall.wall_thickness = self._wall_thickness_mm
             wall.wall_height = self._wall_height_mm
 
-            if self._start_snap_target_object is not None:
+            start_target = self._start_snap_target_object
+            start_endpoint = self._start_snap_target_endpoint
+            end_target = self._snap_target_object
+            end_target_endpoint = self._snap_target_endpoint
+            for side, host, projection in (
+                ("START", self._start_segment_target_object,
+                 self._start_segment_projection),
+                ("END", self._segment_target_object, self._segment_projection),
+            ):
+                if host is None:
+                    continue
+                saved_host_ends.append((host, tuple(host.jhm_wall.end)))
+                successor = split_wall(host, projection.point)
+                successors.append(successor)
+                if side == "START":
+                    start_target, start_endpoint = host, "END"
+                else:
+                    end_target, end_target_endpoint = host, "END"
+
+            if start_target is not None:
                 attach_to_junction(
                     wall_object,
                     "START",
-                    self._start_snap_target_object,
-                    self._start_snap_target_endpoint,
+                    start_target,
+                    start_endpoint,
                 )
-            if self._snap_target_object is not None:
+            if end_target is not None:
                 attach_to_junction(
                     wall_object,
                     "END",
-                    self._snap_target_object,
-                    self._snap_target_endpoint,
+                    end_target,
+                    end_target_endpoint,
                 )
 
             for selected in context.selected_objects:
@@ -473,10 +553,11 @@ class JHM_OT_create_wall(bpy.types.Operator):
             wall_object.select_set(True)
             context.view_layer.objects.active = wall_object
             # Keep the atomic batch as the transaction's final fallible mutation.
-            regenerate_wall_meshes(affected_walls(wall_object))
+            regenerate_wall_meshes(merge_affected(
+                affected_walls(wall_object),
+                *(affected_walls(item) for item in successors),
+            ))
         except Exception as error:
-            if topology is not None:
-                restore_topology(topology)
             if wall_object is not None:
                 failed_mesh = wall_object.data
                 bpy.data.objects.remove(wall_object, do_unlink=True)
@@ -484,6 +565,15 @@ class JHM_OT_create_wall(bpy.types.Operator):
                     bpy.data.meshes.remove(failed_mesh)
             elif mesh is not None:
                 bpy.data.meshes.remove(mesh)
+            for successor in reversed(successors):
+                successor_mesh = successor.data
+                bpy.data.objects.remove(successor, do_unlink=True)
+                if successor_mesh.users == 0:
+                    bpy.data.meshes.remove(successor_mesh)
+            for host, old_end in saved_host_ends:
+                host.jhm_wall.end = old_end
+            if topology is not None:
+                restore_topology(topology)
             self.report({"ERROR"}, f"壁を生成できませんでした: {error}")
             return self._finish({"CANCELLED"})
 
@@ -491,16 +581,24 @@ class JHM_OT_create_wall(bpy.types.Operator):
 
     def _draw_preview(self):
         if self._start_point is None:
-            if self._snap_candidate is not None:
-                self._draw_snap_highlight(self._snap_candidate)
+            if (self._snap_candidate is not None
+                    or getattr(self, "_segment_candidate", None) is not None):
+                self._draw_snap_highlight(
+                    self._snap_candidate if self._snap_candidate is not None
+                    else getattr(self, "_segment_candidate", None)
+                )
             elif self._end_candidate is not None:
                 self._draw_alignment_guides(self._end_candidate)
             return
         if self._end_candidate is None:
             return
         if not self._is_valid_wall_length(self._start_point, self._end_candidate):
-            if self._snap_candidate is not None:
-                self._draw_snap_highlight(self._snap_candidate)
+            if (self._snap_candidate is not None
+                    or getattr(self, "_segment_candidate", None) is not None):
+                self._draw_snap_highlight(
+                    self._snap_candidate if self._snap_candidate is not None
+                    else getattr(self, "_segment_candidate", None)
+                )
             return
 
         start_2d = view3d_utils.location_3d_to_region_2d(
@@ -547,7 +645,8 @@ class JHM_OT_create_wall(bpy.types.Operator):
                 self._draw_marker_ring(
                     shader, start_2d, _SNAP_HIGHLIGHT_RADIUS_PX
                 )
-            if self._snap_candidate is not None:
+            if (self._snap_candidate is not None
+                    or getattr(self, "_segment_candidate", None) is not None):
                 gpu.state.line_width_set(_SNAP_HIGHLIGHT_LINE_WIDTH_PX)
                 self._draw_marker_ring(
                     shader, end_2d, _SNAP_HIGHLIGHT_RADIUS_PX

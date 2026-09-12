@@ -128,6 +128,23 @@ def detach_endpoint(source_object, source_endpoint):
     _purge_invalid(collection)
 
 
+def transfer_endpoint_connections(source_object, source_endpoint,
+                                  destination_object, destination_endpoint):
+    """Move every valid reciprocal edge, preserving the peers' other edges."""
+    targets = [
+        (connection.target_object, connection.target_endpoint)
+        for connection in connection_collection(source_object, source_endpoint)
+        if is_valid_connection(connection)
+    ]
+    detach_endpoint(source_object, source_endpoint)
+    for target_object, target_endpoint in targets:
+        if is_valid_wall_object(target_object):
+            add_reciprocal(
+                destination_object, destination_endpoint,
+                target_object, target_endpoint,
+            )
+
+
 def junction_members(target_object, target_endpoint):
     """Collect the valid connected component containing a target endpoint."""
     pending = [(target_object, target_endpoint)]

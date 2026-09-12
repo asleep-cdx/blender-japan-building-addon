@@ -3,6 +3,7 @@
 import bpy
 
 from .connections import valid_connection_count
+from .drawing_alignment import wall_axis_angle_degrees
 from .junctions import classification_label, classify_junction
 from .joints import joint_status_label
 
@@ -37,6 +38,11 @@ class JHM_PT_house_modeler(bpy.types.Panel):
             wall = active_object.jhm_wall
             selected_box.label(text=f"壁厚: {wall.wall_thickness:.1f} mm")
             selected_box.label(text=f"壁高さ: {wall.wall_height:.1f} mm")
+            angle = wall_axis_angle_degrees(wall.start, wall.end)
+            selected_box.label(
+                text=(f"壁角度: {angle:.1f}°" if angle is not None
+                      else "壁角度: 判定不能")
+            )
             selected_box.separator()
             selected_box.label(
                 text=f"始点接続: {valid_connection_count(active_object, 'START')}"
