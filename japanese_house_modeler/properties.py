@@ -1,11 +1,8 @@
-"""Persistent Blender properties used by the Japanese House Modeler add-on."""
+"""Property definitions for the Japanese House Modeler add-on."""
 
 import bpy
 
 
-# Values are stored directly in millimetres so the add-on's UI consistently uses
-# mm regardless of Blender's scene unit display.  Future mesh code can convert
-# them to metres at the geometry boundary (millimetres / 1000).
 _MIN_THICKNESS_MM = 0.1
 _MAX_THICKNESS_MM = 10_000.0
 _MIN_HEIGHT_MM = 0.1
@@ -30,6 +27,12 @@ class JHM_NewWallDefaults(bpy.types.PropertyGroup):
         min=_MIN_HEIGHT_MM,
         max=_MAX_HEIGHT_MM,
         precision=1,
+    )
+    floor_reference_z_mm: bpy.props.FloatProperty(
+        name="床基準高さ", default=0.0, precision=1,
+    )
+    ceiling_reference_z_mm: bpy.props.FloatProperty(
+        name="天井基準高さ", default=2500.0, precision=1,
     )
 
 
@@ -64,6 +67,10 @@ class JHM_WallProperties(bpy.types.PropertyGroup):
         description="将来のWall Systemが管理するオブジェクトかどうか",
         default=False,
         options={"HIDDEN"},
+    )
+    wall_id: bpy.props.StringProperty(
+        name="Wall ID", default="", options={"HIDDEN"},
+        description="永続的なWall識別子（Object名とは独立）",
     )
     start: bpy.props.FloatVectorProperty(
         name="始点",
@@ -105,3 +112,71 @@ class JHM_WallProperties(bpy.types.PropertyGroup):
         type=JHM_WallConnection,
         options={"HIDDEN"},
     )
+
+
+class JHM_FinishSpan(bpy.types.PropertyGroup):
+    """One ordered canonical wall-face interval."""
+
+    wall_object: bpy.props.PointerProperty(type=bpy.types.Object, options={"HIDDEN"})
+    expected_wall_id: bpy.props.StringProperty(default="", options={"HIDDEN"})
+    side: bpy.props.EnumProperty(items=(("LEFT", "左", ""), ("RIGHT", "右", "")))
+    entry_boundary_kind: bpy.props.EnumProperty(items=tuple(
+        (value, value, "") for value in
+        ("WALL_START", "WALL_END", "DISTANCE_FROM_START", "DISTANCE_FROM_END")
+    ), default="WALL_START")
+    entry_boundary_value_mm: bpy.props.FloatProperty(default=0.0, min=0.0)
+    exit_boundary_kind: bpy.props.EnumProperty(items=tuple(
+        (value, value, "") for value in
+        ("WALL_START", "WALL_END", "DISTANCE_FROM_START", "DISTANCE_FROM_END")
+    ), default="WALL_END")
+    exit_boundary_value_mm: bpy.props.FloatProperty(default=0.0, min=0.0)
+    traversal_direction: bpy.props.EnumProperty(
+        items=(("FORWARD", "順方向", ""), ("REVERSE", "逆方向", "")),
+        default="FORWARD",
+    )
+
+
+class JHM_FinishExclusion(bpy.types.PropertyGroup):
+    """Future-compatible opening/manual exclusion attached to a Wall face."""
+
+    wall_object: bpy.props.PointerProperty(type=bpy.types.Object, options={"HIDDEN"})
+    expected_wall_id: bpy.props.StringProperty(default="", options={"HIDDEN"})
+    side: bpy.props.EnumProperty(items=(("LEFT", "左", ""), ("RIGHT", "右", "")))
+    start_boundary_kind: bpy.props.EnumProperty(items=tuple(
+        (value, value, "") for value in
+        ("WALL_START", "WALL_END", "DISTANCE_FROM_START", "DISTANCE_FROM_END")
+    ), default="WALL_START")
+    start_boundary_value_mm: bpy.props.FloatProperty(default=0.0, min=0.0)
+    end_boundary_kind: bpy.props.EnumProperty(items=tuple(
+        (value, value, "") for value in
+        ("WALL_START", "WALL_END", "DISTANCE_FROM_START", "DISTANCE_FROM_END")
+    ), default="WALL_END")
+    end_boundary_value_mm: bpy.props.FloatProperty(default=0.0, min=0.0)
+    exclusion_type: bpy.props.EnumProperty(items=(
+        ("MANUAL", "Manual", ""), ("DOOR", "Door", ""),
+        ("WINDOW", "Window", ""), ("OTHER", "Other", ""),
+    ), default="MANUAL")
+    source_id: bpy.props.StringProperty(default="")
+
+
+class JHM_FinishProperties(bpy.types.PropertyGroup):
+    is_finish: bpy.props.BoolProperty(default=False, options={"HIDDEN"})
+    finish_id: bpy.props.StringProperty(default="", options={"HIDDEN"})
+    finish_type: bpy.props.EnumProperty(
+        items=(("BASEBOARD", "Baseboard Test", ""), ("CROWN", "Crown", "")),
+        default="BASEBOARD",
+    )
+    profile_id: bpy.props.StringProperty(default="SIMPLE_10X60")
+    vertical_reference: bpy.props.EnumProperty(
+        items=(("FLOOR", "床", ""), ("CEILING", "天井", ""),
+               ("ABSOLUTE", "絶対高さ", "")), default="FLOOR",
+    )
+    vertical_offset_mm: bpy.props.FloatProperty(default=0.0, precision=1)
+    absolute_z_mm: bpy.props.FloatProperty(default=0.0, precision=1)
+    join_policy: bpy.props.EnumProperty(
+        items=(("MITER", "留め", ""), ("BREAK", "分割", "")), default="MITER",
+    )
+    miter_limit: bpy.props.FloatProperty(default=4.0, min=1.0, max=100.0)
+    closed: bpy.props.BoolProperty(default=False)
+    spans: bpy.props.CollectionProperty(type=JHM_FinishSpan)
+    exclusions: bpy.props.CollectionProperty(type=JHM_FinishExclusion)

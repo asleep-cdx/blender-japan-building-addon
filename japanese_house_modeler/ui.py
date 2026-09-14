@@ -7,6 +7,9 @@ from .drawing_alignment import wall_axis_angle_degrees, wall_length_m
 from .junctions import classification_label, classify_junction
 from .joints import joint_status_label
 from .joints import has_identity_transform
+from .finish_identity import duplicate_ids
+from .finish_geometry import diagnose_finish
+from .finish_state import status_label
 
 
 class JHM_PT_house_modeler(bpy.types.Panel):
@@ -30,12 +33,15 @@ class JHM_PT_house_modeler(bpy.types.Panel):
         new_wall_box.operator(
             "jhm.create_wall", text="壁を生成", icon="ADD"
         )
+        new_wall_box.separator()
+        new_wall_box.prop(defaults, "floor_reference_z_mm", text="床基準高さ (mm)")
+        new_wall_box.prop(defaults, "ceiling_reference_z_mm", text="天井基準高さ (mm)")
 
         layout.separator()
         selected_box = layout.box()
-        selected_box.label(text="選択中の壁")
         active_object = context.active_object
         if active_object and active_object.jhm_wall.is_wall:
+            selected_box.label(text="選択中の壁")
             wall = active_object.jhm_wall
             selected_box.label(text=f"壁厚: {wall.wall_thickness:.1f} mm")
             selected_box.label(text=f"壁高さ: {wall.wall_height:.1f} mm")
@@ -54,6 +60,13 @@ class JHM_PT_house_modeler(bpy.types.Panel):
                 state_problems.append("Object Transformあり")
             if not topology_is_consistent(active_object):
                 state_problems.append("接続情報不整合")
+            duplicates = duplicate_ids(
+                [obj for obj in context.scene.objects
+                 if getattr(getattr(obj, "jhm_wall", None), "is_wall", False)],
+                lambda obj: obj.jhm_wall.wall_id,
+            )
+            if wall.wall_id and wall.wall_id in duplicates:
+                state_problems.append("Wall ID重複")
             selected_box.label(
                 text=("管理状態: 正常" if not state_problems else
                       f"管理状態: 要復元（{' / '.join(state_problems)}）")
@@ -99,5 +112,23 @@ class JHM_PT_house_modeler(bpy.types.Panel):
             move_end.endpoint = "END"
             selected_box.separator()
             selected_box.operator("jhm.delete_wall", text="壁を削除")
+            finish_box = layout.box()
+            finish_box.label(text="仕上げ経路")
+            left = finish_box.operator("jhm.start_finish_path", text="左側面から開始")
+            left.side = "LEFT"
+            right = finish_box.operator("jhm.start_finish_path", text="右側面から開始")
+            right.side = "RIGHT"
+        elif (active_object and
+              getattr(getattr(active_object, "jhm_finish", None), "is_finish", False)):
+            finish = active_object.jhm_finish
+            selected_box.label(text="選択中の仕上げ")
+            selected_box.label(text=f"種類: {finish.finish_type}")
+            selected_box.label(text=f"区間数: {len(finish.spans)}")
+            selected_box.label(text="管理状態: " + status_label(diagnose_finish(active_object)))
+            selected_box.operator("jhm.regenerate_finish", text="経路を再生成")
+            selected_box.operator("jhm.repair_finish", text="管理状態へ復元")
+            selected_box.operator("jhm.convert_finish_mesh", text="編集可能Meshとして確定")
+            selected_box.operator("jhm.delete_finish", text="仕上げ経路を削除")
         else:
+            selected_box.label(text="選択中の壁")
             selected_box.label(text="Wallを選択してください。")
