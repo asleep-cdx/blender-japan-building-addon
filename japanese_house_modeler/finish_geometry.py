@@ -3,6 +3,7 @@
 import bpy
 
 from .finish_identity import reference_is_trusted
+from .dependency_transaction import DependencyTransaction, PreparedChange
 from .finish_path import resolve_interval, resolve_vertical
 from .finish_surface import (
     face_segment, resolve_surface_path, transition_blocked_by_footprints,
@@ -21,6 +22,9 @@ def managed_walls():
 
 def resolved_finish_points(finish, scene):
     walls = managed_walls()
+    from .finish_dependencies import validate_finish_references
+    # This also validates every persisted exclusion before dependency work.
+    validate_finish_references(finish.id_data, walls)
     segments = []
     for span in finish.spans:
         target = span.wall_object
@@ -88,17 +92,25 @@ def diagnose_finish(obj):
     walls = managed_walls()
     index = id_index(walls, lambda wall: wall.jhm_wall.wall_id)
     references, intervals_valid = [], True
-    for span in obj.jhm_finish.spans:
+    from .finish_identity import validate_managed_wall_reference
+    from .joints import has_identity_transform
+    records = tuple(obj.jhm_finish.spans) + tuple(obj.jhm_finish.exclusions)
+    for span in records:
         try:
             pointer_present = span.wall_object is not None
             pointer_exists = span.wall_object in walls
             matching = pointer_exists and span.wall_object.jhm_wall.wall_id == span.expected_wall_id
+            validate_managed_wall_reference(
+                span.wall_object, span.expected_wall_id, walls,
+                lambda item: item.jhm_wall.is_wall, has_identity_transform)
         except ReferenceError:
             pointer_present, pointer_exists, matching = False, False, False
+        except ValueError:
+            pointer_exists, matching = False, False
         references.append((pointer_present, pointer_exists, matching,
                            not span.expected_wall_id
                            or len(index.get(span.expected_wall_id, ())) > 1))
-        if pointer_exists:
+        if pointer_exists and span in obj.jhm_finish.spans:
             wall = span.wall_object.jhm_wall
             try:
                 length = ((wall.end[0] - wall.start[0]) ** 2
@@ -116,45 +128,148 @@ def diagnose_finish(obj):
 
 
 def _verification_profile():
+    """Return ``(object, owned_cleanup)`` for borrowed/transaction-owned data."""
     name = "JHM Verification Profile 10x60"
     obj = bpy.data.objects.get(name)
     if obj is not None and obj.type == "CURVE":
-        return obj
+        return obj, None
     data = bpy.data.curves.new(name, "CURVE")
-    data.dimensions = "2D"
-    spline = data.splines.new("POLY")
-    spline.points.add(3)
-    for target, point in zip(spline.points,
-                             ((0, 0), (.01, 0), (.01, .06), (0, .06))):
-        target.co = (*point, 0.0, 1.0)
-    spline.use_cyclic_u = True
-    obj = bpy.data.objects.new(name, data)
-    bpy.context.scene.collection.objects.link(obj)
-    obj.hide_viewport = True
-    obj.hide_render = True
-    return obj
+    obj = None
+    try:
+        data.dimensions = "2D"
+        spline = data.splines.new("POLY")
+        spline.points.add(3)
+        for target, point in zip(spline.points,
+                                 ((0, 0), (.01, 0), (.01, .06), (0, .06))):
+            target.co = (*point, 0.0, 1.0)
+        spline.use_cyclic_u = True
+        obj = bpy.data.objects.new(name, data)
+        bpy.context.scene.collection.objects.link(obj)
+        obj.hide_viewport = True
+        obj.hide_render = True
+    except Exception as operation_error:
+        errors = []
+        for cleanup in (
+                (lambda: bpy.data.objects.remove(obj, do_unlink=True)) if obj else None,
+                lambda: bpy.data.curves.remove(data) if data.users == 0 else None):
+            if cleanup is None:
+                continue
+            try:
+                cleanup()
+            except Exception as error:
+                errors.append(error)
+        if errors:
+            from .dependency_transaction import DependencyRollbackError
+            raise DependencyRollbackError(operation_error, errors) from operation_error
+        raise
+
+    def cleanup():
+        profile_data = obj.data
+        from .dependency_transaction import OperationRecovery
+        recovery = OperationRecovery()
+        recovery.add(lambda: bpy.data.objects.remove(obj, do_unlink=True))
+        recovery.add(lambda: bpy.data.curves.remove(profile_data)
+                     if profile_data.users == 0 else None)
+        recovery()
+    return obj, cleanup
 
 
-def regenerate_finish(obj, scene):
-    """Replace only derived spline geometry; canonical spans remain untouched."""
+def prepare_finish_regeneration(obj, scene):
+    """Build a detached replacement Curve and a reversible data swap."""
     if obj.type != "CURVE" or not obj.jhm_finish.is_finish:
         raise ValueError("管理対象のFinish Curveではありません。")
     if not obj.matrix_basis.is_identity:
         raise ValueError("Finish Object Transformを復元してください。")
     points = resolved_finish_points(obj.jhm_finish, scene)
-    curve = obj.data
-    curve.dimensions = "3D"
-    curve.resolution_u = 1
-    curve.bevel_mode = "OBJECT"
-    curve.bevel_object = _verification_profile()
-    curve.splines.clear()
-    spline = curve.splines.new("POLY")
-    spline.points.add(len(points) - 1)
-    for target, point in zip(spline.points, points):
-        target.co = (*point, 1.0)
-    spline.use_cyclic_u = bool(obj.jhm_finish.closed)
-    curve.update_tag()
-    return points
+    old_curve = obj.data
+    curve = old_curve.copy()
+    owned_profile_cleanup = None
+    try:
+        curve.dimensions = "3D"
+        curve.resolution_u = 1
+        curve.bevel_mode = "OBJECT"
+        profile, owned_profile_cleanup = _verification_profile()
+        curve.bevel_object = profile
+        curve.splines.clear()
+        spline = curve.splines.new("POLY")
+        spline.points.add(len(points) - 1)
+        for target, point in zip(spline.points, points):
+            target.co = (*point, 1.0)
+        spline.use_cyclic_u = bool(obj.jhm_finish.closed)
+        curve.update_tag()
+    except Exception as operation_error:
+        from .dependency_transaction import OperationRecovery, recover_operation
+        recovery = OperationRecovery()
+        recovery.add(lambda: bpy.data.curves.remove(curve)
+                     if curve.users == 0 else None)
+        if owned_profile_cleanup is not None:
+            recovery.add(owned_profile_cleanup)
+        failure = recover_operation(operation_error, recovery)
+        if failure is operation_error:
+            raise
+        raise failure from operation_error
+    def commit(replacement):
+        obj.data = replacement
+
+    def rollback():
+        obj.data = old_curve
+
+    def discard(replacement):
+        from .dependency_transaction import OperationRecovery
+        recovery = OperationRecovery()
+        recovery.add(lambda: bpy.data.curves.remove(replacement)
+                     if replacement.users == 0 else None)
+        if owned_profile_cleanup is not None:
+            recovery.add(owned_profile_cleanup)
+        recovery()
+
+    def dispose_old():
+        if old_curve.users == 0:
+            bpy.data.curves.remove(old_curve)
+
+    change = PreparedChange(curve, commit, rollback, discard, dispose_old)
+    change.points = points
+    return change
+
+
+def regenerate_finishes_atomic(objects, scene):
+    """Prepare all Finish Curves before performing any data assignment."""
+    transaction = DependencyTransaction()
+    changes = transaction.prepare(
+        lambda obj=obj: prepare_finish_regeneration(obj, scene)
+        for obj in objects)
+    transaction.commit()
+    return tuple(change.points for change in changes)
+
+
+def regenerate_wall_finish_dependencies_atomic(walls, finishes, scene,
+                                               snapshot=None,
+                                               restore=lambda _snapshot: None):
+    """Prepare Wall Meshes and Finish Curves in one production transaction."""
+    from .joints import merge_affected, prepare_wall_mesh_regeneration
+
+    transaction = prepare_wall_finish_dependency_transaction(
+        walls, finishes, scene, snapshot, restore)
+    return transaction.commit()
+
+
+def prepare_wall_finish_dependency_transaction(walls, finishes, scene,
+                                               snapshot=None,
+                                               restore=lambda _snapshot: None):
+    """Prepare and return a transaction whose cleanup may be deferred."""
+    from .joints import merge_affected, prepare_wall_mesh_regeneration
+    transaction = DependencyTransaction(snapshot, restore)
+    factories = [lambda wall=wall: prepare_wall_mesh_regeneration(wall)
+                 for wall in merge_affected(walls)]
+    factories.extend(lambda obj=obj: prepare_finish_regeneration(obj, scene)
+                     for obj in finishes)
+    transaction.prepare(factories)
+    return transaction
+
+
+def regenerate_finish(obj, scene):
+    """Atomically replace derived Curve data; canonical spans remain untouched."""
+    return regenerate_finishes_atomic((obj,), scene)[0]
 
 
 def create_finish_object(context, configure):

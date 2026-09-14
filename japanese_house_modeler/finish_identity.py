@@ -1,5 +1,6 @@
 """Persistent identity and reference-validation helpers for managed objects."""
 
+import math
 import uuid
 
 
@@ -60,6 +61,46 @@ def reference_is_trusted(pointer, expected_id, candidates=(), managed=None):
         getattr(getattr(item, "jhm_wall", item), "wall_id", "") or ""
     ) == expected_id]
     return actual == expected_id and (not candidates or owners == [pointer])
+
+
+def validate_wall_reference(pointer, expected_id, candidates=(), managed=None,
+                            identity_transform=lambda _item: True):
+    """Raise unless a persistent reference and canonical Wall are trustworthy."""
+    if not expected_id:
+        raise ValueError("Wall参照IDが空です。")
+    if not reference_is_trusted(pointer, expected_id, candidates, managed):
+        raise ValueError("Wall参照が無効またはWall IDが重複しています。")
+    if not identity_transform(pointer):
+        raise ValueError("参照WallにObject Transformがあります。先にWallを管理状態へ復元してください。")
+    wall = pointer.jhm_wall
+    values = tuple(wall.start[:3]) + tuple(wall.end[:3]) + (
+        wall.wall_thickness, wall.wall_height)
+    if not all(math.isfinite(float(value)) for value in values):
+        raise ValueError("参照Wallのcanonical寸法が有限ではありません。")
+    if math.dist(tuple(wall.start[:2]), tuple(wall.end[:2])) <= 1e-9:
+        raise ValueError("参照Wallが縮退しています。")
+    if wall.wall_thickness <= 0.0 or wall.wall_height <= 0.0:
+        raise ValueError("参照Wallの壁厚または壁高さが不正です。")
+    return pointer
+
+
+def validate_managed_wall_reference(pointer, expected_id, candidates,
+                                    managed, identity_transform):
+    """Production entry point with every mandatory policy argument required."""
+    if candidates is None or managed is None or identity_transform is None:
+        raise TypeError("production Wall validation policy is required")
+    return validate_wall_reference(pointer, expected_id, candidates,
+                                   managed, identity_transform)
+
+
+def validate_repair_target_reference(pointer, expected_id, target, managed):
+    """Allow only the selected repair target's transform/ID ambiguity pre-repair."""
+    if pointer is not target:
+        raise ValueError("repair対象外のWall参照が不正です。")
+    # An empty candidate index permits duplicate ownership only; all canonical,
+    # managed, pointer/ID-match and numeric checks remain active.
+    return validate_wall_reference(
+        pointer, expected_id, (), managed, lambda _item: True)
 
 
 def repair_candidate(expected_id, candidates):

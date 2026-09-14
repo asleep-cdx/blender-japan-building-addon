@@ -3,19 +3,55 @@
 import math
 import bpy
 
-from .connections import add_reciprocal, transfer_endpoint_connections
+from .connections import (
+    add_reciprocal, restore_topology, snapshot_topology,
+    transfer_endpoint_connections, is_valid_wall_object,
+)
 from .drawing_alignment import canonical_split_segments
 from .joints import has_identity_transform
 from .finish_identity import ensure_persistent_id, ensure_unique_persistent_id
 from .finish_dependencies import (
     WallSplitResult, remap_finish_objects_for_split,
-    restore_finish_data, snapshot_finish_data,
+    find_finish_objects, restore_finish_data, snapshot_finish_data,
+    validate_finish_references,
 )
-from .finish_geometry import regenerate_finish
+from .dependency_transaction import OperationRecovery, recover_operation
 
 
-def split_wall(host, point):
-    """Split an identity-transform host and return its canonical END successor."""
+class SplitTransactionContext:
+    """Mandatory hand-off from low-level split to its complete operation."""
+
+    def __init__(self):
+        self.events = []
+        self.remapped_finishes = []
+        self.finalized = False
+
+    def record_split(self, event, finishes):
+        if self.finalized:
+            raise RuntimeError("finalize後のsplit記録はできません。")
+        self.events.append(event)
+        for finish in finishes:
+            if finish not in self.remapped_finishes:
+                self.remapped_finishes.append(finish)
+
+    def finalize(self, walls, before, after, scene, recovery=None):
+        """Consume split/remap results in the outer operation's atomic commit."""
+        if self.finalized:
+            raise RuntimeError("split transactionは既にfinalizeされています。")
+        from .finish_dependencies import dependency_scope_union
+        from .finish_geometry import regenerate_wall_finish_dependencies_atomic
+        finishes = dependency_scope_union(
+            dependency_scope_union(before, after), self.remapped_finishes)
+        result = regenerate_wall_finish_dependencies_atomic(
+            walls, finishes, scene, restore=recovery or (lambda _snapshot: None))
+        self.finalized = True
+        return result
+
+
+def split_wall(host, point, transaction=None):
+    """Split/remap only; final regeneration belongs to the owning operation."""
+    if transaction is None:
+        raise ValueError("Wall splitにはdependency transactionが必要です。")
     wall = host.jhm_wall
     segments = canonical_split_segments(wall.start, wall.end, point)
     if segments is None or not has_identity_transform(host):
@@ -23,13 +59,19 @@ def split_wall(host, point):
     start_segment, end_segment = segments
     old_end = tuple(wall.end)
     old_wall_id = wall.wall_id
-    original_id = ensure_persistent_id(wall)
     old_length_mm = math.dist(wall.start[:2], wall.end[:2]) * 1000.0
     split_distance_mm = math.dist(wall.start[:2], point[:2]) * 1000.0
-    finish_snapshot = snapshot_finish_data(bpy.data.objects)
-    mesh = bpy.data.meshes.new("Wall")
+    direct_finishes = find_finish_objects(bpy.data.objects, host)
+    walls = [obj for obj in bpy.data.objects if is_valid_wall_object(obj)]
+    for finish_object in direct_finishes:
+        validate_finish_references(finish_object, walls, require_topology=False)
+    finish_snapshot = snapshot_finish_data(direct_finishes)
+    topology_snapshot = snapshot_topology()
+    mesh = None
     successor = None
     try:
+        original_id = ensure_persistent_id(wall)
+        mesh = bpy.data.meshes.new("Wall")
         successor = bpy.data.objects.new("Wall", mesh)
         for collection in host.users_collection:
             collection.objects.link(successor)
@@ -54,20 +96,19 @@ def split_wall(host, point):
             old_length_mm, split_distance_mm,
         )
         affected_finishes = remap_finish_objects_for_split(bpy.data.objects, event)
-        for finish_object in affected_finishes:
-            regenerate_finish(finish_object, bpy.context.scene)
+        transaction.record_split(event, affected_finishes)
         return successor
-    except Exception:
-        wall.end = old_end
-        wall.wall_id = old_wall_id
-        restore_finish_data(finish_snapshot)
-        if successor is not None:
-            bpy.data.objects.remove(successor, do_unlink=True)
-        if mesh.users == 0:
-            bpy.data.meshes.remove(mesh)
-        for finish_object, _finish_id, _style, _spans, _exclusions in finish_snapshot:
-            try:
-                regenerate_finish(finish_object, bpy.context.scene)
-            except Exception:
-                pass
-        raise
+    except Exception as operation_error:
+        recovery = OperationRecovery()
+        recovery.add(lambda: setattr(wall, "end", old_end))
+        recovery.add(lambda: setattr(wall, "wall_id", old_wall_id))
+        recovery.add(lambda: restore_topology(topology_snapshot))
+        recovery.add(lambda: restore_finish_data(finish_snapshot))
+        recovery.add(lambda: bpy.data.objects.remove(successor, do_unlink=True)
+                     if successor is not None else None)
+        recovery.add(lambda: bpy.data.meshes.remove(mesh)
+                     if mesh is not None and mesh.users == 0 else None)
+        failure = recover_operation(operation_error, recovery)
+        if failure is operation_error:
+            raise
+        raise failure from operation_error

@@ -4,6 +4,8 @@ import math
 
 import bpy
 
+from .dependency_transaction import prepare_allocated_change
+
 from .connections import is_valid_wall_object, junction_members
 from .junctions import (
     CONTINUATION, CORNER, CROSS, INVALID, ISOLATED, T_JUNCTION, classify_junction,
@@ -1037,3 +1039,32 @@ def regenerate_wall_meshes(wall_objects):
     for _wall_object, old_mesh, _new_mesh in prepared:
         if old_mesh.users == 0:
             bpy.data.meshes.remove(old_mesh)
+
+
+def prepare_wall_mesh_regeneration(wall_object):
+    """Prepare one detached Wall Mesh as a reversible transaction change."""
+    if not has_identity_transform(wall_object):
+        raise ValueError("Object TransformがあるWallは接合を再生成できません。")
+    geometry = build_wall_geometry(wall_object)
+    if geometry is None:
+        raise ValueError(f"{wall_object.name} の接合形状が不正です。")
+    old_mesh = wall_object.data
+    def build(new_mesh):
+        new_mesh.from_pydata(geometry[0], [], geometry[1])
+        for material in old_mesh.materials:
+            new_mesh.materials.append(material)
+        new_mesh.update()
+
+    def discard(mesh):
+        if mesh.users == 0:
+            bpy.data.meshes.remove(mesh)
+
+    def dispose_old():
+        if old_mesh.users == 0:
+            bpy.data.meshes.remove(old_mesh)
+
+    return prepare_allocated_change(
+        lambda: bpy.data.meshes.new(old_mesh.name), build,
+        lambda mesh: setattr(wall_object, "data", mesh),
+        lambda: setattr(wall_object, "data", old_mesh),
+        discard, dispose_old)

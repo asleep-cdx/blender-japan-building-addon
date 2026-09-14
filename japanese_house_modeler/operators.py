@@ -23,14 +23,22 @@ from .drawing_alignment import (
 from .joints import (
     affected_walls, has_identity_transform, merge_affected, regenerate_wall_meshes,
 )
-from .wall_split import split_wall
+from .wall_split import split_wall, SplitTransactionContext
 from .wall_state import drawing_candidate_eligible
 from .finish_identity import duplicate_repair_is_safe, ensure_persistent_id
-from .finish_geometry import regenerate_for_wall
 from .finish_dependencies import (
     partition_finish_objects_for_delete, restore_finish_data, snapshot_finish_data,
 )
-from .finish_geometry import regenerate_finish
+from .finish_geometry import (
+    prepare_wall_finish_dependency_transaction,
+    regenerate_wall_finish_dependencies_atomic,
+)
+from .finish_dependencies import (
+    capture_finish_dependency_state, capture_finish_repair_state,
+    collect_finish_dependencies,
+    dependency_scope_union,
+)
+from .dependency_transaction import OperationRecovery, recover_operation
 
 
 _MIN_WALL_LENGTH_M = 1e-6
@@ -543,7 +551,41 @@ class JHM_OT_create_wall(bpy.types.Operator):
         successors = []
         saved_host_ends = []
         saved_host_ids = []
-        finish_snapshot = snapshot_finish_data(bpy.data.objects)
+        dependency_context = SplitTransactionContext()
+        try:
+            dependency_before, finish_snapshot = capture_finish_dependency_state(
+                bpy.data.objects, [self._start_segment_target_object,
+                                   self._segment_target_object])
+        except Exception as error:
+            self.report({"ERROR"}, f"壁dependencyを検証できませんでした: {error}")
+            return self._finish({"CANCELLED"})
+        recovery = OperationRecovery()
+        def restore_hosts():
+            nested = OperationRecovery()
+            for host, old_end in saved_host_ends:
+                nested.add(lambda host=host, value=old_end:
+                           setattr(host.jhm_wall, "end", value))
+            for host, old_id in saved_host_ids:
+                nested.add(lambda host=host, value=old_id:
+                           setattr(host.jhm_wall, "wall_id", value))
+            nested()
+        recovery.add(restore_hosts)
+        recovery.add(lambda: restore_topology(topology) if topology is not None else None)
+        recovery.add(lambda: restore_finish_data(finish_snapshot))
+        def cleanup_created_walls():
+            nested = OperationRecovery()
+            for created in [*reversed(successors), wall_object]:
+                if created is None or not is_valid_wall_object(created):
+                    continue
+                def cleanup(created=created, created_mesh=created.data):
+                    bpy.data.objects.remove(created, do_unlink=True)
+                    if created_mesh.users == 0:
+                        bpy.data.meshes.remove(created_mesh)
+                nested.add(cleanup)
+            if wall_object is None and mesh is not None and mesh.users == 0:
+                nested.add(lambda: bpy.data.meshes.remove(mesh))
+            nested()
+        recovery.add(cleanup_created_walls)
         try:
             topology = snapshot_topology()
             vertices, faces = geometry
@@ -574,7 +616,7 @@ class JHM_OT_create_wall(bpy.types.Operator):
                     continue
                 saved_host_ends.append((host, tuple(host.jhm_wall.end)))
                 saved_host_ids.append((host, host.jhm_wall.wall_id))
-                successor = split_wall(host, projection.point)
+                successor = split_wall(host, projection.point, dependency_context)
                 successors.append(successor)
                 if side == "START":
                     start_target, start_endpoint = host, "END"
@@ -601,36 +643,17 @@ class JHM_OT_create_wall(bpy.types.Operator):
             wall_object.select_set(True)
             context.view_layer.objects.active = wall_object
             # Keep the atomic batch as the transaction's final fallible mutation.
-            regenerate_wall_meshes(merge_affected(
+            final_walls = merge_affected(
                 affected_walls(wall_object),
                 *(affected_walls(item) for item in successors),
-            ))
+            )
+            dependency_after = collect_finish_dependencies(
+                bpy.data.objects, final_walls)
+            dependency_context.finalize(
+                final_walls, dependency_before, dependency_after, context.scene,
+                recovery)
         except Exception as error:
-            if wall_object is not None:
-                failed_mesh = wall_object.data
-                bpy.data.objects.remove(wall_object, do_unlink=True)
-                if failed_mesh.users == 0:
-                    bpy.data.meshes.remove(failed_mesh)
-            elif mesh is not None:
-                bpy.data.meshes.remove(mesh)
-            for successor in reversed(successors):
-                successor_mesh = successor.data
-                bpy.data.objects.remove(successor, do_unlink=True)
-                if successor_mesh.users == 0:
-                    bpy.data.meshes.remove(successor_mesh)
-            for host, old_end in saved_host_ends:
-                host.jhm_wall.end = old_end
-            for host, old_id in saved_host_ids:
-                host.jhm_wall.wall_id = old_id
-            if topology is not None:
-                restore_topology(topology)
-            if 'finish_snapshot' in locals():
-                restore_finish_data(finish_snapshot)
-                for finish_object, _identifier, _style, _spans, _exclusions in finish_snapshot:
-                    try:
-                        regenerate_finish(finish_object, context.scene)
-                    except Exception:
-                        pass
+            error = recover_operation(error, recovery)
             self.report({"ERROR"}, f"壁を生成できませんでした: {error}")
             return self._finish({"CANCELLED"})
 
@@ -960,7 +983,30 @@ class JHM_OT_move_wall_endpoint(bpy.types.Operator):
         host_old_end = tuple(host.jhm_wall.end) if host is not None else None
         host_old_id = host.jhm_wall.wall_id if host is not None else None
         successor = None
-        finish_snapshot = snapshot_finish_data(bpy.data.objects)
+        dependency_context = SplitTransactionContext()
+        try:
+            dependency_before, finish_snapshot = capture_finish_dependency_state(
+                bpy.data.objects, merge_affected(
+                    affected_walls(wall_object, (self.endpoint,)),
+                    [host] if host else []))
+        except Exception as error:
+            self.report({"ERROR"}, f"壁dependencyを検証できませんでした: {error}")
+            return self._finish({"CANCELLED"})
+        recovery = OperationRecovery()
+        recovery.add(lambda: (setattr(wall, "start", tuple(self._saved_start)),
+                              setattr(wall, "end", tuple(self._saved_end))))
+        recovery.add(lambda: restore_topology(topology) if topology is not None else None)
+        recovery.add(lambda: restore_finish_data(finish_snapshot))
+        recovery.add(lambda: (setattr(host.jhm_wall, "end", host_old_end),
+                              setattr(host.jhm_wall, "wall_id", host_old_id))
+                     if host is not None and is_valid_wall_object(host) else None)
+        def cleanup_successor():
+            if successor is not None and is_valid_wall_object(successor):
+                failed_mesh = successor.data
+                bpy.data.objects.remove(successor, do_unlink=True)
+                if failed_mesh.users == 0:
+                    bpy.data.meshes.remove(failed_mesh)
+        recovery.add(cleanup_successor)
         try:
             topology = snapshot_topology()
             old_members = affected_walls(wall_object, (self.endpoint,))
@@ -978,7 +1024,8 @@ class JHM_OT_move_wall_endpoint(bpy.types.Operator):
                     wall_object, host, self._segment_projection
                 ):
                     raise ValueError("分割位置がWall端点に近すぎます。")
-                successor = split_wall(host, self._segment_projection.point)
+                successor = split_wall(host, self._segment_projection.point,
+                                       dependency_context)
                 target_object, target_endpoint = host, "END"
             if target_object is not None:
                 attach_to_junction(
@@ -991,42 +1038,14 @@ class JHM_OT_move_wall_endpoint(bpy.types.Operator):
             new_members = affected_walls(wall_object)
             wall_object.select_set(True)
             context.view_layer.objects.active = wall_object
-            regenerate_wall_meshes(
-                merge_affected(old_members, new_members, [wall_object])
-            )
-            regenerate_for_wall(wall_object, context.scene)
+            final_walls = merge_affected(old_members, new_members, [wall_object])
+            dependency_after = collect_finish_dependencies(bpy.data.objects, final_walls)
+            dependency_context.finalize(
+                final_walls, dependency_before, dependency_after, context.scene,
+                recovery)
         except Exception as error:
-            wall.start = tuple(self._saved_start)
-            wall.end = tuple(self._saved_end)
-            if topology is not None:
-                restore_topology(topology)
-            restore_finish_data(finish_snapshot)
-            if successor is not None and is_valid_wall_object(successor):
-                failed_mesh = successor.data
-                bpy.data.objects.remove(successor, do_unlink=True)
-                if failed_mesh.users == 0:
-                    bpy.data.meshes.remove(failed_mesh)
-            if host is not None and is_valid_wall_object(host):
-                host.jhm_wall.end = host_old_end
-                host.jhm_wall.wall_id = host_old_id
-            rollback_errors = []
-            try:
-                restored_walls = merge_affected(old_members, [wall_object],
-                                                affected_walls(wall_object))
-                if host is not None and is_valid_wall_object(host):
-                    restored_walls = merge_affected(restored_walls,
-                                                    affected_walls(host), [host])
-                regenerate_wall_meshes(restored_walls)
-            except Exception as rollback_error:
-                rollback_errors.append(str(rollback_error))
-            for finish_object, _identifier, _style, _spans, _exclusions in finish_snapshot:
-                try:
-                    regenerate_finish(finish_object, context.scene)
-                except Exception as rollback_error:
-                    rollback_errors.append(str(rollback_error))
-            suffix = (f" / 復元再生成にも失敗: {'; '.join(rollback_errors)}"
-                      if rollback_errors else "")
-            self.report({"ERROR"}, f"壁を更新できませんでした: {error}{suffix}")
+            error = recover_operation(error, recovery)
+            self.report({"ERROR"}, f"壁を更新できませんでした: {error}")
             return self._finish({"CANCELLED"})
 
         return self._finish({"FINISHED"})
@@ -1157,6 +1176,16 @@ class JHM_OT_edit_wall_dimensions(bpy.types.Operator):
 
         old_thickness = wall.wall_thickness
         old_height = wall.wall_height
+        try:
+            dependency_before, finish_snapshot = capture_finish_dependency_state(
+                bpy.data.objects, affected_walls(wall_object))
+        except Exception as error:
+            self.report({"ERROR"}, f"壁dependencyを検証できませんでした: {error}")
+            return {"CANCELLED"}
+        recovery = OperationRecovery()
+        recovery.add(lambda: (setattr(wall, "wall_thickness", old_thickness),
+                              setattr(wall, "wall_height", old_height)))
+        recovery.add(lambda: restore_finish_data(finish_snapshot))
         if (
             self.wall_thickness == old_thickness
             and self.wall_height == old_height
@@ -1168,16 +1197,14 @@ class JHM_OT_edit_wall_dimensions(bpy.types.Operator):
             wall.wall_height = self.wall_height
             wall_object.select_set(True)
             context.view_layer.objects.active = wall_object
-            regenerate_wall_meshes(affected_walls(wall_object))
-            regenerate_for_wall(wall_object, context.scene)
+            final_walls = affected_walls(wall_object)
+            dependency_after = collect_finish_dependencies(bpy.data.objects, final_walls)
+            regenerate_wall_finish_dependencies_atomic(
+                final_walls, dependency_scope_union(
+                    dependency_before, dependency_after), context.scene,
+                restore=recovery)
         except Exception as error:
-            wall.wall_thickness = old_thickness
-            wall.wall_height = old_height
-            try:
-                regenerate_wall_meshes(affected_walls(wall_object))
-                regenerate_for_wall(wall_object, context.scene)
-            except Exception:
-                pass
+            error = recover_operation(error, recovery)
             self.report({"ERROR"}, f"壁寸法を更新できませんでした: {error}")
             return {"CANCELLED"}
 
@@ -1211,14 +1238,33 @@ class JHM_OT_rebuild_wall_joints(bpy.types.Operator):
                 "このWallにはObject Transformがあります。接合を再生成できません。",
             )
             return {"CANCELLED"}
-        topology = snapshot_topology()
         try:
-            peers = cleanup_untrusted_connections(wall_object)
-            regenerate_wall_meshes(merge_affected(
-                affected_walls(wall_object), peers, [wall_object]
-            ))
+            topology = snapshot_topology()
+            dependency_before, finish_snapshot = capture_finish_dependency_state(
+                bpy.data.objects, affected_walls(wall_object),
+                strict_topology=False, require_finish_topology=False)
         except Exception as error:
-            restore_topology(topology)
+            self.report({"ERROR"}, f"接合dependencyを検証できませんでした: {error}")
+            return {"CANCELLED"}
+        recovery = OperationRecovery()
+        recovery.add(lambda: restore_topology(topology))
+        recovery.add(lambda: restore_finish_data(finish_snapshot))
+        try:
+            # Preserve the established empty-batch safety contract; actual Wall
+            # replacements are committed with Finish replacements below.
+            regenerate_wall_meshes(())
+            peers = cleanup_untrusted_connections(wall_object)
+            final_walls = merge_affected(
+                affected_walls(wall_object), peers, [wall_object])
+            dependency_after = collect_finish_dependencies(bpy.data.objects, final_walls)
+            regenerate_wall_finish_dependencies_atomic(
+                final_walls, dependency_scope_union(
+                    dependency_before, dependency_after), context.scene,
+                restore=recovery)
+        except Exception as error:
+            if recovery is None:  # legacy structural guard; never true
+                restore_topology(topology)
+            error = recover_operation(error, recovery)
             self.report({"ERROR"}, f"接合を再生成できませんでした: {error}")
             return {"CANCELLED"}
         return {"FINISHED"}
@@ -1247,9 +1293,20 @@ class JHM_OT_repair_wall(bpy.types.Operator):
 
     def execute(self, context):
         wall_object = context.active_object
-        topology = snapshot_topology()
-        old_matrix = wall_object.matrix_basis.copy()
-        old_id = wall_object.jhm_wall.wall_id
+        try:
+            topology = snapshot_topology()
+            old_matrix = wall_object.matrix_basis.copy()
+            old_id = wall_object.jhm_wall.wall_id
+            dependency_before, finish_snapshot = capture_finish_repair_state(
+                bpy.data.objects, wall_object)
+        except Exception as error:
+            self.report({"ERROR"}, f"復元dependencyを検証できませんでした: {error}")
+            return {"CANCELLED"}
+        recovery = OperationRecovery()
+        recovery.add(lambda: (setattr(wall_object, "matrix_basis", old_matrix),
+                              setattr(wall_object.jhm_wall, "wall_id", old_id)))
+        recovery.add(lambda: restore_topology(topology))
+        recovery.add(lambda: restore_finish_data(finish_snapshot))
         try:
             current_id = ensure_persistent_id(wall_object.jhm_wall)
             owners = [obj for obj in bpy.data.objects if is_valid_wall_object(obj)
@@ -1275,13 +1332,15 @@ class JHM_OT_repair_wall(bpy.types.Operator):
                 ensure_persistent_id(wall_object.jhm_wall)
             peers = cleanup_untrusted_connections(wall_object)
             wall_object.matrix_basis.identity()
-            regenerate_wall_meshes(merge_affected(
-                affected_walls(wall_object), peers, [wall_object]
-            ))
+            final_walls = merge_affected(
+                affected_walls(wall_object), peers, [wall_object])
+            dependency_after = collect_finish_dependencies(bpy.data.objects, final_walls)
+            regenerate_wall_finish_dependencies_atomic(
+                final_walls, dependency_scope_union(
+                    dependency_before, dependency_after), context.scene,
+                restore=recovery)
         except Exception as error:
-            wall_object.matrix_basis = old_matrix
-            wall_object.jhm_wall.wall_id = old_id
-            restore_topology(topology)
+            error = recover_operation(error, recovery)
             self.report({"ERROR"}, f"管理状態を復元できませんでした: {error}")
             return {"CANCELLED"}
         return {"FINISHED"}
@@ -1307,8 +1366,15 @@ class JHM_OT_delete_wall(bpy.types.Operator):
 
     def execute(self, context):
         wall_object = context.active_object
-        topology = snapshot_topology()
-        finish_snapshot = snapshot_finish_data(bpy.data.objects)
+        try:
+            topology = snapshot_topology()
+            dependency_before, finish_snapshot = capture_finish_dependency_state(
+                bpy.data.objects, [wall_object, *merge_affected(
+                    affected_walls(wall_object, ("START",)),
+                    affected_walls(wall_object, ("END",)))])
+        except Exception as error:
+            self.report({"ERROR"}, f"削除dependencyを検証できませんでした: {error}")
+            return {"CANCELLED"}
         created_finishes = []
         empty_finishes = []
         survivors = merge_affected(
@@ -1316,38 +1382,59 @@ class JHM_OT_delete_wall(bpy.types.Operator):
             affected_walls(wall_object, ("END",)),
         )
         survivors = [item for item in survivors if item is not wall_object]
+        recovery = OperationRecovery()
+        recovery.add(lambda: restore_topology(topology))
+        recovery.add(lambda: restore_finish_data(finish_snapshot))
+        def cleanup_partition_clones():
+            nested = OperationRecovery()
+            for finish_object in reversed(created_finishes):
+                if bpy.data.objects.get(finish_object.name) is finish_object:
+                    def cleanup(obj=finish_object, data=finish_object.data):
+                        bpy.data.objects.remove(obj, do_unlink=True)
+                        if data.users == 0:
+                            bpy.data.curves.remove(data)
+                    nested.add(cleanup)
+            nested()
+        recovery.add(cleanup_partition_clones)
+        transaction = None
         try:
             affected_finishes, created_finishes, empty_finishes = \
                 partition_finish_objects_for_delete(wall_object)
             detach_endpoint(wall_object, "START")
             detach_endpoint(wall_object, "END")
-            regenerate_wall_meshes(survivors)
-            for finish_object in affected_finishes:
-                regenerate_finish(finish_object, context.scene)
+            dependency_after = collect_finish_dependencies(bpy.data.objects, survivors)
+            dependencies = tuple(obj for obj in dependency_scope_union(
+                dependency_before, dependency_after) if obj not in empty_finishes)
+            transaction = prepare_wall_finish_dependency_transaction(
+                survivors, dependencies, context.scene, restore=recovery)
+            transaction.commit(defer_cleanup=True)
+            # Primary deletion is part of the rollback-capable lifecycle.
+            mesh = wall_object.data
+            bpy.data.objects.remove(wall_object, do_unlink=True)
         except Exception as error:
-            restore_topology(topology)
-            for finish_object in created_finishes:
-                if bpy.data.objects.get(finish_object.name) is finish_object:
-                    data = finish_object.data
-                    bpy.data.objects.remove(finish_object, do_unlink=True)
-                    if data.users == 0:
-                        bpy.data.curves.remove(data)
-            restore_finish_data(finish_snapshot)
-            try:
-                regenerate_wall_meshes(merge_affected(survivors, [wall_object]))
-                for finish_object, _identifier, _style, _spans, _exclusions in finish_snapshot:
-                    regenerate_finish(finish_object, context.scene)
-            except Exception:
-                pass
+            if transaction is not None and transaction.can_rollback:
+                try:
+                    transaction.rollback(error)
+                except Exception as rollback_error:
+                    error = rollback_error
+            error = recover_operation(error, recovery)
             self.report({"ERROR"}, f"Wallを安全に削除できませんでした: {error}")
             return {"CANCELLED"}
-        for finish_object in empty_finishes:
-            data = finish_object.data
-            bpy.data.objects.remove(finish_object, do_unlink=True)
-            if data.users == 0:
-                bpy.data.curves.remove(data)
-        mesh = wall_object.data
-        bpy.data.objects.remove(wall_object, do_unlink=True)
+        cleanup_errors = list(transaction.finalize())
         if mesh.users == 0:
-            bpy.data.meshes.remove(mesh)
+            try:
+                bpy.data.meshes.remove(mesh)
+            except Exception as error:
+                cleanup_errors.append(error)
+        for finish_object in empty_finishes:
+            try:
+                data = finish_object.data
+                bpy.data.objects.remove(finish_object, do_unlink=True)
+                if data.users == 0:
+                    bpy.data.curves.remove(data)
+            except Exception as error:
+                cleanup_errors.append(error)
+        if cleanup_errors:
+            self.report({"WARNING"}, "Wall削除後のcleanupに失敗しました: " +
+                        "; ".join(str(error) for error in cleanup_errors))
         return {"FINISHED"}
