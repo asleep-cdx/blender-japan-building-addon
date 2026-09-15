@@ -21,12 +21,15 @@ from japanese_house_modeler.finish_identity import (
     reference_is_trusted, repair_candidate,
 )
 from japanese_house_modeler.finish_path import (
-    backspace_pending, propagate_canonical_side, resolve_boundary,
-    resolve_interval, traversal_for_connection,
+    backspace_pending, boundary_reaches_endpoint, profile_horizontal_sign,
+    propagate_canonical_side, resolve_boundary, resolve_interval,
+    transition_boundaries_reach, traversal_endpoints, traversal_for_connection,
+    verification_profile_points,
 )
 from japanese_house_modeler.finish_surface import (
-    face_segment, line_intersection, resolve_join,
+    endpoint_blocked_by_footprints, face_segment, line_intersection, resolve_join,
     resolve_surface_path, side_normal, transition_blocked_by_footprints,
+    wall_axis,
 )
 from japanese_house_modeler.finish_state import (
     finish_problem_keys, status_label, unique_rebind_candidate,
@@ -80,6 +83,52 @@ class Build06AIdentityTests(unittest.TestCase):
 
 
 class Build06APathTests(unittest.TestCase):
+    def test_canonical_endpoint_reach_including_numeric_boundary(self):
+        self.assertTrue(boundary_reaches_endpoint(0, 2000, "START"))
+        self.assertTrue(boundary_reaches_endpoint(2000, 2000, "END"))
+        self.assertFalse(boundary_reaches_endpoint(1500, 2000, "END"))
+        self.assertTrue(boundary_reaches_endpoint(
+            resolve_boundary("DISTANCE_FROM_START", 2000, 2000), 2000, "END"))
+        self.assertTrue(boundary_reaches_endpoint(
+            resolve_boundary("DISTANCE_FROM_END", 2000, 2000), 2000, "START"))
+
+    def test_traversal_endpoint_and_profile_orientation_matrix(self):
+        self.assertEqual(traversal_endpoints("FORWARD"), ("START", "END"))
+        self.assertEqual(traversal_endpoints("REVERSE"), ("END", "START"))
+        self.assertEqual(profile_horizontal_sign("LEFT", "FORWARD"), -1.0)
+        self.assertEqual(profile_horizontal_sign("RIGHT", "REVERSE"), -1.0)
+        self.assertEqual(profile_horizontal_sign("RIGHT", "FORWARD"), 1.0)
+        self.assertEqual(profile_horizontal_sign("LEFT", "REVERSE"), 1.0)
+
+    def test_mirrored_profiles_preserve_polygon_winding(self):
+        def signed_area(points):
+            return sum(first[0] * second[1] - second[0] * first[1]
+                       for first, second in zip(points, points[1:] + points[:1])) / 2.0
+
+        positive = verification_profile_points(1.0)
+        negative = verification_profile_points(-1.0)
+        original_working_negative = (
+            (0.0, 0.0), (-.01, 0.0), (-.01, .06), (0.0, .06))
+        self.assertEqual(negative, original_working_negative)
+        self.assertEqual(math.copysign(1.0, signed_area(positive)),
+                         math.copysign(1.0, signed_area(original_working_negative)))
+        self.assertEqual({point[0] for point in positive}, {0.0, .01})
+        self.assertEqual({point[0] for point in negative}, {0.0, -.01})
+        self.assertEqual({point[1] for point in positive}, {0.0, .06})
+        self.assertEqual({point[1] for point in negative}, {0.0, .06})
+
+    def test_transition_rejects_partial_departure_before_miter(self):
+        self.assertFalse(transition_boundaries_reach(
+            (0, 1500), 2000, "FORWARD", (0, 1000), 1000, "FORWARD"))
+        self.assertTrue(transition_boundaries_reach(
+            (0, 2000), 2000, "FORWARD", (0, 1000), 1000, "FORWARD"))
+
+    def test_reverse_transition_uses_high_to_low_boundaries(self):
+        self.assertTrue(transition_boundaries_reach(
+            (2000, 0), 2000, "REVERSE", (1000, 0), 1000, "REVERSE"))
+        self.assertFalse(transition_boundaries_reach(
+            (2000, 500), 2000, "REVERSE", (1000, 0), 1000, "REVERSE"))
+
     def test_boundaries_and_partial_interval(self):
         self.assertEqual(resolve_boundary("DISTANCE_FROM_END", 400, 2000), 1600)
         self.assertEqual(resolve_interval("DISTANCE_FROM_START", 500,
@@ -123,6 +172,28 @@ class Build06APathTests(unittest.TestCase):
 
 
 class Build06ASurfaceTests(unittest.TestCase):
+    def test_wall_axis_canonical_length_ignores_z_difference(self):
+        axis, length = wall_axis((0, 0, -4), (3, 4, 12))
+        self.assertEqual(axis, (.6, .8))
+        self.assertEqual(length, 5.0)
+
+    def test_single_span_endpoint_blocker_uses_outward_projection(self):
+        upward = [((1, 0), (1, 2), .2)]
+        downward = [((1, 0), (1, -2), .2)]
+        self.assertTrue(endpoint_blocked_by_footprints(
+            (1, .1), (0, 1), upward))
+        self.assertFalse(endpoint_blocked_by_footprints(
+            (1, -.1), (0, -1), upward))
+        self.assertTrue(endpoint_blocked_by_footprints(
+            (1, -.1), (0, -1), downward))
+        self.assertFalse(endpoint_blocked_by_footprints((1, .1), (0, 1), ()))
+
+    def test_endpoint_blocker_rejects_invalid_thickness(self):
+        for thickness in (math.nan, math.inf, -math.inf, 0.0, -0.1):
+            with self.subTest(thickness=thickness), self.assertRaises(ValueError):
+                endpoint_blocked_by_footprints(
+                    (1, .1), (0, 1), [((1, 0), (1, 2), thickness)])
+
     def test_left_right_normals(self):
         self.assertEqual(side_normal((0, 0), (2, 0), "LEFT"), (0.0, 1.0))
         self.assertEqual(side_normal((0, 0), (2, 0), "RIGHT"), (0.0, -1.0))

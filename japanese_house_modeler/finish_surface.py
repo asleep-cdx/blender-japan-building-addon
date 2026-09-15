@@ -141,6 +141,31 @@ def transition_blocked_by_footprints(first_segment, second_segment, blockers,
         for junction, other, thickness in blockers)
 
 
+def endpoint_blocked_by_footprints(endpoint, outward_normal, blockers,
+                                   projection_m=.01):
+    """Test the endpoint and verification-profile projection against blockers."""
+    projection = float(projection_m)
+    if not math.isfinite(projection) or projection < 0.0:
+        raise ValueError("invalid Finish profile projection")
+    ray_end = (endpoint[0] + outward_normal[0] * projection,
+               endpoint[1] + outward_normal[1] * projection)
+    for junction, other, thickness in blockers:
+        axis, length = wall_axis(junction, other)
+        normal = -axis[1], axis[0]
+        def local(point):
+            delta = point[0] - junction[0], point[1] - junction[1]
+            return (delta[0] * axis[0] + delta[1] * axis[1],
+                    delta[0] * normal[0] + delta[1] * normal[1])
+        thickness = float(thickness)
+        if not math.isfinite(thickness) or thickness <= 0.0:
+            raise ValueError("invalid blocker thickness")
+        half = thickness * .5
+        if _segment_intersects_box(local(endpoint), local(ray_end),
+                                   (1.0e-7, -half), (length, half)):
+            return True
+    return False
+
+
 def resolve_surface_path(segments, miter_limit=4.0):
     """Join ordered raw segments without ever inferring a branch."""
     if not segments:
