@@ -130,6 +130,10 @@ class JHM_PT_house_modeler(bpy.types.Panel):
                 selected_box.label(text=f"Profile: {profile.profile_id}")
                 selected_box.label(text=f"高さ: {profile.height_mm:.1f} mm")
                 selected_box.label(text=f"出幅: {profile.projection_mm:.1f} mm")
+                if profile.profile_id == "BEVEL":
+                    selected_box.label(text=f"面取り: {profile.bevel_mm:.1f} mm")
+                elif profile.profile_id == "ROUNDED":
+                    selected_box.label(text=f"半径: {profile.radius_mm:.1f} mm")
             except ValueError:
                 selected_box.label(text="Profile: 解決不能")
             selected_box.label(text=f"区間数: {len(finish.spans)}")
@@ -144,7 +148,7 @@ class JHM_PT_house_modeler(bpy.types.Panel):
                         selected_box.label(text="状態: 全区間除外")
                 except (AttributeError, ReferenceError, TypeError, ValueError):
                     selected_box.label(text="表示区間: 解決不能")
-            selected_box.operator("jhm.edit_finish_profile", text="Profile寸法を変更")
+            selected_box.operator("jhm.edit_finish_profile", text="Profileを変更")
             selected_box.operator("jhm.edit_finish_boundaries", text="開始/終了位置を変更")
             exclusions = selected_box.box()
             exclusions.label(text=f"Manual Exclusion ({len(finish.exclusions)})")

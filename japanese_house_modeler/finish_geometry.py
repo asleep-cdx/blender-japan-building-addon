@@ -413,7 +413,7 @@ def _production_profile(resolved, horizontal_sign, vertical_base_m):
     sign = -1.0 if float(horizontal_sign) < 0.0 else 1.0
     identity = derived_profile_cache_identity(resolved, sign, vertical_base_m)
     vertical_base_mm = identity[-1]
-    name = (f"JHM SIMPLE r{resolved.profile_revision} "
+    name = (f"JHM {resolved.profile_id} r{resolved.profile_revision} "
             f"{resolved.projection_mm:g}x{resolved.height_mm:g} "
             f"Z{vertical_base_mm:g} "
             + ("Negative" if sign < 0 else "Positive"))
@@ -428,6 +428,8 @@ def _production_profile(resolved, horizontal_sign, vertical_base_m):
                 and candidate.get("jhm_profile_schema_version") == resolved.schema_version
                 and candidate.get("jhm_profile_height_mm") == resolved.height_mm
                 and candidate.get("jhm_profile_projection_mm") == resolved.projection_mm
+                and candidate.get("jhm_profile_bevel_mm") == resolved.bevel_mm
+                and candidate.get("jhm_profile_radius_mm") == resolved.radius_mm
                 and candidate.get("jhm_profile_orientation") == orientation
                 and candidate.get("jhm_profile_vertical_base_mm")
                 == vertical_base_mm):
@@ -439,7 +441,7 @@ def _production_profile(resolved, horizontal_sign, vertical_base_m):
     try:
         data.dimensions = "2D"
         spline = data.splines.new("POLY")
-        spline.points.add(3)
+        spline.points.add(len(resolved.contour) - 1)
         for target, point in zip(spline.points,
                                  placement_adjusted_contour(
                                      resolved, sign, vertical_base_m)):
@@ -454,6 +456,8 @@ def _production_profile(resolved, horizontal_sign, vertical_base_m):
         obj["jhm_profile_schema_version"] = resolved.schema_version
         obj["jhm_profile_height_mm"] = resolved.height_mm
         obj["jhm_profile_projection_mm"] = resolved.projection_mm
+        obj["jhm_profile_bevel_mm"] = resolved.bevel_mm
+        obj["jhm_profile_radius_mm"] = resolved.radius_mm
         obj["jhm_profile_orientation"] = orientation
         obj["jhm_profile_vertical_base_mm"] = vertical_base_mm
         obj.hide_viewport = True

@@ -12,12 +12,13 @@ from .finish_geometry import (
 )
 from .finish_dependencies import restore_finish_data, snapshot_finish_data
 from .finish_profiles import (
-    DEFAULT_HEIGHT_MM, DEFAULT_PROJECTION_MM, PROFILE_SCHEMA_VERSION,
-    SIMPLE_PROFILE_ID, SIMPLE_PROFILE_REVISION, resolve_finish_profile,
+    BEVEL_PROFILE_ID, DEFAULT_BEVEL_MM, DEFAULT_HEIGHT_MM,
+    DEFAULT_PROJECTION_MM, DEFAULT_RADIUS_MM, PROFILE_SCHEMA_VERSION,
+    ROUNDED_PROFILE_ID, SIMPLE_PROFILE_ID, SIMPLE_PROFILE_REVISION, resolve_finish_profile,
     resolve_default_simple_profile, transactional_profile_edit,
 )
 from .finish_hardening import managed_finish_objects
-from .finish_mesh import weld_and_validate_finish_mesh
+from .finish_mesh import apply_profile_shading, weld_and_validate_finish_mesh
 from .dependency_transaction import DependencyTransaction, OperationRecovery, recover_operation
 from .finish_identity import (
     duplicate_ids, ensure_persistent_id, id_index, new_persistent_id,
@@ -464,14 +465,17 @@ class JHM_OT_regenerate_finish(bpy.types.Operator):
 
 
 class JHM_OT_edit_finish_profile(bpy.types.Operator):
-    """Transactionally edit one Run's production SIMPLE parameters."""
+    """Transactionally switch or edit one Run's standard Profile."""
 
     bl_idname = "jhm.edit_finish_profile"
-    bl_label = "Profile寸法を変更"
+    bl_label = "Profileを変更"
     bl_options = {"REGISTER", "UNDO"}
 
     profile: bpy.props.EnumProperty(
-        name="Profile", items=(("SIMPLE", "SIMPLE", "標準の矩形Profile"),),
+        name="Profile", items=(
+            ("SIMPLE", "SIMPLE", "標準の矩形Profile"),
+            ("BEVEL", "BEVEL", "上部室内側を45度面取り"),
+            ("ROUNDED", "ROUNDED", "上部室内側を丸める")),
         default="SIMPLE")
     height_mm: bpy.props.FloatProperty(
         name="高さ (mm)", default=DEFAULT_HEIGHT_MM,
@@ -479,6 +483,22 @@ class JHM_OT_edit_finish_profile(bpy.types.Operator):
     projection_mm: bpy.props.FloatProperty(
         name="出幅 (mm)", default=DEFAULT_PROJECTION_MM,
         min=0.1, max=10000.0, precision=1)
+    bevel_mm: bpy.props.FloatProperty(
+        name="面取り (mm)", default=DEFAULT_BEVEL_MM,
+        min=0.1, max=10000.0, precision=1)
+    radius_mm: bpy.props.FloatProperty(
+        name="半径 (mm)", default=DEFAULT_RADIUS_MM,
+        min=0.1, max=10000.0, precision=1)
+
+    def draw(self, _context):
+        layout = self.layout
+        layout.prop(self, "profile")
+        layout.prop(self, "height_mm")
+        layout.prop(self, "projection_mm")
+        if self.profile == BEVEL_PROFILE_ID:
+            layout.prop(self, "bevel_mm")
+        elif self.profile == ROUNDED_PROFILE_ID:
+            layout.prop(self, "radius_mm")
 
     @classmethod
     def poll(cls, context):
@@ -490,16 +510,19 @@ class JHM_OT_edit_finish_profile(bpy.types.Operator):
         except ValueError as error:
             self.report({"ERROR"}, str(error))
             return {"CANCELLED"}
-        self.profile = SIMPLE_PROFILE_ID
+        self.profile = resolved.profile_id
         self.height_mm = resolved.height_mm
         self.projection_mm = resolved.projection_mm
+        self.bevel_mm = resolved.bevel_mm
+        self.radius_mm = resolved.radius_mm
         return context.window_manager.invoke_props_dialog(self)
 
     def execute(self, context):
         obj = context.active_object
         finish = obj.jhm_finish
-        new = (SIMPLE_PROFILE_ID, SIMPLE_PROFILE_REVISION,
-               PROFILE_SCHEMA_VERSION, self.height_mm, self.projection_mm)
+        new = (self.profile, SIMPLE_PROFILE_REVISION,
+               PROFILE_SCHEMA_VERSION, self.height_mm, self.projection_mm,
+               self.bevel_mm, self.radius_mm)
         try:
             # Preparation performs Profile, path, miter and blocker validation
             # while the previous valid Curve remains installed.
@@ -507,7 +530,7 @@ class JHM_OT_edit_finish_profile(bpy.types.Operator):
                 finish, new,
                 lambda: prepare_finish_regeneration(obj, context.scene))
         except Exception as error:
-            self.report({"ERROR"}, f"Profile寸法を変更できませんでした: {error}")
+            self.report({"ERROR"}, f"Profileを変更できませんでした: {error}")
             return {"CANCELLED"}
         return {"FINISHED"}
 
@@ -640,8 +663,7 @@ class JHM_OT_convert_finish_mesh(bpy.types.Operator):
             # unwelded boundary vertices.  Finalize topology while the managed
             # source still exists so any failure remains fully recoverable.
             weld_and_validate_finish_mesh(mesh)
-            for polygon in mesh.polygons:
-                polygon.use_smooth = False
+            apply_profile_shading(mesh, resolve_finish_profile(obj.jhm_finish))
         except Exception as error:
             recovery = OperationRecovery()
             recovery.add(remove_temporary)

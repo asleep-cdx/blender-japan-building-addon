@@ -5,25 +5,48 @@ import math
 
 
 SIMPLE_PROFILE_ID = "SIMPLE"
+BEVEL_PROFILE_ID = "BEVEL"
+ROUNDED_PROFILE_ID = "ROUNDED"
+STANDARD_PROFILE_IDS = (SIMPLE_PROFILE_ID, BEVEL_PROFILE_ID, ROUNDED_PROFILE_ID)
 LEGACY_SIMPLE_PROFILE_ID = "SIMPLE_10X60"
 SIMPLE_PROFILE_REVISION = 1
+BEVEL_PROFILE_REVISION = 1
+ROUNDED_PROFILE_REVISION = 1
 PROFILE_SCHEMA_VERSION = 1
 DEFAULT_HEIGHT_MM = 60.0
 DEFAULT_PROJECTION_MM = 10.0
+DEFAULT_BEVEL_MM = 5.0
+DEFAULT_RADIUS_MM = 5.0
+ROUNDED_ARC_SEGMENTS_R1 = 16
 PRODUCTION_CURVE_DIMENSIONS = "2D"
 
 
 @dataclass(frozen=True)
+class ProfileShading:
+    """Deterministic shading intent for a standard Profile revision."""
+
+    smooth_round: bool
+    smooth_contour_edges: tuple
+
+
+@dataclass(frozen=True)
 class ResolvedProfile:
-    """One immutable, orientation-independent Profile resolution."""
+    """One immutable source of geometry, safety and shading information."""
 
     profile_id: str
     profile_revision: int
     schema_version: int
     height_mm: float
     projection_mm: float
+    bevel_mm: float
+    radius_mm: float
     contour: tuple
     bounds: tuple
+    shading: ProfileShading
+
+    @property
+    def profile_kind(self):
+        return self.profile_id
 
     @property
     def height_m(self):
@@ -31,48 +54,87 @@ class ResolvedProfile:
 
     @property
     def projection_m(self):
-        return self.projection_mm / 1000.0
+        """Maximum horizontal safety extent, derived from contour bounds."""
+        return max(abs(self.bounds[0]), abs(self.bounds[1]))
+
+    @property
+    def maximum_horizontal_extent_m(self):
+        return self.projection_m
+
+
+def _positive_dimensions(height, projection):
+    if not all(math.isfinite(value) and value > 0.0
+               for value in (height, projection)):
+        raise ValueError("Profileの高さと出幅は有限の正数である必要があります。")
 
 
 def resolve_profile(profile_id, profile_revision=0, schema_version=0,
-                    height_mm=0.0, projection_mm=0.0):
+                    height_mm=0.0, projection_mm=0.0,
+                    bevel_mm=DEFAULT_BEVEL_MM, radius_mm=DEFAULT_RADIUS_MM):
     """Resolve persisted identity and Run-local values without mutating them."""
     if profile_id == LEGACY_SIMPLE_PROFILE_ID:
+        profile_id = SIMPLE_PROFILE_ID
         revision, schema = SIMPLE_PROFILE_REVISION, PROFILE_SCHEMA_VERSION
         height, projection = DEFAULT_HEIGHT_MM, DEFAULT_PROJECTION_MM
-    elif profile_id == SIMPLE_PROFILE_ID:
+    elif profile_id in STANDARD_PROFILE_IDS:
         revision, schema = int(profile_revision), int(schema_version)
         height, projection = float(height_mm), float(projection_mm)
-        if revision != SIMPLE_PROFILE_REVISION:
-            raise ValueError("未対応のSIMPLE Profile revisionです。")
+        if revision != 1:
+            raise ValueError(f"未対応の{profile_id} Profile revisionです。")
         if schema != PROFILE_SCHEMA_VERSION:
             raise ValueError("未対応のProfile schema versionです。")
     else:
         raise ValueError("Profileを解決できません。")
-    if not all(math.isfinite(value) and value > 0.0
-               for value in (height, projection)):
-        raise ValueError("Profileの高さと出幅は有限の正数である必要があります。")
-    contour = ((0.0, 0.0), (0.0, height / 1000.0),
-               (projection / 1000.0, height / 1000.0),
-               (projection / 1000.0, 0.0))
-    return ResolvedProfile(SIMPLE_PROFILE_ID, revision, schema, height,
-                           projection, contour,
-                           (0.0, projection / 1000.0,
-                            0.0, height / 1000.0))
+
+    bevel, radius = float(bevel_mm), float(radius_mm)
+    _positive_dimensions(height, projection)
+    scale = 1.0 / 1000.0
+    if profile_id == SIMPLE_PROFILE_ID:
+        contour_mm = ((0.0, 0.0), (0.0, height),
+                      (projection, height), (projection, 0.0))
+        shading = ProfileShading(False, ())
+    elif profile_id == BEVEL_PROFILE_ID:
+        if not math.isfinite(bevel) or not 0.0 < bevel < min(height, projection):
+            raise ValueError("面取りは高さと出幅より小さい有限の正数である必要があります。")
+        contour_mm = ((0.0, 0.0), (0.0, height),
+                      (projection - bevel, height),
+                      (projection, height - bevel), (projection, 0.0))
+        shading = ProfileShading(False, ())
+    else:
+        if not math.isfinite(radius) or not 0.0 < radius < min(height, projection):
+            raise ValueError("半径は高さと出幅より小さい有限の正数である必要があります。")
+        cx, cy = projection - radius, height - radius
+        arc = tuple((cx + radius * math.cos(math.pi / 2.0 -
+                                            math.pi * index /
+                                            (2.0 * ROUNDED_ARC_SEGMENTS_R1)),
+                     cy + radius * math.sin(math.pi / 2.0 -
+                                            math.pi * index /
+                                            (2.0 * ROUNDED_ARC_SEGMENTS_R1)))
+                    for index in range(ROUNDED_ARC_SEGMENTS_R1 + 1))
+        contour_mm = ((0.0, 0.0), (0.0, height)) + arc + ((projection, 0.0),)
+        # Arc consists of 16 edges, starting at contour edge 2.
+        shading = ProfileShading(True, tuple(range(2, 2 + ROUNDED_ARC_SEGMENTS_R1)))
+
+    contour = tuple((x * scale, y * scale) for x, y in contour_mm)
+    xs, ys = tuple(zip(*contour))
+    bounds = (min(xs), max(xs), min(ys), max(ys))
+    return ResolvedProfile(profile_id, revision, schema, height, projection,
+                           bevel, radius, contour, bounds, shading)
 
 
 def resolve_finish_profile(finish):
-    return resolve_profile(finish.profile_id, finish.profile_revision,
-                           finish.profile_schema_version,
-                           finish.profile_height_mm,
-                           finish.profile_projection_mm)
+    return resolve_profile(
+        finish.profile_id, finish.profile_revision,
+        finish.profile_schema_version, finish.profile_height_mm,
+        finish.profile_projection_mm,
+        getattr(finish, "profile_bevel_mm", DEFAULT_BEVEL_MM),
+        getattr(finish, "profile_radius_mm", DEFAULT_RADIUS_MM))
 
 
 def resolve_default_simple_profile():
-    """Resolve the production SIMPLE defaults used by path creation preview."""
-    return resolve_profile(
-        SIMPLE_PROFILE_ID, SIMPLE_PROFILE_REVISION, PROFILE_SCHEMA_VERSION,
-        DEFAULT_HEIGHT_MM, DEFAULT_PROJECTION_MM)
+    return resolve_profile(SIMPLE_PROFILE_ID, SIMPLE_PROFILE_REVISION,
+                           PROFILE_SCHEMA_VERSION, DEFAULT_HEIGHT_MM,
+                           DEFAULT_PROJECTION_MM)
 
 
 def oriented_contour(profile, horizontal_sign):
@@ -85,7 +147,6 @@ def oriented_contour(profile, horizontal_sign):
 
 
 def vertical_base_mm(vertical_base_m):
-    """Return a stable canonical-mm cache value for derived placement."""
     value = float(vertical_base_m)
     if not math.isfinite(value):
         raise ValueError("Profile vertical placementが不正です。")
@@ -93,22 +154,20 @@ def vertical_base_mm(vertical_base_m):
 
 
 def placement_adjusted_contour(profile, horizontal_sign, vertical_base_m):
-    """Translate only the Blender-derived contour to its vertical placement."""
     base = vertical_base_mm(vertical_base_m) / 1000.0
     return tuple((x, y + base)
                  for x, y in oriented_contour(profile, horizontal_sign))
 
 
 def derived_profile_cache_identity(profile, horizontal_sign, vertical_base_m):
-    """Identity for one orientation- and placement-specific Blender Profile."""
     orientation = "NEGATIVE" if float(horizontal_sign) < 0.0 else "POSITIVE"
     return (profile.profile_id, profile.profile_revision, profile.schema_version,
-            profile.height_mm, profile.projection_mm, orientation,
+            profile.height_mm, profile.projection_mm,
+            profile.bevel_mm, profile.radius_mm, orientation,
             vertical_base_mm(vertical_base_m))
 
 
 def uniform_vertical_base(points, epsilon_m=1.0e-9):
-    """Resolve the single Stage 1 path Z, rejecting mixed vertical paths."""
     if not points:
         raise ValueError("Finish pathが空です。")
     values = [float(point[2]) for point in points]
@@ -121,14 +180,15 @@ def uniform_vertical_base(points, epsilon_m=1.0e-9):
 
 
 def production_profile_values(profile):
-    """Canonical values stored when a legacy Run is explicitly edited."""
+    """Canonical legacy migration values (kept compatible with Stage 1)."""
     return (profile.profile_id, profile.profile_revision, profile.schema_version,
             profile.height_mm, profile.projection_mm)
 
 
 PROFILE_INSTANCE_FIELDS = (
     "profile_id", "profile_revision", "profile_schema_version",
-    "profile_height_mm", "profile_projection_mm",
+    "profile_height_mm", "profile_projection_mm", "profile_bevel_mm",
+    "profile_radius_mm",
 )
 
 
@@ -136,7 +196,10 @@ def transactional_profile_edit(owner, values, prepare):
     """Apply Run-local values and a derived replacement as one transaction."""
     from .dependency_transaction import DependencyTransaction
 
-    old = tuple(getattr(owner, field) for field in PROFILE_INSTANCE_FIELDS)
+    defaults = (None, None, None, None, None, DEFAULT_BEVEL_MM, DEFAULT_RADIUS_MM)
+    old = tuple(getattr(owner, field, default)
+                for field, default in zip(PROFILE_INSTANCE_FIELDS, defaults))
+    fields = PROFILE_INSTANCE_FIELDS[:len(values)]
 
     def restore(snapshot):
         for field, value in zip(PROFILE_INSTANCE_FIELDS, snapshot):
@@ -144,14 +207,12 @@ def transactional_profile_edit(owner, values, prepare):
 
     transaction = DependencyTransaction(old, restore)
     try:
-        for field, value in zip(PROFILE_INSTANCE_FIELDS, values):
+        for field, value in zip(fields, values):
             setattr(owner, field, value)
-        # Validate before allocating Blender data; prepare may repeat resolution
-        # so geometry and safety consume this exact provisional state.
         resolve_finish_profile(owner)
         transaction.prepare((prepare,))
         transaction.commit()
     except Exception:
-        restore(old)  # also covers failure before transaction.prepare()
+        restore(old)
         raise
     return values
