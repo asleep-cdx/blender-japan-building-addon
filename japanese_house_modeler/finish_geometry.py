@@ -34,7 +34,7 @@ def managed_walls():
 
 
 def validate_path_footprints(spans, segments, intervals, projection_m,
-                             miter_limit=4.0):
+                             miter_limit=4.0, endpoint_exemptions=((), ())):
     """Reject unselected junction walls obstructing a resolved Finish path."""
     for index, (first, second) in enumerate(zip(spans, spans[1:])):
         first_object, _first_side, first_traversal = first
@@ -60,7 +60,8 @@ def validate_path_footprints(spans, segments, intervals, projection_m,
             raise ValueError("選択していない接続Wallが仕上げ経路を遮っています。")
 
     selected = {span[0] for span in spans}
-    for span_index, at_start in ((0, True), (len(spans) - 1, False)):
+    for endpoint_index, (span_index, at_start) in enumerate(
+            ((0, True), (len(spans) - 1, False))):
         wall_object, side, traversal = spans[span_index]
         wall = wall_object.jhm_wall
         arrival, departure = traversal_endpoints(traversal)
@@ -71,7 +72,7 @@ def validate_path_footprints(spans, segments, intervals, projection_m,
             continue
         blockers = []
         for blocker, blocker_endpoint in junction_members(wall_object, endpoint):
-            if blocker in selected:
+            if blocker in selected or blocker in endpoint_exemptions[endpoint_index]:
                 continue
             blocker_wall = blocker.jhm_wall
             junction = (blocker_wall.start if blocker_endpoint == "START"
@@ -231,7 +232,19 @@ def _visible_range_plan(finish, scene, resolved_profile=None):
                 groups.append(current); current = []
             effective = ((end, start) if span.traversal_direction == "REVERSE"
                          else (start, end))
-            current.append((canonical_spans[span_index], segment, effective))
+            adjacent = (
+                canonical_spans[span_index - 1][0] if span_index > 0 else None,
+                canonical_spans[span_index + 1][0]
+                if span_index + 1 < len(canonical_spans) else None,
+            )
+            adjacent_segments = (
+                _segments[span_index - 1] if span_index > 0 else None,
+                _segments[span_index + 1]
+                if span_index + 1 < len(_segments) else None,
+            )
+            current.append((canonical_spans[span_index], segment, effective,
+                            span_index, reaches_arrival, reaches_departure,
+                            adjacent, adjacent_segments))
             if not reaches_departure:
                 groups.append(current); current = []
     if current:
@@ -256,14 +269,26 @@ def resolved_finish_ranges(finish, scene, resolved_profile=None):
     ranges = []
     for group in groups:
         spans = tuple(item[0] for item in group)
-        segments = tuple(item[1] for item in group)
+        segments = [item[1] for item in group]
         intervals = tuple(item[2] for item in group)
+        endpoint_exemptions = [set(), set()]
+        from .finish_surface import resolve_junction_butt
+        first, last = group[0], group[-1]
+        if first[3] > 0 and first[4]:
+            segments[0] = resolve_junction_butt(
+                segments[0], first[7][0], "START", finish.miter_limit)
+            endpoint_exemptions[0].add(first[6][0])
+        if last[3] + 1 < len(finish.spans) and last[5]:
+            segments[-1] = resolve_junction_butt(
+                segments[-1], last[7][1], "END", finish.miter_limit)
+            endpoint_exemptions[1].add(last[6][1])
+        segments = tuple(segments)
         from .finish_surface import validate_profile_miter_space
         validate_profile_miter_space(segments, resolved_profile.projection_m,
                                      finish.miter_limit)
         validate_path_footprints(
             spans, segments, intervals, resolved_profile.projection_m,
-            finish.miter_limit)
+            finish.miter_limit, tuple(endpoint_exemptions))
         ranges.append(tuple((x, y, z) for x, y in resolve_surface_path(
             segments, finish.miter_limit)))
     return tuple(ranges), enabled_count

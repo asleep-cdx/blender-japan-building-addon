@@ -17,6 +17,9 @@ from japanese_house_modeler.finish_exclusions import (
     transactional_edit,
 )
 from japanese_house_modeler.finish_path import resolve_boundary
+from japanese_house_modeler.finish_surface import (
+    endpoint_blocked_by_footprints, resolve_junction_butt, resolve_surface_path,
+)
 
 
 class Stage2AIntervalTests(unittest.TestCase):
@@ -186,6 +189,44 @@ class Stage2ABoundaryAndMigrationTests(unittest.TestCase):
         self.assertEqual(activated_identity("logical", "fragment",
                                             lambda: self.fail()),
                          ("logical", "fragment"))
+
+
+class Stage2AJunctionButtTests(unittest.TestCase):
+    horizontal = ((0.0, 0.05), (2.0, 0.05))
+    vertical = ((1.95, 0.0), (1.95, 2.0))
+    corner = (1.95, 0.05)
+
+    def test_previous_excluded_through_junction_trims_next_start(self):
+        result = resolve_junction_butt(
+            self.vertical, self.horizontal, "START")
+        self.assertEqual(result, (self.corner, self.vertical[1]))
+
+    def test_next_excluded_from_junction_trims_previous_end(self):
+        result = resolve_junction_butt(
+            self.horizontal, self.vertical, "END")
+        self.assertEqual(result, (self.horizontal[0], self.corner))
+
+    def test_reverse_and_side_orientation_are_axis_independent(self):
+        reverse_vertical = tuple(reversed(self.vertical))
+        reverse_horizontal = tuple(reversed(self.horizontal))
+        result = resolve_junction_butt(
+            reverse_vertical, reverse_horizontal, "END")[1]
+        self.assertAlmostEqual(result[0], self.corner[0])
+        self.assertAlmostEqual(result[1], self.corner[1])
+
+    def test_normal_uncut_junction_still_resolves_one_miter(self):
+        self.assertEqual(resolve_surface_path(
+            (self.horizontal, self.vertical)),
+            (self.horizontal[0], self.corner, self.vertical[1]))
+
+    def test_interior_exclusion_remains_plain_butt(self):
+        interior = ((0.5, 0.05), (1.0, 0.05))
+        self.assertEqual(interior[1], (1.0, 0.05))
+
+    def test_unrelated_branch_blocker_is_still_detected(self):
+        self.assertTrue(endpoint_blocked_by_footprints(
+            self.corner, (1.0, 0.0),
+            (((1.95, 0.05), (2.95, 0.05), 0.1),), 0.01))
 
 
 if __name__ == "__main__":
