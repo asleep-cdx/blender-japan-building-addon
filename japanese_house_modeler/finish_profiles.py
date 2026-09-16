@@ -43,6 +43,8 @@ class ResolvedProfile:
     contour: tuple
     bounds: tuple
     shading: ProfileShading
+    uniform_scale: float = 1.0
+    display_name: str = ""
 
     @property
     def profile_kind(self):
@@ -122,7 +124,37 @@ def resolve_profile(profile_id, profile_revision=0, schema_version=0,
                            bevel, radius, contour, bounds, shading)
 
 
-def resolve_finish_profile(finish):
+def resolve_custom_profile(profile_id, profile_revision, schema_version,
+                           uniform_scale, library):
+    from .finish_custom_profiles import (
+        find_definition, scaled_contour, validate_uniform_scale,
+    )
+    definition = find_definition(library, profile_id, profile_revision,
+                                 schema_version)
+    scale = validate_uniform_scale(uniform_scale)
+    raw = tuple((float(point.x), float(point.y)) for point in definition.points)
+    contour = scaled_contour(raw, scale)
+    if len(contour) < 3:
+        raise ValueError("Custom Profile snapshotが不正です。")
+    xs, ys = zip(*contour)
+    bounds = min(xs), max(xs), min(ys), max(ys)
+    smooth = tuple(index for index, point in enumerate(definition.points)
+                   if getattr(point, "smooth_to_next", False))
+    return ResolvedProfile(
+        profile_id, int(profile_revision), int(schema_version),
+        (bounds[3] - bounds[2]) * 1000.0,
+        max(abs(bounds[0]), abs(bounds[1])) * 1000.0,
+        0.0, 0.0, contour, bounds,
+        ProfileShading(bool(smooth), smooth), scale,
+        definition.display_name)
+
+
+def resolve_finish_profile(finish, library=None):
+    if finish.profile_id not in STANDARD_PROFILE_IDS + (LEGACY_SIMPLE_PROFILE_ID,):
+        return resolve_custom_profile(
+            finish.profile_id, finish.profile_revision,
+            finish.profile_schema_version,
+            getattr(finish, "profile_uniform_scale", 1.0), library)
     return resolve_profile(
         finish.profile_id, finish.profile_revision,
         finish.profile_schema_version, finish.profile_height_mm,
@@ -163,7 +195,8 @@ def derived_profile_cache_identity(profile, horizontal_sign, vertical_base_m):
     orientation = "NEGATIVE" if float(horizontal_sign) < 0.0 else "POSITIVE"
     return (profile.profile_id, profile.profile_revision, profile.schema_version,
             profile.height_mm, profile.projection_mm,
-            profile.bevel_mm, profile.radius_mm, orientation,
+            profile.bevel_mm, profile.radius_mm, profile.uniform_scale,
+            profile.contour, profile.shading.smooth_contour_edges, orientation,
             vertical_base_mm(vertical_base_m))
 
 
@@ -189,14 +222,16 @@ PROFILE_INSTANCE_FIELDS = (
     "profile_id", "profile_revision", "profile_schema_version",
     "profile_height_mm", "profile_projection_mm", "profile_bevel_mm",
     "profile_radius_mm",
+    "profile_uniform_scale",
 )
 
 
-def transactional_profile_edit(owner, values, prepare):
+def transactional_profile_edit(owner, values, prepare, library=None):
     """Apply Run-local values and a derived replacement as one transaction."""
     from .dependency_transaction import DependencyTransaction
 
-    defaults = (None, None, None, None, None, DEFAULT_BEVEL_MM, DEFAULT_RADIUS_MM)
+    defaults = (None, None, None, None, None, DEFAULT_BEVEL_MM,
+                DEFAULT_RADIUS_MM, 1.0)
     old = tuple(getattr(owner, field, default)
                 for field, default in zip(PROFILE_INSTANCE_FIELDS, defaults))
     fields = PROFILE_INSTANCE_FIELDS[:len(values)]
@@ -209,7 +244,7 @@ def transactional_profile_edit(owner, values, prepare):
     try:
         for field, value in zip(fields, values):
             setattr(owner, field, value)
-        resolve_finish_profile(owner)
+        resolve_finish_profile(owner, library)
         transaction.prepare((prepare,))
         transaction.commit()
     except Exception:

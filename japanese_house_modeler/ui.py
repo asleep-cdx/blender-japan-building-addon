@@ -38,6 +38,23 @@ class JHM_PT_house_modeler(bpy.types.Panel):
         new_wall_box.prop(defaults, "ceiling_reference_z_mm", text="天井基準高さ (mm)")
         new_wall_box.operator("jhm.regenerate_all_finishes", text="仕上げを一括再生成")
 
+        profile_box = layout.box()
+        profile_box.label(text="Project Custom Profile Library")
+        profile_box.label(text="2D / 閉じた1 spline / POLY・BEZIER")
+        profile_box.label(text="+X = 出幅方向 / +Y = 上方向")
+        profile_box.label(text="Object Transform = identity")
+        library = context.scene.jhm_custom_profiles
+        if library:
+            profile_box.prop(context.scene, "jhm_custom_profile_index", text="選択番号")
+            for index, item in enumerate(library):
+                marker = ">" if index == context.scene.jhm_custom_profile_index else " "
+                profile_box.label(text=(f"{marker} {index}: {item.display_name} "
+                                        f"({item.source_type}, r{item.profile_revision})"))
+        else:
+            profile_box.label(text="登録Profileなし")
+        profile_box.operator("jhm.register_custom_profile")
+        profile_box.operator("jhm.delete_custom_profile")
+
         layout.separator()
         selected_box = layout.box()
         active_object = context.active_object
@@ -126,18 +143,21 @@ class JHM_PT_house_modeler(bpy.types.Panel):
             selected_box.label(text=f"種類: {finish.finish_type}")
             try:
                 from .finish_profiles import resolve_finish_profile
-                profile = resolve_finish_profile(finish)
-                selected_box.label(text=f"Profile: {profile.profile_id}")
+                profile = resolve_finish_profile(finish, context.scene.jhm_custom_profiles)
+                selected_box.label(text=f"Profile: {profile.display_name or profile.profile_id}")
                 selected_box.label(text=f"高さ: {profile.height_mm:.1f} mm")
                 selected_box.label(text=f"出幅: {profile.projection_mm:.1f} mm")
                 if profile.profile_id == "BEVEL":
                     selected_box.label(text=f"面取り: {profile.bevel_mm:.1f} mm")
                 elif profile.profile_id == "ROUNDED":
                     selected_box.label(text=f"半径: {profile.radius_mm:.1f} mm")
+                elif profile.profile_id not in ("SIMPLE", "BEVEL", "ROUNDED"):
+                    selected_box.label(text=f"revision: {profile.profile_revision}")
+                    selected_box.label(text=f"均一スケール: {profile.uniform_scale:g}")
             except ValueError:
                 selected_box.label(text="Profile: 解決不能")
             selected_box.label(text=f"区間数: {len(finish.spans)}")
-            problems = diagnose_finish(active_object)
+            problems = diagnose_finish(active_object, context.scene)
             selected_box.label(text="管理状態: " + status_label(problems))
             if not problems:
                 try:
