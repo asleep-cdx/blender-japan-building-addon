@@ -16,6 +16,9 @@ from japanese_house_modeler.finish_profiles import (
     resolve_default_simple_profile, transactional_profile_edit,
 )
 from japanese_house_modeler.finish_path import profile_horizontal_sign
+from japanese_house_modeler.finish_mesh import (
+    MESH_WELD_DISTANCE_M, closed_volume_topology_is_valid,
+)
 from japanese_house_modeler.finish_surface import (
     endpoint_blocked_by_footprints, transition_blocked_by_footprints,
     validate_profile_miter_space,
@@ -28,6 +31,15 @@ def signed_area(points):
 
 
 class Build06BStage1ProfileTests(unittest.TestCase):
+    def test_mesh_cleanup_uses_micrometre_weld_and_closed_volume_policy(self):
+        self.assertEqual(MESH_WELD_DISTANCE_M, 1.0e-6)
+        self.assertTrue(closed_volume_topology_is_valid(0, 0, .001))
+        self.assertTrue(closed_volume_topology_is_valid(0, 0, -.001))
+        self.assertFalse(closed_volume_topology_is_valid(1, 1, .001))
+        self.assertFalse(closed_volume_topology_is_valid(0, 0, 0.0))
+        self.assertFalse(closed_volume_topology_is_valid(
+            0, 0, float("nan")))
+
     def test_preview_default_uses_resolved_production_simple_profile(self):
         profile = resolve_default_simple_profile()
         self.assertEqual((profile.profile_id, profile.profile_revision,

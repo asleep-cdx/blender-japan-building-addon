@@ -16,6 +16,7 @@ from .finish_profiles import (
     resolve_default_simple_profile, transactional_profile_edit,
 )
 from .finish_hardening import managed_finish_objects
+from .finish_mesh import weld_and_validate_finish_mesh
 from .dependency_transaction import OperationRecovery, recover_operation
 from .finish_identity import (
     duplicate_ids, ensure_persistent_id, id_index, new_persistent_id,
@@ -435,6 +436,10 @@ class JHM_OT_convert_finish_mesh(bpy.types.Operator):
                 temporary.evaluated_get(depsgraph), depsgraph=depsgraph)
             if mesh is None:
                 raise RuntimeError("Mesh datablockを生成できませんでした。")
+            # Curve fill caps and side faces may evaluate with coincident but
+            # unwelded boundary vertices.  Finalize topology while the managed
+            # source still exists so any failure remains fully recoverable.
+            weld_and_validate_finish_mesh(mesh)
             for polygon in mesh.polygons:
                 polygon.use_smooth = False
         except Exception as error:
