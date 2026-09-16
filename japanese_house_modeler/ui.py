@@ -8,7 +8,7 @@ from .junctions import classification_label, classify_junction
 from .joints import joint_status_label
 from .joints import has_identity_transform
 from .finish_identity import duplicate_ids
-from .finish_geometry import diagnose_finish
+from .finish_geometry import canonical_visible_range_state, diagnose_finish
 from .finish_state import status_label
 
 
@@ -136,10 +136,14 @@ class JHM_PT_house_modeler(bpy.types.Panel):
             problems = diagnose_finish(active_object)
             selected_box.label(text="管理状態: " + status_label(problems))
             if not problems:
-                visible_count = len(active_object.data.splines)
-                selected_box.label(text=f"表示区間: {visible_count}")
-                if visible_count == 0 and any(item.enabled for item in finish.exclusions):
-                    selected_box.label(text="状態: 全区間除外")
+                try:
+                    visible_state, visible_count = canonical_visible_range_state(
+                        finish, context.scene)
+                    selected_box.label(text=f"表示区間: {visible_count}")
+                    if visible_state == "VALID_EMPTY":
+                        selected_box.label(text="状態: 全区間除外")
+                except (AttributeError, ReferenceError, TypeError, ValueError):
+                    selected_box.label(text="表示区間: 解決不能")
             selected_box.operator("jhm.edit_finish_profile", text="Profile寸法を変更")
             selected_box.operator("jhm.edit_finish_boundaries", text="開始/終了位置を変更")
             exclusions = selected_box.box()

@@ -11,10 +11,11 @@ package.__path__ = [str(ROOT / "japanese_house_modeler")]
 sys.modules.setdefault("japanese_house_modeler", package)
 
 from japanese_house_modeler.finish_exclusions import (
-    calculate_visible_intervals, classify_visible_state,
+    activated_identity, calculate_visible_intervals, classify_visible_state,
     exclusion_split_identities, merge_coverage, subtract_intervals,
-    transactional_edit,
+    piece_reaches_boundary, run_boundary_field, transactional_edit,
 )
+from japanese_house_modeler.finish_path import resolve_boundary
 
 
 class Stage2AIntervalTests(unittest.TestCase):
@@ -81,6 +82,69 @@ class Stage2AIdentityStateTests(unittest.TestCase):
     def test_partial_boundary_positive_validation(self): self.assertEqual(subtract_intervals((100, 900), ()), ((100.0, 900.0),))
     def test_partial_boundary_reverse_validation(self):
         with self.assertRaises(ValueError): subtract_intervals((900, 100), ())
+
+
+class Stage2AReverseGroupingTests(unittest.TestCase):
+    def assert_uncut(self, traversal):
+        self.assertTrue(piece_reaches_boundary(
+            (0, 1000), (0, 1000), traversal, "ARRIVAL"))
+        self.assertTrue(piece_reaches_boundary(
+            (0, 1000), (0, 1000), traversal, "DEPARTURE"))
+
+    def test_forward_forward_continuous(self):
+        self.assert_uncut("FORWARD"); self.assert_uncut("FORWARD")
+
+    def test_forward_reverse_continuous(self):
+        self.assert_uncut("FORWARD"); self.assert_uncut("REVERSE")
+
+    def test_reverse_forward_continuous(self):
+        self.assert_uncut("REVERSE"); self.assert_uncut("FORWARD")
+
+    def test_reverse_reverse_continuous(self):
+        self.assert_uncut("REVERSE"); self.assert_uncut("REVERSE")
+
+    def test_reverse_arrival_cut_does_not_join_previous(self):
+        self.assertFalse(piece_reaches_boundary(
+            (0, 800), (0, 1000), "REVERSE", "ARRIVAL"))
+
+    def test_reverse_departure_cut_does_not_join_next(self):
+        self.assertFalse(piece_reaches_boundary(
+            (200, 1000), (0, 1000), "REVERSE", "DEPARTURE"))
+
+    def test_full_reverse_joins_both_sides(self): self.assert_uncut("REVERSE")
+
+
+class Stage2ABoundaryAndMigrationTests(unittest.TestCase):
+    def test_single_forward_fields(self):
+        self.assertEqual((run_boundary_field("FORWARD", "START"),
+                          run_boundary_field("FORWARD", "END")),
+                         ("entry", "exit"))
+
+    def test_single_reverse_fields(self):
+        self.assertEqual((run_boundary_field("REVERSE", "START"),
+                          run_boundary_field("REVERSE", "END")),
+                         ("exit", "entry"))
+
+    def test_multi_first_reverse(self):
+        self.assertEqual(run_boundary_field("REVERSE", "START"), "exit")
+
+    def test_multi_last_reverse(self):
+        self.assertEqual(run_boundary_field("REVERSE", "END"), "entry")
+
+    def test_existing_boundary_normalizes_from_wall_start(self):
+        self.assertEqual(resolve_boundary("WALL_START", 123, 1000), 0)
+        self.assertEqual(resolve_boundary("WALL_END", 123, 1000), 1000)
+        self.assertEqual(resolve_boundary("DISTANCE_FROM_END", 250, 1000), 750)
+
+    def test_legacy_identity_migrates_only_on_activation(self):
+        values = iter(("logical", "fragment"))
+        self.assertEqual(activated_identity("", "", lambda: next(values)),
+                         ("logical", "fragment"))
+
+    def test_existing_identity_is_preserved(self):
+        self.assertEqual(activated_identity("logical", "fragment",
+                                            lambda: self.fail()),
+                         ("logical", "fragment"))
 
 
 if __name__ == "__main__":

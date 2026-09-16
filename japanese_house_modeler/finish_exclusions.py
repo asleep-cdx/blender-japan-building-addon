@@ -74,6 +74,44 @@ def classify_visible_state(canonical_valid, visible_count, exclusion_count):
     return "NORMAL"
 
 
+def traversal_bounds(interval, traversal):
+    """Return canonical arrival/departure coordinates in traversal order."""
+    start, end = map(float, interval)
+    if end - start <= EPSILON_MM:
+        raise ValueError("invalid span interval")
+    if traversal == "FORWARD":
+        return start, end
+    if traversal == "REVERSE":
+        return end, start
+    raise ValueError("invalid traversal direction")
+
+
+def piece_reaches_boundary(piece, interval, traversal, boundary,
+                           epsilon=0.001):
+    """Whether an ascending visible piece reaches arrival or departure."""
+    if boundary not in {"ARRIVAL", "DEPARTURE"}:
+        raise ValueError("invalid traversal boundary")
+    arrival, departure = traversal_bounds(interval, traversal)
+    piece_arrival, piece_departure = traversal_bounds(piece, traversal)
+    expected = arrival if boundary == "ARRIVAL" else departure
+    actual = piece_arrival if boundary == "ARRIVAL" else piece_departure
+    return abs(actual - expected) <= float(epsilon)
+
+
+def run_boundary_field(traversal, endpoint):
+    """Map an actual Run endpoint to its canonical FinishSpan field prefix."""
+    if endpoint == "START":
+        return "entry" if traversal == "FORWARD" else "exit"
+    if endpoint == "END":
+        return "exit" if traversal == "FORWARD" else "entry"
+    raise ValueError("invalid Run endpoint")
+
+
+def activated_identity(exclusion_id, fragment_id, factory=new_exclusion_id):
+    """Lazily migrate a legacy record when the user explicitly enables it."""
+    return exclusion_id or factory(), fragment_id or factory()
+
+
 def exclusion_split_identities(exclusion_id, fragment_id, piece_count,
                                factory=new_exclusion_id):
     """Preserve a logical ID and replace fragment IDs only when divided."""

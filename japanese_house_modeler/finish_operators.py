@@ -46,6 +46,7 @@ def _finish_poll(context):
 def _transactional_finish_mutation(obj, scene, mutate):
     """Commit canonical and generated Finish state together."""
     snapshot = snapshot_finish_data((obj,))
+    old_active_index = obj.jhm_finish.active_exclusion_index
     transaction = DependencyTransaction(snapshot, restore_finish_data)
     try:
         mutate()
@@ -54,6 +55,8 @@ def _transactional_finish_mutation(obj, scene, mutate):
     except Exception:
         if transaction.state not in {"ROLLED_BACK", "FINALIZED"}:
             transaction.rollback()
+        obj.jhm_finish.active_exclusion_index = min(
+            old_active_index, max(0, len(obj.jhm_finish.exclusions) - 1))
         raise
 
 
@@ -108,7 +111,13 @@ class JHM_OT_edit_finish_exclusion(bpy.types.Operator):
         finish = context.active_object.jhm_finish
         if not finish.exclusions: return {"CANCELLED"}
         item = finish.exclusions[min(finish.active_exclusion_index, len(finish.exclusions)-1)]
-        self.start_mm, self.end_mm = item.start_boundary_value_mm, item.end_boundary_value_mm
+        from .finish_path import resolve_boundary
+        wall = item.wall_object.jhm_wall
+        length_mm = wall_axis(wall.start, wall.end)[1] * 1000.0
+        self.start_mm = resolve_boundary(
+            item.start_boundary_kind, item.start_boundary_value_mm, length_mm)
+        self.end_mm = resolve_boundary(
+            item.end_boundary_kind, item.end_boundary_value_mm, length_mm)
         return context.window_manager.invoke_props_dialog(self)
 
     def execute(self, context):
@@ -148,7 +157,15 @@ class JHM_OT_toggle_finish_exclusion(bpy.types.Operator):
     def execute(self, context):
         obj, finish, index = context.active_object, context.active_object.jhm_finish, context.active_object.jhm_finish.active_exclusion_index
         if index >= len(finish.exclusions): return {"CANCELLED"}
-        try: _transactional_finish_mutation(obj, context.scene, lambda: setattr(finish.exclusions[index], "enabled", not finish.exclusions[index].enabled))
+        from .finish_exclusions import activated_identity
+        def mutate():
+            item = finish.exclusions[index]
+            enabling = not item.enabled
+            if enabling:
+                item.exclusion_id, item.fragment_id = activated_identity(
+                    item.exclusion_id, item.fragment_id)
+            item.enabled = enabling
+        try: _transactional_finish_mutation(obj, context.scene, mutate)
         except Exception as error:
             self.report({"ERROR"}, str(error)); return {"CANCELLED"}
         return {"FINISHED"}
@@ -163,20 +180,32 @@ class JHM_OT_edit_finish_boundaries(bpy.types.Operator):
     def poll(cls, context): return _finish_poll(context)
     def invoke(self, context, _event):
         from .finish_path import resolve_boundary
+        from .finish_exclusions import run_boundary_field
         finish = context.active_object.jhm_finish
         first, last = finish.spans[0], finish.spans[-1]
         def length(span):
             wall = span.wall_object.jhm_wall
             return wall_axis(wall.start, wall.end)[1] * 1000.0
-        self.start_mm = resolve_boundary(first.entry_boundary_kind, first.entry_boundary_value_mm, length(first))
-        self.end_mm = resolve_boundary(last.exit_boundary_kind, last.exit_boundary_value_mm, length(last))
+        start_field = run_boundary_field(first.traversal_direction, "START")
+        end_field = run_boundary_field(last.traversal_direction, "END")
+        self.start_mm = resolve_boundary(
+            getattr(first, start_field + "_boundary_kind"),
+            getattr(first, start_field + "_boundary_value_mm"), length(first))
+        self.end_mm = resolve_boundary(
+            getattr(last, end_field + "_boundary_kind"),
+            getattr(last, end_field + "_boundary_value_mm"), length(last))
         return context.window_manager.invoke_props_dialog(self)
     def execute(self, context):
+        from .finish_exclusions import run_boundary_field
         obj, finish = context.active_object, context.active_object.jhm_finish
         def mutate():
             first, last = finish.spans[0], finish.spans[-1]
-            first.entry_boundary_kind = last.exit_boundary_kind = "DISTANCE_FROM_START"
-            first.entry_boundary_value_mm, last.exit_boundary_value_mm = self.start_mm, self.end_mm
+            start_field = run_boundary_field(first.traversal_direction, "START")
+            end_field = run_boundary_field(last.traversal_direction, "END")
+            setattr(first, start_field + "_boundary_kind", "DISTANCE_FROM_START")
+            setattr(first, start_field + "_boundary_value_mm", self.start_mm)
+            setattr(last, end_field + "_boundary_kind", "DISTANCE_FROM_START")
+            setattr(last, end_field + "_boundary_value_mm", self.end_mm)
         try: _transactional_finish_mutation(obj, context.scene, mutate)
         except Exception as error:
             self.report({"ERROR"}, str(error)); return {"CANCELLED"}
