@@ -124,8 +124,17 @@ class JHM_PT_house_modeler(bpy.types.Panel):
             finish = active_object.jhm_finish
             selected_box.label(text="選択中の仕上げ")
             selected_box.label(text=f"種類: {finish.finish_type}")
+            try:
+                from .finish_profiles import resolve_finish_profile
+                profile = resolve_finish_profile(finish)
+                selected_box.label(text=f"Profile: {profile.profile_id}")
+                selected_box.label(text=f"高さ: {profile.height_mm:.1f} mm")
+                selected_box.label(text=f"出幅: {profile.projection_mm:.1f} mm")
+            except ValueError:
+                selected_box.label(text="Profile: 解決不能")
             selected_box.label(text=f"区間数: {len(finish.spans)}")
             selected_box.label(text="管理状態: " + status_label(diagnose_finish(active_object)))
+            selected_box.operator("jhm.edit_finish_profile", text="Profile寸法を変更")
             selected_box.operator("jhm.regenerate_finish", text="経路を再生成")
             selected_box.operator("jhm.repair_finish", text="管理状態へ復元")
             selected_box.operator("jhm.convert_finish_mesh", text="編集可能Meshとして確定")

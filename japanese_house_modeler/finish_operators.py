@@ -10,7 +10,13 @@ from .finish_geometry import (
     create_finish_object, diagnose_finish, prepare_finish_regeneration,
     regenerate_finish, regenerate_finishes_atomic, validate_path_footprints,
 )
+from .finish_profiles import (
+    DEFAULT_HEIGHT_MM, DEFAULT_PROJECTION_MM, PROFILE_SCHEMA_VERSION,
+    SIMPLE_PROFILE_ID, SIMPLE_PROFILE_REVISION, resolve_finish_profile,
+    resolve_default_simple_profile, transactional_profile_edit,
+)
 from .finish_hardening import managed_finish_objects
+from .finish_mesh import weld_and_validate_finish_mesh
 from .dependency_transaction import OperationRecovery, recover_operation
 from .finish_identity import (
     duplicate_ids, ensure_persistent_id, id_index, new_persistent_id,
@@ -18,7 +24,9 @@ from .finish_identity import (
 from .finish_state import unique_rebind_candidate
 from .joints import has_identity_transform
 from .connections import connection_collection, is_reciprocal_connection
-from .finish_surface import face_segment, resolve_surface_path, wall_axis
+from .finish_surface import (
+    face_segment, resolve_surface_path, validate_profile_miter_space, wall_axis,
+)
 from .finish_path import (
     backspace_pending, propagate_canonical_side, traversal_for_connection,
 )
@@ -150,7 +158,10 @@ class JHM_OT_start_finish_path(bpy.types.Operator):
             return
         shader = gpu.shader.from_builtin("UNIFORM_COLOR")
         try:
+            preview_profile = resolve_default_simple_profile()
             resolve_surface_path(segments_resolved)
+            validate_profile_miter_space(
+                segments_resolved, preview_profile.projection_m)
             intervals = []
             for obj, _side, traversal in spans:
                 _axis, length = wall_axis(
@@ -158,7 +169,9 @@ class JHM_OT_start_finish_path(bpy.types.Operator):
                 length *= 1000.0
                 intervals.append((0.0, length) if traversal == "FORWARD"
                                  else (length, 0.0))
-            validate_path_footprints(spans, segments_resolved, intervals)
+            validate_path_footprints(
+                spans, segments_resolved, intervals,
+                preview_profile.projection_m)
             color = (0.1, 0.8, 1.0, 1.0)
         except ValueError:
             # Keep the raw guide visible, but never present a join which the
@@ -249,6 +262,55 @@ class JHM_OT_regenerate_finish(bpy.types.Operator):
             regenerate_finish(context.active_object, context.scene)
         except Exception as error:
             self.report({"ERROR"}, str(error)); return {"CANCELLED"}
+        return {"FINISHED"}
+
+
+class JHM_OT_edit_finish_profile(bpy.types.Operator):
+    """Transactionally edit one Run's production SIMPLE parameters."""
+
+    bl_idname = "jhm.edit_finish_profile"
+    bl_label = "Profile寸法を変更"
+    bl_options = {"REGISTER", "UNDO"}
+
+    profile: bpy.props.EnumProperty(
+        name="Profile", items=(("SIMPLE", "SIMPLE", "標準の矩形Profile"),),
+        default="SIMPLE")
+    height_mm: bpy.props.FloatProperty(
+        name="高さ (mm)", default=DEFAULT_HEIGHT_MM,
+        min=0.1, max=100000.0, precision=1)
+    projection_mm: bpy.props.FloatProperty(
+        name="出幅 (mm)", default=DEFAULT_PROJECTION_MM,
+        min=0.1, max=10000.0, precision=1)
+
+    @classmethod
+    def poll(cls, context):
+        return _finish_poll(context)
+
+    def invoke(self, context, _event):
+        try:
+            resolved = resolve_finish_profile(context.active_object.jhm_finish)
+        except ValueError as error:
+            self.report({"ERROR"}, str(error))
+            return {"CANCELLED"}
+        self.profile = SIMPLE_PROFILE_ID
+        self.height_mm = resolved.height_mm
+        self.projection_mm = resolved.projection_mm
+        return context.window_manager.invoke_props_dialog(self)
+
+    def execute(self, context):
+        obj = context.active_object
+        finish = obj.jhm_finish
+        new = (SIMPLE_PROFILE_ID, SIMPLE_PROFILE_REVISION,
+               PROFILE_SCHEMA_VERSION, self.height_mm, self.projection_mm)
+        try:
+            # Preparation performs Profile, path, miter and blocker validation
+            # while the previous valid Curve remains installed.
+            transactional_profile_edit(
+                finish, new,
+                lambda: prepare_finish_regeneration(obj, context.scene))
+        except Exception as error:
+            self.report({"ERROR"}, f"Profile寸法を変更できませんでした: {error}")
+            return {"CANCELLED"}
         return {"FINISHED"}
 
 
@@ -374,6 +436,10 @@ class JHM_OT_convert_finish_mesh(bpy.types.Operator):
                 temporary.evaluated_get(depsgraph), depsgraph=depsgraph)
             if mesh is None:
                 raise RuntimeError("Mesh datablockを生成できませんでした。")
+            # Curve fill caps and side faces may evaluate with coincident but
+            # unwelded boundary vertices.  Finalize topology while the managed
+            # source still exists so any failure remains fully recoverable.
+            weld_and_validate_finish_mesh(mesh)
             for polygon in mesh.polygons:
                 polygon.use_smooth = False
         except Exception as error:
