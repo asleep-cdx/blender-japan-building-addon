@@ -46,8 +46,29 @@ tree, the 166-test automated suite passed, and the full Build 05-B regression pa
 
 ## Post-Build-06-A follow-up
 
-These are usability/appearance follow-ups and are not Build 06-A failures:
+**Post-Build-06-A follow-up: COMPLETED**
 
-- Generated Finish default Flat Shade.
-- Finish path preview visibility / line thickness improvement.
-- Invalid-path preview indication (for example, T-blocker paths should use a clear warning color instead of normal cyan/blue).
+Runtime verification target: GitHub PR #3 production-code commit
+`ef815734fc8338bd5164f5c65f206f807ef4d504`.
+
+### Automated
+
+- `python -m unittest tests.test_build_06_a`
+- 60 tests PASS
+
+### Blender 5.2 LTS runtime
+
+1. Generated Finish Curve Flat Shade: **PASS**
+   - Confirmed `spline.use_smooth=False`.
+2. Editable Mesh conversion Flat Shade: **PASS**
+   - Confirmed all `polygon.use_smooth=False`.
+3. Normal path preview: **PASS**
+   - Cyan.
+   - Approximately 3 px thick preview line.
+4. GPU line-width state restoration: **PASS**
+   - Before and after preview, `gpu.state.line_width_get() == 1.0`.
+5. T-blocker invalid preview: **PASS**
+   - Orange warning line.
+   - Enter continued to reject the path with
+     「選択していない接続Wallが仕上げ経路を遮っています。」
+   - No invalid Finish was generated.

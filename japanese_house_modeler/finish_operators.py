@@ -8,7 +8,7 @@ from gpu_extras.batch import batch_for_shader
 from .connections import is_valid_wall_object
 from .finish_geometry import (
     create_finish_object, diagnose_finish, prepare_finish_regeneration,
-    regenerate_finish, regenerate_finishes_atomic,
+    regenerate_finish, regenerate_finishes_atomic, validate_path_footprints,
 )
 from .finish_hardening import managed_finish_objects
 from .dependency_transaction import OperationRecovery, recover_operation
@@ -18,7 +18,7 @@ from .finish_identity import (
 from .finish_state import unique_rebind_candidate
 from .joints import has_identity_transform
 from .connections import connection_collection, is_reciprocal_connection
-from .finish_surface import face_segment, resolve_surface_path
+from .finish_surface import face_segment, resolve_surface_path, wall_axis
 from .finish_path import (
     backspace_pending, propagate_canonical_side, traversal_for_connection,
 )
@@ -151,13 +151,28 @@ class JHM_OT_start_finish_path(bpy.types.Operator):
         shader = gpu.shader.from_builtin("UNIFORM_COLOR")
         try:
             resolve_surface_path(segments_resolved)
+            intervals = []
+            for obj, _side, traversal in spans:
+                _axis, length = wall_axis(
+                    obj.jhm_wall.start, obj.jhm_wall.end)
+                length *= 1000.0
+                intervals.append((0.0, length) if traversal == "FORWARD"
+                                 else (length, 0.0))
+            validate_path_footprints(spans, segments_resolved, intervals)
             color = (0.1, 0.8, 1.0, 1.0)
         except ValueError:
             # Keep the raw guide visible, but never present a join which the
             # final resolver already rejects as an apparently valid cyan path.
             color = (1.0, 0.25, 0.05, 1.0)
-        shader.bind(); shader.uniform_float("color", color)
-        batch_for_shader(shader, "LINES", {"pos": [(x, y, .02) for x, y in vertices]}).draw(shader)
+        previous_line_width = gpu.state.line_width_get()
+        try:
+            gpu.state.line_width_set(3.0)
+            shader.bind(); shader.uniform_float("color", color)
+            batch_for_shader(
+                shader, "LINES", {"pos": [(x, y, .02) for x, y in vertices]}
+            ).draw(shader)
+        finally:
+            gpu.state.line_width_set(previous_line_width)
 
     def _commit(self, context):
         changed_ids = []
@@ -359,6 +374,8 @@ class JHM_OT_convert_finish_mesh(bpy.types.Operator):
                 temporary.evaluated_get(depsgraph), depsgraph=depsgraph)
             if mesh is None:
                 raise RuntimeError("Mesh datablockを生成できませんでした。")
+            for polygon in mesh.polygons:
+                polygon.use_smooth = False
         except Exception as error:
             recovery = OperationRecovery()
             recovery.add(remove_temporary)
