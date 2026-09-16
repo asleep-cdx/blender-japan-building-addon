@@ -2,16 +2,17 @@
 
 Blender 5.2 LTS向けの、日本住宅を寸法ベースでモデリングするためのアドオンです。
 
-## Build 01
+## Build 06-A Stage 3 Candidate
 
 実装済み：
 
 - 3D Viewport のサイドバー「日本住宅」タブにあるUI
-- 新規壁のデフォルト壁厚（105 mm）・壁高さ（2500 mm）
-- 将来の個別Wallデータ用 `PropertyGroup`
-- 正の値だけを許可する寸法入力
+- 永続IDと明示接続を持つ芯線ベースのWall生成・編集・分割・安全な削除
+- Wall接合と、Wall参照をcanonical stateとして保持するFinishRun
+- transaction-safeなFinish再生成、分割/削除remap、管理状態診断
+- 床/天井基準の一括再生成、および通常編集可能なMeshへの確定
 
-未実装：壁の生成、クリック操作、スナップ、接合、間取り図、ドア・窓・床・天井など、Wall Systemの実処理全般です。Build 01の「＋ 壁」は未実装であることを通知するだけで、メッシュを生成しません。
+これはBlender 5.2 LTSでのformal runtime acceptance前の候補版です。`BREAK` join、closed Finish、Profile Library、開口、部屋認識、床/天井Mesh生成は対象外です。
 
 ## インストール
 
@@ -20,6 +21,6 @@ Blender 5.2 LTS向けの、日本住宅を寸法ベースでモデリングす�
 3. 「日本住宅モデラー」を有効化します。
 4. 3D Viewportで **N** を押し、「日本住宅」タブを開きます。
 
-## 今後の予定
+## Acceptance
 
-Build 02では、トップビューで指定する始点・終点、壁芯、個別寸法、および壁メッシュ生成を追加する予定です。
+自動テスト結果と、未実施のBlender runtime項目はリポジトリ直下の `BUILD_06_A_ACCEPTANCE_RECORD.md` で区別して記録します。

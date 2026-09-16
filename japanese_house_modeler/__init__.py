@@ -3,10 +3,10 @@
 bl_info = {
     "name": "日本住宅モデラー",
     "author": "Japanese House Modeler Contributors",
-    "version": (0, 1, 0),
+    "version": (0, 6, 3),
     "blender": (5, 2, 0),
     "location": "View3D > Sidebar > 日本住宅",
-    "description": "Create centreline-based walls for Japanese house modelling",
+    "description": "Build 06-A Stage 3 Candidate: managed Walls and FinishRuns",
     "category": "3D View",
 }
 
@@ -28,6 +28,7 @@ _CLASSES = (
     operators.JHM_OT_delete_wall,
     finish_operators.JHM_OT_start_finish_path,
     finish_operators.JHM_OT_regenerate_finish,
+    finish_operators.JHM_OT_regenerate_all_finishes,
     finish_operators.JHM_OT_repair_finish,
     finish_operators.JHM_OT_delete_finish,
     finish_operators.JHM_OT_convert_finish_mesh,

@@ -6,14 +6,19 @@ from bpy_extras import view3d_utils
 from gpu_extras.batch import batch_for_shader
 
 from .connections import is_valid_wall_object
-from .finish_geometry import create_finish_object, diagnose_finish, regenerate_finish
+from .finish_geometry import (
+    create_finish_object, diagnose_finish, prepare_finish_regeneration,
+    regenerate_finish, regenerate_finishes_atomic,
+)
+from .finish_hardening import managed_finish_objects
+from .dependency_transaction import OperationRecovery, recover_operation
 from .finish_identity import (
     duplicate_ids, ensure_persistent_id, id_index, new_persistent_id,
 )
 from .finish_state import unique_rebind_candidate
 from .joints import has_identity_transform
 from .connections import connection_collection, is_reciprocal_connection
-from .finish_surface import face_segment
+from .finish_surface import face_segment, resolve_surface_path
 from .finish_path import (
     backspace_pending, propagate_canonical_side, traversal_for_connection,
 )
@@ -130,18 +135,28 @@ class JHM_OT_start_finish_path(bpy.types.Operator):
             spans[0] = (spans[0][0], spans[0][1], self._candidate_first_traversal)
         spans += ([self._candidate] if self._candidate else [])
         vertices = []
+        segments_resolved = []
         for obj, side, traversal in spans:
             try:
-                vertices.extend(face_segment(
+                segment = face_segment(
                     obj.jhm_wall.start, obj.jhm_wall.end,
                     obj.jhm_wall.wall_thickness / 1000.0, side,
-                    traversal=traversal))
+                    traversal=traversal)
+                segments_resolved.append(segment)
+                vertices.extend(segment)
             except (ReferenceError, ValueError):
                 continue
         if len(vertices) < 2:
             return
         shader = gpu.shader.from_builtin("UNIFORM_COLOR")
-        shader.bind(); shader.uniform_float("color", (0.1, 0.8, 1.0, 1.0))
+        try:
+            resolve_surface_path(segments_resolved)
+            color = (0.1, 0.8, 1.0, 1.0)
+        except ValueError:
+            # Keep the raw guide visible, but never present a join which the
+            # final resolver already rejects as an apparently valid cyan path.
+            color = (1.0, 0.25, 0.05, 1.0)
+        shader.bind(); shader.uniform_float("color", color)
         batch_for_shader(shader, "LINES", {"pos": [(x, y, .02) for x, y in vertices]}).draw(shader)
 
     def _commit(self, context):
@@ -222,9 +237,34 @@ class JHM_OT_regenerate_finish(bpy.types.Operator):
         return {"FINISHED"}
 
 
-class JHM_OT_repair_finish(JHM_OT_regenerate_finish):
+class JHM_OT_regenerate_all_finishes(bpy.types.Operator):
+    """Explicitly apply floor/ceiling reference changes as one transaction."""
+
+    bl_idname = "jhm.regenerate_all_finishes"
+    bl_label = "仕上げを一括再生成"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        objects = managed_finish_objects(
+            (obj, bool(getattr(getattr(obj, "jhm_finish", None), "is_finish", False)))
+            for obj in context.scene.objects)
+        try:
+            regenerate_finishes_atomic(objects, context.scene)
+        except Exception as error:
+            self.report({"ERROR"}, f"一括再生成できませんでした: {error}")
+            return {"CANCELLED"}
+        self.report({"INFO"}, f"{len(objects)}件の仕上げを再生成しました。")
+        return {"FINISHED"}
+
+
+class JHM_OT_repair_finish(bpy.types.Operator):
     bl_idname = "jhm.repair_finish"
     bl_label = "管理状態へ復元"
+    bl_options = {"REGISTER", "UNDO"}
+
+    @classmethod
+    def poll(cls, context):
+        return _finish_poll(context)
 
     def execute(self, context):
         obj = context.active_object
@@ -282,18 +322,110 @@ class JHM_OT_convert_finish_mesh(bpy.types.Operator):
 
     def execute(self, context):
         obj = context.active_object
+        original_curve = obj.data
+        prepared = None
+        temporary = None
+        mesh = None
+        replacement_object = None
+
+        def remove_temporary():
+            if temporary is not None and temporary.name in bpy.data.objects:
+                bpy.data.objects.remove(temporary, do_unlink=True)
+
+        def discard_prepared():
+            if prepared is not None:
+                prepared.discard(prepared.replacement)
+
+        def remove_mesh():
+            if mesh is not None and mesh.users == 0:
+                bpy.data.meshes.remove(mesh)
+
+        def remove_replacement():
+            if (replacement_object is not None
+                    and replacement_object.name in bpy.data.objects):
+                bpy.data.objects.remove(replacement_object, do_unlink=True)
+
         try:
-            regenerate_finish(obj, context.scene)
-            for selected in context.selected_objects:
-                selected.select_set(False)
-            context.view_layer.objects.active = obj
-            obj.select_set(True)
-            bpy.ops.object.convert(target="MESH")
-            obj.jhm_finish.is_finish = False
-            obj.jhm_finish.finish_id = ""
-            obj.jhm_finish.spans.clear()
-            obj.jhm_finish.exclusions.clear()
+            # Prepare every disposable resource while the managed source remains
+            # untouched.  A newly-created Object has no copied Finish identity.
+            prepared = prepare_finish_regeneration(obj, context.scene)
+            temporary = bpy.data.objects.new(
+                "JHM Finish Conversion Temporary", prepared.replacement)
+            temporary.jhm_finish.is_finish = False
+            temporary.jhm_finish.finish_id = ""
+            context.collection.objects.link(temporary)
+            depsgraph = context.evaluated_depsgraph_get()
+            mesh = bpy.data.meshes.new_from_object(
+                temporary.evaluated_get(depsgraph), depsgraph=depsgraph)
+            if mesh is None:
+                raise RuntimeError("Mesh datablockを生成できませんでした。")
         except Exception as error:
-            self.report({"ERROR"}, f"Meshへ変換できませんでした: {error}")
+            recovery = OperationRecovery()
+            recovery.add(remove_temporary)
+            recovery.add(discard_prepared)
+            recovery.add(remove_mesh)
+            failure = recover_operation(error, recovery)
+            self.report({"ERROR"}, f"Meshへ変換できませんでした: {failure}")
             return {"CANCELLED"}
+
+        # The evaluated Mesh no longer needs its disposable Object/Curve.  Do
+        # this before the final swap so cleanup failure leaves the source valid.
+        preparation_cleanup = OperationRecovery()
+        preparation_cleanup.add(remove_temporary)
+        preparation_cleanup.add(discard_prepared)
+        try:
+            preparation_cleanup()
+        except Exception as error:
+            recovery = OperationRecovery()
+            recovery.add(remove_mesh)
+            failure = recover_operation(error, recovery)
+            self.report({"ERROR"}, f"Meshへ変換できませんでした: {failure}")
+            return {"CANCELLED"}
+
+        # Build and link a real Mesh Object while the original managed Finish is
+        # still completely intact.  Object.data cannot change a CURVE to MESH.
+        try:
+            replacement_object = bpy.data.objects.new(f"{obj.name} Mesh", mesh)
+            replacement_object.matrix_world = obj.matrix_world.copy()
+            replacement_object.jhm_finish.is_finish = False
+            replacement_object.jhm_finish.finish_id = ""
+            collections = tuple(obj.users_collection) or (context.collection,)
+            for collection in collections:
+                collection.objects.link(replacement_object)
+        except Exception as error:
+            recovery = OperationRecovery()
+            recovery.add(remove_replacement)
+            recovery.add(remove_mesh)
+            failure = recover_operation(error, recovery)
+            self.report({"ERROR"}, f"Meshへ変換できませんでした: {failure}")
+            return {"CANCELLED"}
+
+        # Final commit: only now replace the original managed Object.  If the
+        # removal itself fails, discard only the prepared replacement resources.
+        try:
+            bpy.data.objects.remove(obj, do_unlink=True)
+        except Exception as error:
+            recovery = OperationRecovery()
+            recovery.add(remove_replacement)
+            recovery.add(remove_mesh)
+            failure = recover_operation(error, recovery)
+            self.report({"ERROR"}, f"Meshへ変換できませんでした: {failure}")
+            return {"CANCELLED"}
+        cleanup_warning = None
+        if original_curve.users == 0:
+            try:
+                bpy.data.curves.remove(original_curve)
+            except Exception as error:
+                # The replacement is already committed and usable.  Failure to
+                # dispose zero-user old data must not turn success into CANCELLED.
+                cleanup_warning = error
+        for selected in context.selected_objects:
+            selected.select_set(False)
+        replacement_object.select_set(True)
+        context.view_layer.objects.active = replacement_object
+        if cleanup_warning is not None:
+            self.report(
+                {"WARNING"},
+                f"Mesh変換は完了しましたが旧Curveの後処理に失敗しました: {cleanup_warning}",
+            )
         return {"FINISHED"}

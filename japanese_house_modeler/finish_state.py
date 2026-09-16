@@ -8,11 +8,14 @@ STATUS_LABELS = {
     "INTERVAL": "区間不正",
     "DISCONTINUOUS": "経路不連続",
     "OBJECT_TRANSFORM": "Object Transformあり",
+    "FINISH_ID": "Finish ID不整合",
+    "JOIN_POLICY": "未対応join_policy",
+    "CLOSED": "未対応closed状態",
 }
 
 
 def finish_problem_keys(transform_identity, references, intervals_valid,
-                        path_continuous, span_count=None):
+                        path_continuous, span_count=None, extra_problems=()):
     """Classify status from per-span pointer validity and ID integrity."""
     problems = []
     if not transform_identity:
@@ -32,6 +35,9 @@ def finish_problem_keys(transform_identity, references, intervals_valid,
         problems.append("INTERVAL")
     if not path_continuous or span_count == 0:
         problems.append("DISCONTINUOUS")
+    for key in extra_problems:
+        if key not in problems:
+            problems.append(key)
     return tuple(problems)
 
 

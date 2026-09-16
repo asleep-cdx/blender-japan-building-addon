@@ -36,6 +36,7 @@ class JHM_PT_house_modeler(bpy.types.Panel):
         new_wall_box.separator()
         new_wall_box.prop(defaults, "floor_reference_z_mm", text="床基準高さ (mm)")
         new_wall_box.prop(defaults, "ceiling_reference_z_mm", text="天井基準高さ (mm)")
+        new_wall_box.operator("jhm.regenerate_all_finishes", text="仕上げを一括再生成")
 
         layout.separator()
         selected_box = layout.box()

@@ -34,6 +34,16 @@ from japanese_house_modeler.finish_surface import (
 from japanese_house_modeler.finish_state import (
     finish_problem_keys, status_label, unique_rebind_candidate,
 )
+from japanese_house_modeler.finish_hardening import (
+    VERIFICATION_PROFILE_ROLE, VERIFICATION_PROFILE_VERSION,
+    duplicate_finish_ids, finish_configuration_problems, finish_id_is_valid,
+    finish_intervals_are_valid,
+    managed_finish_objects, profile_identity_matches,
+    validate_finish_configuration,
+)
+from japanese_house_modeler.dependency_transaction import (
+    DependencyRollbackError, OperationRecovery, recover_operation,
+)
 
 
 class Owner:
@@ -42,6 +52,89 @@ class Owner:
 
 
 class Build06AIdentityTests(unittest.TestCase):
+    def test_span_and_exclusion_interval_kinds_are_validated_separately(self):
+        valid_span = ("WALL_START", 0, "WALL_END", 0, 2000, "FORWARD")
+        invalid_span = ("WALL_END", 0, "WALL_START", 0, 2000, "FORWARD")
+        valid_exclusion = ("DISTANCE_FROM_START", 100,
+                           "DISTANCE_FROM_END", 100, 2000)
+        invalid_exclusion = ("DISTANCE_FROM_START", 1900,
+                             "DISTANCE_FROM_END", 1900, 2000)
+        self.assertTrue(finish_intervals_are_valid((valid_span,), ()))
+        self.assertFalse(finish_intervals_are_valid((invalid_span,), ()))
+        self.assertTrue(finish_intervals_are_valid((), (valid_exclusion,)))
+        self.assertFalse(finish_intervals_are_valid((), (invalid_exclusion,)))
+
+    def test_duplicate_finish_id_diagnosis_ignores_empty(self):
+        first, second = object(), object()
+        self.assertEqual(duplicate_finish_ids(
+            ((first, "finish-x"), (second, "finish-x"), (object(), ""))),
+            {"finish-x": (first, second)})
+        problems = finish_problem_keys(
+            True, (), True, True, 1, ("FINISH_ID",))
+        self.assertIn("FINISH_ID", problems)
+        self.assertIn("Finish ID不整合", status_label(problems))
+
+    def test_finish_id_normalization_policy(self):
+        self.assertFalse(finish_id_is_valid(""))
+        self.assertFalse(finish_id_is_valid("   \t"))
+        self.assertFalse(finish_id_is_valid(" duplicate ", {"duplicate": ()}))
+        self.assertTrue(finish_id_is_valid(" unique-id ", {"other": ()}))
+        first, second = object(), object()
+        self.assertEqual(duplicate_finish_ids(
+            ((first, " same "), (second, "same"))),
+            {"same": (first, second)})
+        for value, duplicates, expected in (
+                ("", {}, True), ("  ", {}, True),
+                (" same ", {"same": ()}, True), ("unique", {}, False)):
+            problems = finish_problem_keys(
+                True, (), True, True, 1,
+                (() if finish_id_is_valid(value, duplicates) else ("FINISH_ID",)))
+            self.assertEqual("FINISH_ID" in problems, expected)
+
+    def test_unsupported_break_and_closed_are_explicit(self):
+        self.assertEqual(finish_configuration_problems("BREAK", True),
+                         ("JOIN_POLICY", "CLOSED"))
+        with self.assertRaisesRegex(ValueError, "join_policy=BREAK"):
+            validate_finish_configuration("BREAK", False)
+        with self.assertRaisesRegex(ValueError, "closed=True"):
+            validate_finish_configuration("MITER", True)
+        self.assertTrue(validate_finish_configuration("MITER", False))
+        problems = finish_problem_keys(
+            True, (), True, True, 1, ("JOIN_POLICY", "CLOSED"))
+        label = status_label(problems)
+        self.assertIn("未対応join_policy", label)
+        self.assertIn("未対応closed状態", label)
+
+    def test_verification_profile_requires_complete_managed_identity(self):
+        metadata = {
+            "jhm_managed_profile": True,
+            "jhm_profile_role": VERIFICATION_PROFILE_ROLE,
+            "jhm_profile_version": VERIFICATION_PROFILE_VERSION,
+            "jhm_profile_orientation": "POSITIVE",
+        }
+        self.assertTrue(profile_identity_matches(
+            "CURVE", "CURVE", metadata, "POSITIVE"))
+        self.assertFalse(profile_identity_matches(
+            "CURVE", "CURVE", {}, "POSITIVE"))  # same-name user Curve
+        for key, value in (
+                ("jhm_managed_profile", False),
+                ("jhm_profile_role", "WRONG"),
+                ("jhm_profile_version", VERIFICATION_PROFILE_VERSION + 1)):
+            invalid = dict(metadata)
+            invalid[key] = value
+            self.assertFalse(profile_identity_matches(
+                "CURVE", "CURVE", invalid, "POSITIVE"))
+        self.assertFalse(profile_identity_matches(
+            "MESH", "CURVE", metadata, "POSITIVE"))
+        self.assertFalse(profile_identity_matches(
+            "CURVE", "CURVE", metadata, "NEGATIVE"))
+
+    def test_bulk_regeneration_selection_is_stable(self):
+        first, ignored, second = object(), object(), object()
+        self.assertEqual(managed_finish_objects(
+            ((first, True), (ignored, False), (second, True))),
+            (first, second))
+
     def test_new_and_preserved_id(self):
         owner = Owner()
         value = ensure_persistent_id(owner)
@@ -281,6 +374,25 @@ class Build06ASurfaceTests(unittest.TestCase):
 
 
 class Build06ADependencyTests(unittest.TestCase):
+    def test_operation_recovery_attempts_all_and_preserves_original_error(self):
+        attempted = []
+        recovery = OperationRecovery()
+
+        def fail(label):
+            attempted.append(label)
+            raise RuntimeError(label)
+
+        recovery.add(lambda: fail("first"))
+        recovery.add(lambda: attempted.append("middle"))
+        recovery.add(lambda: fail("last"))
+        original = ValueError("conversion failed")
+        failure = recover_operation(original, recovery)
+        self.assertEqual(attempted, ["first", "middle", "last"])
+        self.assertIsInstance(failure, DependencyRollbackError)
+        self.assertIs(failure.operation_error, original)
+        self.assertEqual([str(error) for error in failure.rollback_errors],
+                         ["first", "last"])
+
     def test_whole_crossing_split(self):
         span = SpanRecord("a", 0, 2000)
         self.assertEqual(remap_span_for_split(span, "a", "b", 1000),
