@@ -67,6 +67,13 @@ def resolve_finish_profile(finish):
                            finish.profile_projection_mm)
 
 
+def resolve_default_simple_profile():
+    """Resolve the production SIMPLE defaults used by path creation preview."""
+    return resolve_profile(
+        SIMPLE_PROFILE_ID, SIMPLE_PROFILE_REVISION, PROFILE_SCHEMA_VERSION,
+        DEFAULT_HEIGHT_MM, DEFAULT_PROJECTION_MM)
+
+
 def oriented_contour(profile, horizontal_sign):
     """Return a mirrored derived contour while preserving its winding."""
     if not math.isfinite(float(horizontal_sign)):

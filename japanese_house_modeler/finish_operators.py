@@ -13,7 +13,7 @@ from .finish_geometry import (
 from .finish_profiles import (
     DEFAULT_HEIGHT_MM, DEFAULT_PROJECTION_MM, PROFILE_SCHEMA_VERSION,
     SIMPLE_PROFILE_ID, SIMPLE_PROFILE_REVISION, resolve_finish_profile,
-    transactional_profile_edit,
+    resolve_default_simple_profile, transactional_profile_edit,
 )
 from .finish_hardening import managed_finish_objects
 from .dependency_transaction import OperationRecovery, recover_operation
@@ -23,7 +23,9 @@ from .finish_identity import (
 from .finish_state import unique_rebind_candidate
 from .joints import has_identity_transform
 from .connections import connection_collection, is_reciprocal_connection
-from .finish_surface import face_segment, resolve_surface_path, wall_axis
+from .finish_surface import (
+    face_segment, resolve_surface_path, validate_profile_miter_space, wall_axis,
+)
 from .finish_path import (
     backspace_pending, propagate_canonical_side, traversal_for_connection,
 )
@@ -155,7 +157,10 @@ class JHM_OT_start_finish_path(bpy.types.Operator):
             return
         shader = gpu.shader.from_builtin("UNIFORM_COLOR")
         try:
+            preview_profile = resolve_default_simple_profile()
             resolve_surface_path(segments_resolved)
+            validate_profile_miter_space(
+                segments_resolved, preview_profile.projection_m)
             intervals = []
             for obj, _side, traversal in spans:
                 _axis, length = wall_axis(
@@ -165,7 +170,7 @@ class JHM_OT_start_finish_path(bpy.types.Operator):
                                  else (length, 0.0))
             validate_path_footprints(
                 spans, segments_resolved, intervals,
-                DEFAULT_PROJECTION_MM / 1000.0)
+                preview_profile.projection_m)
             color = (0.1, 0.8, 1.0, 1.0)
         except ValueError:
             # Keep the raw guide visible, but never present a join which the

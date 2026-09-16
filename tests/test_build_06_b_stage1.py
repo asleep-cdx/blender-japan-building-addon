@@ -13,7 +13,7 @@ sys.modules.setdefault("japanese_house_modeler", package)
 from japanese_house_modeler.finish_profiles import (
     LEGACY_SIMPLE_PROFILE_ID, PROFILE_SCHEMA_VERSION, SIMPLE_PROFILE_ID,
     oriented_contour, production_profile_values, resolve_profile,
-    transactional_profile_edit,
+    resolve_default_simple_profile, transactional_profile_edit,
 )
 from japanese_house_modeler.finish_path import profile_horizontal_sign
 from japanese_house_modeler.finish_surface import (
@@ -28,6 +28,12 @@ def signed_area(points):
 
 
 class Build06BStage1ProfileTests(unittest.TestCase):
+    def test_preview_default_uses_resolved_production_simple_profile(self):
+        profile = resolve_default_simple_profile()
+        self.assertEqual((profile.profile_id, profile.profile_revision,
+                          profile.schema_version), ("SIMPLE", 1, 1))
+        self.assertEqual(profile.projection_m, .01)
+
     def test_simple_default_60_by_10(self):
         profile = resolve_profile("SIMPLE", 1, 1, 60, 10)
         self.assertEqual((profile.height_mm, profile.projection_mm), (60, 10))
