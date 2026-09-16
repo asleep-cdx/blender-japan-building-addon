@@ -18,6 +18,12 @@ from .connections import (
 )
 from .finish_identity import id_index
 from .finish_state import finish_problem_keys
+from .finish_hardening import (
+    VERIFICATION_PROFILE_ROLE, VERIFICATION_PROFILE_VERSION,
+    duplicate_finish_ids, finish_configuration_problems, finish_id_is_valid,
+    finish_intervals_are_valid,
+    profile_identity_matches, validate_finish_configuration,
+)
 
 
 def managed_walls():
@@ -135,49 +141,73 @@ def spans_topologically_continuous(spans):
 def diagnose_finish(obj):
     walls = managed_walls()
     index = id_index(walls, lambda wall: wall.jhm_wall.wall_id)
-    references, intervals_valid = [], True
+    references, span_intervals, exclusion_intervals = [], [], []
     from .finish_identity import validate_managed_wall_reference
     from .joints import has_identity_transform
-    records = tuple(obj.jhm_finish.spans) + tuple(obj.jhm_finish.exclusions)
-    for span in records:
+    def diagnose_reference(record):
         try:
-            pointer_present = span.wall_object is not None
-            pointer_exists = span.wall_object in walls
-            matching = pointer_exists and span.wall_object.jhm_wall.wall_id == span.expected_wall_id
+            pointer_present = record.wall_object is not None
+            pointer_exists = record.wall_object in walls
+            matching = (pointer_exists
+                        and record.wall_object.jhm_wall.wall_id
+                        == record.expected_wall_id)
             validate_managed_wall_reference(
-                span.wall_object, span.expected_wall_id, walls,
+                record.wall_object, record.expected_wall_id, walls,
                 lambda item: item.jhm_wall.is_wall, has_identity_transform)
         except ReferenceError:
             pointer_present, pointer_exists, matching = False, False, False
         except ValueError:
             pointer_exists, matching = False, False
         references.append((pointer_present, pointer_exists, matching,
-                           not span.expected_wall_id
-                           or len(index.get(span.expected_wall_id, ())) > 1))
-        if pointer_exists and span in obj.jhm_finish.spans:
-            wall = span.wall_object.jhm_wall
-            try:
-                length = ((wall.end[0] - wall.start[0]) ** 2
-                          + (wall.end[1] - wall.start[1]) ** 2) ** .5 * 1000.0
-                resolve_interval(span.entry_boundary_kind,
-                                 span.entry_boundary_value_mm,
-                                 span.exit_boundary_kind,
-                                 span.exit_boundary_value_mm, length,
-                                 span.traversal_direction)
-            except (ValueError, TypeError):
-                intervals_valid = False
+                           not record.expected_wall_id
+                           or len(index.get(record.expected_wall_id, ())) > 1))
+        if pointer_exists:
+            wall = record.wall_object.jhm_wall
+            return ((wall.end[0] - wall.start[0]) ** 2
+                    + (wall.end[1] - wall.start[1]) ** 2) ** .5 * 1000.0
+        return None
+
+    for span in obj.jhm_finish.spans:
+        length = diagnose_reference(span)
+        if length is not None:
+            span_intervals.append((
+                span.entry_boundary_kind, span.entry_boundary_value_mm,
+                span.exit_boundary_kind, span.exit_boundary_value_mm, length,
+                span.traversal_direction,
+            ))
+    for exclusion in obj.jhm_finish.exclusions:
+        length = diagnose_reference(exclusion)
+        if length is not None:
+            exclusion_intervals.append((
+                exclusion.start_boundary_kind, exclusion.start_boundary_value_mm,
+                exclusion.end_boundary_kind, exclusion.end_boundary_value_mm, length,
+            ))
+    intervals_valid = finish_intervals_are_valid(
+        span_intervals, exclusion_intervals)
     continuous = spans_topologically_continuous(obj.jhm_finish.spans)
+    finishes = [(item, item.jhm_finish.finish_id) for item in bpy.data.objects
+                if getattr(getattr(item, "jhm_finish", None), "is_finish", False)]
+    extras = list(finish_configuration_problems(
+        obj.jhm_finish.join_policy, obj.jhm_finish.closed))
+    if not finish_id_is_valid(obj.jhm_finish.finish_id,
+                              duplicate_finish_ids(finishes)):
+        extras.append("FINISH_ID")
     return finish_problem_keys(obj.matrix_basis.is_identity, references,
-                               intervals_valid, continuous, len(obj.jhm_finish.spans))
+                               intervals_valid, continuous, len(obj.jhm_finish.spans),
+                               extras)
 
 
 def _verification_profile(horizontal_sign):
     """Return ``(object, owned_cleanup)`` for borrowed/transaction-owned data."""
     sign = -1.0 if float(horizontal_sign) < 0.0 else 1.0
     name = "JHM Verification Profile 10x60 " + ("Negative" if sign < 0 else "Positive")
-    obj = bpy.data.objects.get(name)
-    if obj is not None and obj.type == "CURVE":
-        return obj, None
+    orientation = "NEGATIVE" if sign < 0 else "POSITIVE"
+    for candidate in bpy.data.objects:
+        data_type = ("CURVE" if isinstance(getattr(candidate, "data", None),
+                                           bpy.types.Curve) else "")
+        if profile_identity_matches(candidate.type, data_type, candidate,
+                                    orientation):
+            return candidate, None
     data = bpy.data.curves.new(name, "CURVE")
     obj = None
     try:
@@ -190,6 +220,10 @@ def _verification_profile(horizontal_sign):
         spline.use_cyclic_u = True
         obj = bpy.data.objects.new(name, data)
         bpy.context.scene.collection.objects.link(obj)
+        obj["jhm_managed_profile"] = True
+        obj["jhm_profile_role"] = VERIFICATION_PROFILE_ROLE
+        obj["jhm_profile_version"] = VERIFICATION_PROFILE_VERSION
+        obj["jhm_profile_orientation"] = orientation
         obj.hide_viewport = True
         obj.hide_render = True
     except Exception as operation_error:
@@ -225,6 +259,13 @@ def prepare_finish_regeneration(obj, scene):
         raise ValueError("管理対象のFinish Curveではありません。")
     if not obj.matrix_basis.is_identity:
         raise ValueError("Finish Object Transformを復元してください。")
+    validate_finish_configuration(obj.jhm_finish.join_policy,
+                                  obj.jhm_finish.closed)
+    managed = [(item, item.jhm_finish.finish_id) for item in bpy.data.objects
+               if getattr(getattr(item, "jhm_finish", None), "is_finish", False)]
+    duplicates = duplicate_finish_ids(managed)
+    if not finish_id_is_valid(obj.jhm_finish.finish_id, duplicates):
+        raise ValueError("Finish IDが空、空白、または重複しています。")
     points = resolved_finish_points(obj.jhm_finish, scene)
     old_curve = obj.data
     curve = old_curve.copy()
@@ -243,7 +284,7 @@ def prepare_finish_regeneration(obj, scene):
         spline.points.add(len(points) - 1)
         for target, point in zip(spline.points, points):
             target.co = (*point, 1.0)
-        spline.use_cyclic_u = bool(obj.jhm_finish.closed)
+        spline.use_cyclic_u = False
         curve.update_tag()
     except Exception as operation_error:
         from .dependency_transaction import OperationRecovery, recover_operation
