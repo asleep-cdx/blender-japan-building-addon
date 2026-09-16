@@ -2,7 +2,7 @@
 
 Blender 5.2 LTS向けの、日本住宅を寸法ベースでモデリングするためのアドオンです。
 
-## Build 06-A Stage 3 Candidate
+## Build 06-A
 
 実装済み：
 
@@ -12,7 +12,7 @@ Blender 5.2 LTS向けの、日本住宅を寸法ベースでモデリングす�
 - transaction-safeなFinish再生成、分割/削除remap、管理状態診断
 - 床/天井基準の一括再生成、および通常編集可能なMeshへの確定
 
-これはBlender 5.2 LTSでのformal runtime acceptance前の候補版です。`BREAK` join、closed Finish、Profile Library、開口、部屋認識、床/天井Mesh生成は対象外です。
+Build 06-AはBlender 5.2 LTSでformal acceptance済みです。`BREAK` join、closed Finish、Profile Library、開口、部屋認識、床/天井Mesh生成はBuild 06-Aの対象外です。
 
 ## インストール
 
@@ -23,4 +23,4 @@ Blender 5.2 LTS向けの、日本住宅を寸法ベースでモデリングす�
 
 ## Acceptance
 
-自動テスト結果と、未実施のBlender runtime項目はリポジトリ直下の `BUILD_06_A_ACCEPTANCE_RECORD.md` で区別して記録します。
+自動テストおよびBlender runtime acceptanceの結果は、リポジトリ直下の `BUILD_06_A_ACCEPTANCE_RECORD.md` に記録しています。
