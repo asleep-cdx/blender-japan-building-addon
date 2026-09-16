@@ -8,7 +8,10 @@ from .finish_path import (
     boundary_reaches_endpoint, profile_horizontal_sign, resolve_interval,
     resolve_vertical, transition_boundaries_reach, traversal_endpoints,
 )
-from .finish_profiles import oriented_contour, resolve_finish_profile
+from .finish_profiles import (
+    derived_profile_cache_identity, placement_adjusted_contour,
+    PRODUCTION_CURVE_DIMENSIONS, resolve_finish_profile, uniform_vertical_base,
+)
 from .finish_surface import (
     endpoint_blocked_by_footprints, face_segment, resolve_surface_path,
     side_normal, transition_blocked_by_footprints, wall_axis,
@@ -227,11 +230,14 @@ def diagnose_finish(obj):
                                extras)
 
 
-def _production_profile(resolved, horizontal_sign):
+def _production_profile(resolved, horizontal_sign, vertical_base_m):
     """Return a dimension-keyed derived Profile and optional owned cleanup."""
     sign = -1.0 if float(horizontal_sign) < 0.0 else 1.0
+    identity = derived_profile_cache_identity(resolved, sign, vertical_base_m)
+    vertical_base_mm = identity[-1]
     name = (f"JHM SIMPLE r{resolved.profile_revision} "
             f"{resolved.projection_mm:g}x{resolved.height_mm:g} "
+            f"Z{vertical_base_mm:g} "
             + ("Negative" if sign < 0 else "Positive"))
     orientation = "NEGATIVE" if sign < 0 else "POSITIVE"
     for candidate in bpy.data.objects:
@@ -244,7 +250,9 @@ def _production_profile(resolved, horizontal_sign):
                 and candidate.get("jhm_profile_schema_version") == resolved.schema_version
                 and candidate.get("jhm_profile_height_mm") == resolved.height_mm
                 and candidate.get("jhm_profile_projection_mm") == resolved.projection_mm
-                and candidate.get("jhm_profile_orientation") == orientation):
+                and candidate.get("jhm_profile_orientation") == orientation
+                and candidate.get("jhm_profile_vertical_base_mm")
+                == vertical_base_mm):
             for spline in candidate.data.splines:
                 spline.use_smooth = False
             return candidate, None
@@ -255,7 +263,8 @@ def _production_profile(resolved, horizontal_sign):
         spline = data.splines.new("POLY")
         spline.points.add(3)
         for target, point in zip(spline.points,
-                                 oriented_contour(resolved, sign)):
+                                 placement_adjusted_contour(
+                                     resolved, sign, vertical_base_m)):
             target.co = (*point, 0.0, 1.0)
         spline.use_cyclic_u = True
         spline.use_smooth = False
@@ -268,6 +277,7 @@ def _production_profile(resolved, horizontal_sign):
         obj["jhm_profile_height_mm"] = resolved.height_mm
         obj["jhm_profile_projection_mm"] = resolved.projection_mm
         obj["jhm_profile_orientation"] = orientation
+        obj["jhm_profile_vertical_base_mm"] = vertical_base_mm
         obj.hide_viewport = True
         obj.hide_render = True
     except Exception as operation_error:
@@ -312,25 +322,27 @@ def prepare_finish_regeneration(obj, scene):
         raise ValueError("Finish IDが空、空白、または重複しています。")
     resolved_profile = resolve_finish_profile(obj.jhm_finish)
     points = resolved_finish_points(obj.jhm_finish, scene, resolved_profile)
+    vertical_base_m = uniform_vertical_base(points)
     old_curve = obj.data
     curve = old_curve.copy()
     owned_profile_cleanup = None
     try:
-        curve.dimensions = "3D"
+        curve.dimensions = PRODUCTION_CURVE_DIMENSIONS
         curve.resolution_u = 1
         curve.bevel_mode = "OBJECT"
         first_span = obj.jhm_finish.spans[0]
         profile, owned_profile_cleanup = _production_profile(
             resolved_profile,
             profile_horizontal_sign(first_span.side,
-                                    first_span.traversal_direction))
+                                    first_span.traversal_direction),
+            vertical_base_m)
         curve.bevel_object = profile
         curve.use_fill_caps = True
         curve.splines.clear()
         spline = curve.splines.new("POLY")
         spline.points.add(len(points) - 1)
         for target, point in zip(spline.points, points):
-            target.co = (*point, 1.0)
+            target.co = (point[0], point[1], 0.0, 1.0)
         spline.use_cyclic_u = False
         spline.use_smooth = False
         curve.update_tag()

@@ -10,6 +10,7 @@ SIMPLE_PROFILE_REVISION = 1
 PROFILE_SCHEMA_VERSION = 1
 DEFAULT_HEIGHT_MM = 60.0
 DEFAULT_PROJECTION_MM = 10.0
+PRODUCTION_CURVE_DIMENSIONS = "2D"
 
 
 @dataclass(frozen=True)
@@ -81,6 +82,42 @@ def oriented_contour(profile, horizontal_sign):
     if horizontal_sign >= 0.0:
         return profile.contour
     return tuple((-x, y) for x, y in reversed(profile.contour))
+
+
+def vertical_base_mm(vertical_base_m):
+    """Return a stable canonical-mm cache value for derived placement."""
+    value = float(vertical_base_m)
+    if not math.isfinite(value):
+        raise ValueError("Profile vertical placementが不正です。")
+    return round(value * 1000.0, 6)
+
+
+def placement_adjusted_contour(profile, horizontal_sign, vertical_base_m):
+    """Translate only the Blender-derived contour to its vertical placement."""
+    base = vertical_base_mm(vertical_base_m) / 1000.0
+    return tuple((x, y + base)
+                 for x, y in oriented_contour(profile, horizontal_sign))
+
+
+def derived_profile_cache_identity(profile, horizontal_sign, vertical_base_m):
+    """Identity for one orientation- and placement-specific Blender Profile."""
+    orientation = "NEGATIVE" if float(horizontal_sign) < 0.0 else "POSITIVE"
+    return (profile.profile_id, profile.profile_revision, profile.schema_version,
+            profile.height_mm, profile.projection_mm, orientation,
+            vertical_base_mm(vertical_base_m))
+
+
+def uniform_vertical_base(points, epsilon_m=1.0e-9):
+    """Resolve the single Stage 1 path Z, rejecting mixed vertical paths."""
+    if not points:
+        raise ValueError("Finish pathが空です。")
+    values = [float(point[2]) for point in points]
+    epsilon = float(epsilon_m)
+    if (not all(math.isfinite(value) for value in values)
+            or not math.isfinite(epsilon) or epsilon < 0.0
+            or any(abs(value - values[0]) > epsilon for value in values[1:])):
+        raise ValueError("Finish path内で異なるvertical placementは使用できません。")
+    return values[0]
 
 
 def production_profile_values(profile):

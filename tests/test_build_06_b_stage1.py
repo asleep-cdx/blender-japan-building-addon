@@ -11,9 +11,13 @@ package.__path__ = [str(ROOT / "japanese_house_modeler")]
 sys.modules.setdefault("japanese_house_modeler", package)
 
 from japanese_house_modeler.finish_profiles import (
-    LEGACY_SIMPLE_PROFILE_ID, PROFILE_SCHEMA_VERSION, SIMPLE_PROFILE_ID,
-    oriented_contour, production_profile_values, resolve_profile,
+    derived_profile_cache_identity,
+    LEGACY_SIMPLE_PROFILE_ID, PROFILE_SCHEMA_VERSION,
+    PRODUCTION_CURVE_DIMENSIONS, SIMPLE_PROFILE_ID,
+    oriented_contour, placement_adjusted_contour, production_profile_values,
+    resolve_profile,
     resolve_default_simple_profile, transactional_profile_edit,
+    uniform_vertical_base,
 )
 from japanese_house_modeler.finish_path import profile_horizontal_sign
 from japanese_house_modeler.finish_mesh import (
@@ -31,6 +35,39 @@ def signed_area(points):
 
 
 class Build06BStage1ProfileTests(unittest.TestCase):
+    def test_production_finish_path_is_two_dimensional(self):
+        self.assertEqual(PRODUCTION_CURVE_DIMENSIONS, "2D")
+
+    def test_placement_adjusted_contour_preserves_canonical_profile(self):
+        profile = resolve_profile("SIMPLE", 1, 1, 60, 10)
+        canonical = profile.contour
+        for base, expected_y in ((0.0, (0.0, .06)),
+                                 (.5, (.5, .56)),
+                                 (-.2, (-.2, -.14))):
+            derived = placement_adjusted_contour(profile, 1, base)
+            self.assertEqual({x for x, _y in derived}, {0.0, .01})
+            self.assertEqual((min(y for _x, y in derived),
+                              max(y for _x, y in derived)), expected_y)
+            self.assertEqual(profile.contour, canonical)
+            self.assertEqual((profile.height_mm, profile.projection_mm),
+                             (60, 10))
+
+    def test_placement_mirroring_preserves_winding_and_cache_separation(self):
+        profile = resolve_profile("SIMPLE", 1, 1, 60, 10)
+        positive = placement_adjusted_contour(profile, 1, .5)
+        mirrored = placement_adjusted_contour(profile, -1, .5)
+        self.assertGreater(signed_area(positive) * signed_area(mirrored), 0)
+        first = derived_profile_cache_identity(profile, 1, .5)
+        second = derived_profile_cache_identity(profile, 1, -.2)
+        self.assertNotEqual(first, second)
+        self.assertEqual(first[-1], 500.0)
+        self.assertEqual(second[-1], -200.0)
+
+    def test_stage1_path_requires_one_vertical_base(self):
+        self.assertEqual(uniform_vertical_base(((0, 0, .5), (1, 0, .5))), .5)
+        with self.assertRaisesRegex(ValueError, "異なるvertical"):
+            uniform_vertical_base(((0, 0, .5), (1, 0, .6)))
+
     def test_mesh_cleanup_uses_micrometre_weld_and_closed_volume_policy(self):
         self.assertEqual(MESH_WELD_DISTANCE_M, 1.0e-6)
         self.assertTrue(closed_volume_topology_is_valid(0, 0, .001))
