@@ -32,6 +32,7 @@ from japanese_house_modeler.finish_mesh import (
 
 
 SQUARE = ((0, 0), (0.01, 0), (0.01, 0.06), (0, 0.06))
+CLOCKWISE_SQUARE = ((0, 0), (0, 0.06), (0.01, 0.06), (0.01, 0))
 
 
 def circle_knots():
@@ -53,9 +54,14 @@ def mixed_knots():
 
 
 class CustomContourTests(unittest.TestCase):
-    def test_poly_removes_closing_point_and_normalizes_ccw(self):
-        value = normalize_poly_contour(tuple(reversed(SQUARE)) + (SQUARE[-1],))
-        self.assertEqual(4, len(value)); self.assertGreater(signed_area(value), 0)
+    def test_poly_ccw_input_normalizes_clockwise_without_closing_point(self):
+        value = normalize_poly_contour(SQUARE + (SQUARE[0],))
+        self.assertEqual(4, len(value)); self.assertLess(signed_area(value), 0)
+
+    def test_poly_clockwise_input_remains_clockwise(self):
+        value = normalize_poly_contour(CLOCKWISE_SQUARE)
+        self.assertEqual(CLOCKWISE_SQUARE, value)
+        self.assertLess(signed_area(value), 0)
 
     def test_poly_bounds(self):
         self.assertEqual((0.0, .01, 0.0, .06), contour_bounds(normalize_poly_contour(SQUARE)))
@@ -100,6 +106,7 @@ class BezierTests(unittest.TestCase):
         self.assertEqual(first, sample_cyclic_bezier(circle_knots()))
         self.assertEqual(4 * CUSTOM_BEZIER_SEGMENTS_PER_SPAN_R1, len(first))
         self.assertNotEqual(first[0], first[-1])
+        self.assertLess(signed_area(first), 0)
 
     def test_other_sampling_revision_rejected(self):
         with self.assertRaises(ValueError): sample_cyclic_bezier(circle_knots(), 8)
@@ -114,7 +121,10 @@ class BezierTests(unittest.TestCase):
 
     def test_mixed_straight_and_curved_span_intent(self):
         snapshot = make_snapshot("BEZIER", knots=mixed_knots())
-        self.assertEqual(tuple(range(16, 32)), snapshot.smooth_edges)
+        self.assertLess(signed_area(snapshot.contour), 0)
+        # Raw input is CCW, so old span edges 16..31 become canonical
+        # clockwise edges n-2-i => 31..46 without losing their physical span.
+        self.assertEqual(tuple(range(31, 47)), snapshot.smooth_edges)
 
 
 class IdentityAndResolutionTests(unittest.TestCase):
@@ -157,11 +167,22 @@ class ScaleOrientationShadingTests(unittest.TestCase):
     def test_scaled_contour(self):
         self.assertEqual(((0.0, 0.0), (2.0, 4.0)), scaled_contour(((0, 0), (1, 2)), 2))
 
-    def test_mirror_preserves_positive_winding(self):
+    def test_custom_and_mirror_preserve_standard_clockwise_winding(self):
         contour = normalize_poly_contour(SQUARE)
-        self.assertGreater(signed_area(mirrored_contour(contour)), 0)
+        simple = resolve_profile("SIMPLE", 1, 1, 60, 10)
+        self.assertLess(signed_area(contour), 0)
+        self.assertLess(signed_area(simple.contour), 0)
+        self.assertEqual(math.copysign(1, signed_area(simple.contour)),
+                         math.copysign(1, signed_area(contour)))
+        self.assertLess(signed_area(mirrored_contour(contour)), 0)
         profile = types.SimpleNamespace(contour=contour)
-        self.assertGreater(signed_area(oriented_contour(profile, -1)), 0)
+        self.assertLess(signed_area(oriented_contour(profile, 1)), 0)
+        self.assertLess(signed_area(oriented_contour(profile, -1)), 0)
+
+    def test_all_standard_profiles_are_clockwise(self):
+        for name in ("SIMPLE", "BEVEL", "ROUNDED"):
+            self.assertLess(signed_area(
+                resolve_profile(name, 1, 1, 60, 10, 5, 5).contour), 0)
 
     def test_cache_identity_includes_scale_and_contour(self):
         base = resolve_profile("SIMPLE", 1, 1, 60, 10)
@@ -205,8 +226,8 @@ class ScaleOrientationShadingTests(unittest.TestCase):
 
     def test_custom_quad_consumes_explicit_edge_intent(self):
         profile = types.SimpleNamespace(
-            contour=((0, 0), (.01, 0), (.01, .06), (0, .06)),
-            shading=types.SimpleNamespace(smooth_contour_edges=(1,)))
+            contour=CLOCKWISE_SQUARE,
+            shading=types.SimpleNamespace(smooth_contour_edges=(2,)))
         smooth_quad = ((0, .01, 0), (0, .01, .06),
                        (1, .01, .06), (1, .01, 0))
         hard_quad = ((0, 0, 0), (0, .01, 0),
@@ -222,8 +243,8 @@ class ScaleOrientationShadingTests(unittest.TestCase):
 
     def test_equal_height_opposite_edges_are_not_ambiguous(self):
         profile = types.SimpleNamespace(
-            contour=((0, 0), (.01, 0), (.01, .06), (0, .06)),
-            shading=types.SimpleNamespace(smooth_contour_edges=(1,)))
+            contour=CLOCKWISE_SQUARE,
+            shading=types.SimpleNamespace(smooth_contour_edges=(2,)))
         path = (((0, 0, 0), (1, 0, 0)),)
         right = ((0, .01, 0), (0, .01, .06),
                  (1, .01, .06), (1, .01, 0))
@@ -235,8 +256,8 @@ class ScaleOrientationShadingTests(unittest.TestCase):
 
     def test_equal_height_opposite_edges_mirrored_orientation(self):
         profile = types.SimpleNamespace(
-            contour=((0, 0), (.01, 0), (.01, .06), (0, .06)),
-            shading=types.SimpleNamespace(smooth_contour_edges=(1,)))
+            contour=CLOCKWISE_SQUARE,
+            shading=types.SimpleNamespace(smooth_contour_edges=(2,)))
         path = (((0, 0, 0), (1, 0, 0)),)
         mirrored_right = ((0, -.01, .06), (0, -.01, 0),
                           (1, -.01, 0), (1, -.01, .06))

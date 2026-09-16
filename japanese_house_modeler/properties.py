@@ -187,7 +187,7 @@ class JHM_CustomProfileDefinition(bpy.types.PropertyGroup):
     max_x: bpy.props.FloatProperty(options={"HIDDEN"})
     min_y: bpy.props.FloatProperty(options={"HIDDEN"})
     max_y: bpy.props.FloatProperty(options={"HIDDEN"})
-    winding: bpy.props.StringProperty(default="CCW", options={"HIDDEN"})
+    winding: bpy.props.StringProperty(default="CW", options={"HIDDEN"})
     points: bpy.props.CollectionProperty(type=JHM_CustomProfilePoint)
 
 class JHM_FinishProperties(bpy.types.PropertyGroup):

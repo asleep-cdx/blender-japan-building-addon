@@ -131,7 +131,7 @@ def is_convex(points):
 
 
 def normalize_poly_contour(points):
-    """Validate and return a CCW cyclic contour without a closing duplicate."""
+    """Return a validated clockwise production contour without a closing point."""
     contour = remove_adjacent_duplicates(points)
     if len(contour) < 3:
         raise ValueError("Profileには3個以上の有効な点が必要です。")
@@ -147,7 +147,9 @@ def normalize_poly_contour(points):
         raise ValueError("Profile輪郭が自己交差または接触しています。")
     if not is_convex(contour):
         raise ValueError("revision 1では凹形Custom Profileを使用できません。")
-    if area < 0.0:
+    # Standard SIMPLE/BEVEL/ROUNDED Profiles are clockwise (negative signed
+    # area).  Custom revision 1 uses that same production winding contract.
+    if area > 0.0:
         contour = tuple(reversed(contour))
     return contour
 
@@ -189,7 +191,7 @@ def scaled_contour(contour, scale):
 
 
 def mirrored_contour(contour):
-    """Mirror derived geometry across X=0 and preserve CCW winding."""
+    """Mirror derived geometry across X=0 and preserve canonical winding."""
     return tuple((-x, y) for x, y in reversed(contour))
 
 
@@ -241,7 +243,7 @@ def make_snapshot(source_type, points=None, knots=None, profile_id=None):
             # Coincident adjacent samples are normalized; conservative hard
             # intent avoids falsely smoothing a sharp transition.
             smooth = ()
-        elif signed_area(raw) < 0.0:
+        elif signed_area(raw) > 0.0:
             count = len(flags)
             smooth = tuple(index for index in range(count)
                            if flags[(count - 2 - index) % count])
