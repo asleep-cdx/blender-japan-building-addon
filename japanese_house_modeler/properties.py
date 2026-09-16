@@ -157,6 +157,10 @@ class JHM_FinishExclusion(bpy.types.PropertyGroup):
         ("WINDOW", "Window", ""), ("OTHER", "Other", ""),
     ), default="MANUAL")
     source_id: bpy.props.StringProperty(default="")
+    exclusion_id: bpy.props.StringProperty(default="", options={"HIDDEN"})
+    fragment_id: bpy.props.StringProperty(default="", options={"HIDDEN"})
+    # False is intentional: persisted 06-A records remain visually inactive.
+    enabled: bpy.props.BoolProperty(name="有効", default=False)
 
 
 class JHM_FinishProperties(bpy.types.PropertyGroup):
@@ -188,3 +192,4 @@ class JHM_FinishProperties(bpy.types.PropertyGroup):
     closed: bpy.props.BoolProperty(default=False)
     spans: bpy.props.CollectionProperty(type=JHM_FinishSpan)
     exclusions: bpy.props.CollectionProperty(type=JHM_FinishExclusion)
+    active_exclusion_index: bpy.props.IntProperty(default=0, min=0)

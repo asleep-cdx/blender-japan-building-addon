@@ -8,7 +8,7 @@ from .junctions import classification_label, classify_junction
 from .joints import joint_status_label
 from .joints import has_identity_transform
 from .finish_identity import duplicate_ids
-from .finish_geometry import diagnose_finish
+from .finish_geometry import canonical_visible_range_state, diagnose_finish
 from .finish_state import status_label
 
 
@@ -133,8 +133,33 @@ class JHM_PT_house_modeler(bpy.types.Panel):
             except ValueError:
                 selected_box.label(text="Profile: 解決不能")
             selected_box.label(text=f"区間数: {len(finish.spans)}")
-            selected_box.label(text="管理状態: " + status_label(diagnose_finish(active_object)))
+            problems = diagnose_finish(active_object)
+            selected_box.label(text="管理状態: " + status_label(problems))
+            if not problems:
+                try:
+                    visible_state, visible_count = canonical_visible_range_state(
+                        finish, context.scene)
+                    selected_box.label(text=f"表示区間: {visible_count}")
+                    if visible_state == "VALID_EMPTY":
+                        selected_box.label(text="状態: 全区間除外")
+                except (AttributeError, ReferenceError, TypeError, ValueError):
+                    selected_box.label(text="表示区間: 解決不能")
             selected_box.operator("jhm.edit_finish_profile", text="Profile寸法を変更")
+            selected_box.operator("jhm.edit_finish_boundaries", text="開始/終了位置を変更")
+            exclusions = selected_box.box()
+            exclusions.label(text=f"Manual Exclusion ({len(finish.exclusions)})")
+            if finish.exclusions:
+                exclusions.prop(finish, "active_exclusion_index", text="編集対象番号")
+                for index, item in enumerate(finish.exclusions):
+                    row = exclusions.row()
+                    marker = ">" if index == finish.active_exclusion_index else " "
+                    identity = item.exclusion_id[:8] or "legacy"
+                    row.label(text=f"{marker} {index}: {identity}")
+                    row.label(text="有効" if item.enabled else "無効")
+                exclusions.operator("jhm.edit_finish_exclusion", text="選択項目を編集")
+                exclusions.operator("jhm.toggle_finish_exclusion", text="有効/無効を切替")
+                exclusions.operator("jhm.remove_finish_exclusion", text="選択項目を削除")
+            exclusions.operator("jhm.add_finish_exclusion", text="Manual Exclusionを追加")
             selected_box.operator("jhm.regenerate_finish", text="経路を再生成")
             selected_box.operator("jhm.repair_finish", text="管理状態へ復元")
             selected_box.operator("jhm.convert_finish_mesh", text="編集可能Meshとして確定")

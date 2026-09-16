@@ -6,7 +6,7 @@ bl_info = {
     "version": (0, 6, 3),
     "blender": (5, 2, 0),
     "location": "View3D > Sidebar > 日本住宅",
-    "description": "Build 06-B Stage 1: Standard Baseboard Foundation",
+    "description": "Build 06-B Stage 2-A: Manual Exclusion and Partial Placement",
     "category": "3D View",
 }
 
@@ -29,6 +29,11 @@ _CLASSES = (
     finish_operators.JHM_OT_start_finish_path,
     finish_operators.JHM_OT_regenerate_finish,
     finish_operators.JHM_OT_edit_finish_profile,
+    finish_operators.JHM_OT_add_finish_exclusion,
+    finish_operators.JHM_OT_edit_finish_exclusion,
+    finish_operators.JHM_OT_remove_finish_exclusion,
+    finish_operators.JHM_OT_toggle_finish_exclusion,
+    finish_operators.JHM_OT_edit_finish_boundaries,
     finish_operators.JHM_OT_regenerate_all_finishes,
     finish_operators.JHM_OT_repair_finish,
     finish_operators.JHM_OT_delete_finish,

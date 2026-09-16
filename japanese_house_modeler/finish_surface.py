@@ -75,6 +75,26 @@ def resolve_join(first, second, miter_limit=4.0, max_reach_m=1.0):
             and reach <= float(max_reach_m) else None)
 
 
+def resolve_junction_butt(segment, adjacent_segment, endpoint,
+                          miter_limit=4.0):
+    """Terminate one surviving face at an adjacent canonical face line.
+
+    The returned segment remains independent, so its Curve cap is a BUTT cap;
+    the adjacent segment is context only and is never added to its range.
+    """
+    if endpoint == "START":
+        point = resolve_join(adjacent_segment, segment, miter_limit)
+        if point is None:
+            raise ValueError("unsafe junction-aware Finish BUTT start")
+        return point, segment[1]
+    if endpoint == "END":
+        point = resolve_join(segment, adjacent_segment, miter_limit)
+        if point is None:
+            raise ValueError("unsafe junction-aware Finish BUTT end")
+        return segment[0], point
+    raise ValueError("invalid Finish BUTT endpoint")
+
+
 def propagate_physical_side(previous_segment, start, end, thickness_m, traversal):
     """Choose the canonical side whose traversed face continues most closely."""
     choices = []
