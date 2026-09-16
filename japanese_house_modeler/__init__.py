@@ -6,7 +6,7 @@ bl_info = {
     "version": (0, 6, 3),
     "blender": (5, 2, 0),
     "location": "View3D > Sidebar > 日本住宅",
-    "description": "Build 06-B Stage 2-B: BEVEL, ROUNDED, and Profile-aware Shading",
+    "description": "Build 06-B: Custom Profile Registration and Final Baseboard",
     "category": "3D View",
 }
 
@@ -19,6 +19,8 @@ _CLASSES = (
     properties.JHM_WallProperties,
     properties.JHM_FinishSpan,
     properties.JHM_FinishExclusion,
+    properties.JHM_CustomProfilePoint,
+    properties.JHM_CustomProfileDefinition,
     properties.JHM_FinishProperties,
     operators.JHM_OT_create_wall,
     operators.JHM_OT_move_wall_endpoint,
@@ -28,6 +30,8 @@ _CLASSES = (
     operators.JHM_OT_delete_wall,
     finish_operators.JHM_OT_start_finish_path,
     finish_operators.JHM_OT_regenerate_finish,
+    finish_operators.JHM_OT_register_custom_profile,
+    finish_operators.JHM_OT_delete_custom_profile,
     finish_operators.JHM_OT_edit_finish_profile,
     finish_operators.JHM_OT_add_finish_exclusion,
     finish_operators.JHM_OT_edit_finish_exclusion,
@@ -52,6 +56,9 @@ def register():
     bpy.types.Scene.jhm_new_wall_defaults = bpy.props.PointerProperty(
         type=properties.JHM_NewWallDefaults
     )
+    bpy.types.Scene.jhm_custom_profiles = bpy.props.CollectionProperty(
+        type=properties.JHM_CustomProfileDefinition)
+    bpy.types.Scene.jhm_custom_profile_index = bpy.props.IntProperty(default=0, min=0)
     bpy.types.Object.jhm_wall = bpy.props.PointerProperty(
         type=properties.JHM_WallProperties
     )
@@ -67,6 +74,8 @@ def unregister():
     del bpy.types.Object.jhm_finish
     del bpy.types.Object.jhm_wall
     del bpy.types.Scene.jhm_new_wall_defaults
+    del bpy.types.Scene.jhm_custom_profile_index
+    del bpy.types.Scene.jhm_custom_profiles
 
     for cls in reversed(_CLASSES):
         bpy.utils.unregister_class(cls)

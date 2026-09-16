@@ -5,13 +5,13 @@
 - **Build 06-B Stage 1: ACCEPTED**
 - **Build 06-B Stage 2-A: ACCEPTED**
 - **Build 06-B Stage 2-B: ACCEPTED**
-- **Build 06-B overall: IN PROGRESS**
-- **Stage 3: NOT YET ACCEPTED**
+- **Build 06-B Stage 3: ACCEPTED**
+- **Build 06-B overall: ACCEPTED**
 
-This record accepts Stage 1, **Standard Baseboard Foundation**, and Stage 2-A,
-**Manual Exclusion and Partial Placement**, and Stage 2-B, **BEVEL, ROUNDED,
-and Profile-aware Shading**. It does not accept Build 06-B as a whole and does
-not provide acceptance evidence for Stage 3.
+This record accepts every Build 06-B implementation stage: Stage 1, **Standard
+Baseboard Foundation**; Stage 2-A, **Manual Exclusion and Partial Placement**;
+Stage 2-B, **BEVEL, ROUNDED, and Profile-aware Shading**; and Stage 3, **Custom
+Profile Registration and Final Baseboard**. Build 06-B overall is accepted.
 
 ## Tested revisions and artifact
 
@@ -40,6 +40,16 @@ not provide acceptance evidence for Stage 3.
   `5c313ca34e7eb83c40c3cabc92d96a300662c2b7`
 - Accepted Stage 2-B build identification:
   `Build 06-B Stage 2-B: BEVEL, ROUNDED, and Profile-aware Shading`
+- Stage 3 Blender 5.2 LTS runtime-tested production revision:
+  `30872defb35b0af8a41a522cb85bd44f40e76d06`
+- Stage 3 runtime artifact:
+  `Japanese_House_Modeler_Build_06_B_Stage3_Candidate_r2.zip`
+- Stage 3 automated-test source revision:
+  `30872defb35b0af8a41a522cb85bd44f40e76d06`
+- Acceptance-record-only revision: this later commit changes only this record and
+  build-identification metadata; it does not change the runtime-tested production tree.
+- Accepted Build 06-B identification:
+  `Build 06-B: Custom Profile Registration and Final Baseboard`
 
 The runtime evidence below was supplied from Blender 5.2 LTS execution. Pure
 Python automation is recorded separately and is not represented as Blender
@@ -161,24 +171,75 @@ The Blender 5.2 LTS evidence above satisfies the Stage 2-B gates:
 - Save/reopen passes.
 - Material preservation passes.
 
-## Automated evidence at latest local Stage 2-B source
+## Stage 3 runtime acceptance
+
+The following evidence was obtained in Blender 5.2 LTS from runtime-tested
+production revision `30872defb35b0af8a41a522cb85bd44f40e76d06` using artifact
+`Japanese_House_Modeler_Build_06_B_Stage3_Candidate_r2.zip`. Candidate r1 had
+reversed Custom POLY normals; testing stopped, the canonical winding defect was
+corrected, and all accepted evidence below is from corrected candidate r2.
+
+| # | Test | Result | Runtime evidence |
+|---:|---|---|---|
+| 1 | Custom POLY registration | PASS | Registered five canonical points with 12 mm projection and 65 mm height in the project-local library. |
+| 2 | Source edit independence | PASS | Radically editing the source after registration did not change the stored immutable snapshot. |
+| 3 | Source deletion independence | PASS | Deleting the source Object did not remove or invalidate the registered snapshot. |
+| 4 | Candidate r1 defect handling | PASS | Reversed Custom POLY normals stopped acceptance; no defective candidate was accepted. |
+| 5 | Candidate r2 winding | PASS | Registered Custom canonical signed area was negative: clockwise, matching SIMPLE, BEVEL, and ROUNDED. |
+| 6 | POLY application after source deletion | PASS | Produced correct 65 × 12 mm geometry, identity Object scale, outward normals, and normal managed state. |
+| 7 | Uniform scale Undo/Redo | PASS | Scale 1.0 → 1.5 produced 97.5 × 18 mm; Undo restored 1.0 and Redo restored 1.5. |
+| 8 | Referenced-definition deletion safety | PASS | Deletion was rejected with `このProfileは使用中のため削除できません。`; the Finish remained valid. |
+| 9 | Custom BEZIER registration | PASS | Persisted source type BEZIER, 80 deterministic samples, 16 smooth contour edges, and clockwise winding. |
+| 10 | Custom → Custom replacement | PASS | POLY → BEZIER replaced geometry transactionally and retained normal management. |
+| 11 | BEZIER editable Mesh | PASS | Identity scale; Smooth 16 / Flat 220; 236 polygons; boundary 0; non-manifold 0; positive signed volume; managed Finish detached. |
+| 12 | BEZIER visual shading | PASS | Curved region was smooth, planar regions and caps remained flat, with no visible shading failure. |
+| 13 | Material preservation | PASS | `Stage3_Custom_Mat` and material index 0 survived Mesh conversion together with the Smooth/Flat split. |
+| 14 | Save/reopen and source independence | PASS | Library, Custom FinishRun, and Material persisted; source stayed absent; regeneration succeeded from the snapshot. |
+| 15 | Unused definition deletion | PASS | Unused POLY was deleted, referenced BEZIER remained, and deletion Undo/Redo was checked in Blender UI. |
+| 16 | Registration Undo/Redo | PASS | Registration appeared, Undo removed it, and Redo restored it through uninterrupted Blender UI Undo/Redo. |
+| 17 | Deleted-definition persistence | PASS | Deleted definitions did not reappear after save/reopen; referenced BEZIER remained. |
+| 18 | Orientation and Miter matrix | PASS | LEFT+FORWARD, RIGHT+REVERSE, RIGHT+FORWARD, and LEFT+REVERSE from canonical span data all produced a correct 90° Miter, identity scale, and no gap, overlap, or spike. |
+| 19 | Manual Exclusion and junction-aware BUTT | PASS | One Exclusion produced two visible ranges; no bridge crossed the excluded corner and the survivor ended cleanly without spike or penetration. |
+| 20 | Junction-aware editable Mesh | PASS | Smooth 32 / Flat 440; 472 polygons; boundary 0; non-manifold 0; positive signed volume; identity scale; managed Finish detached. |
+| 21 | Replacement preserves Exclusion | PASS | Custom → SIMPLE preserved Exclusion identity and count 1, two visible ranges, and normal management. |
+| 22 | SIMPLE → Custom Undo/Redo | PASS | Undo returned to SIMPLE, Redo returned to Custom BEZIER, and Exclusion identity remained unchanged. |
+| 23 | Partial Run BUTT | PASS | Custom BEZIER on a partial straight interval produced two clean free ends with no Miter extension or spike. |
+| 24 | Partial Run editable Mesh | PASS | Smooth 16 / Flat 220; 236 polygons; boundary 0; non-manifold 0; positive signed volume; identity scale; managed Finish detached. |
+| 25 | Run-local scale independence | PASS | Editing one Run to 1.25 left another at 1.50 and did not alter unrelated Custom Runs. |
+| 26 | Standard ROUNDED regression | PASS | Smooth 16 / Flat 40; 56 polygons; boundary 0; non-manifold 0; positive signed volume; identity scale; managed Finish detached. |
+| 27 | Legacy `SIMPLE_10X60` regression | PASS | Persisted legacy identity resolved non-destructively to SIMPLE r1/schema1 at 60 × 10 mm; identity scale and regeneration succeeded. |
+
+## Stage 3 completion gate
+
+The Blender 5.2 LTS evidence verifies immutable project-local POLY/BEZIER
+snapshots, source independence, standard-compatible winding and normals, uniform
+run-local scaling, transactional replacement, deletion safety, deterministic
+shading, Material preservation, save/reopen, Undo/Redo, orientation, Miter, BUTT,
+Exclusion, editable Mesh topology, standard regression, and legacy compatibility.
+
+## Automated evidence at accepted Build 06-B source
+
+The acceptance-only edit was tested from an otherwise unchanged production tree.
 
 | Check | Result | Details |
 |---|---|---|
+| Stage 3 targeted pure suite | PASS | `python -B -m unittest tests.test_build_06_b_stage3` — 40 tests passed. |
 | Stage 2-B targeted pure suite | PASS | `python -B -m unittest tests.test_build_06_b_stage2b` — 20 tests passed. |
 | Stage 2-A targeted pure suite | PASS | `python -B -m unittest tests.test_build_06_b_stage2a` — 51 tests passed. |
 | Stage 1 targeted pure suite | PASS | `python -B -m unittest tests.test_build_06_b_stage1` — 20 tests passed. |
-| Full pure suite | PASS | `python -B -m unittest discover -s tests` — 257 tests passed. |
+| Build 06-A regression | PASS | `python -B -m unittest tests.test_build_06_a` — 60 tests passed. |
+| Build 05-B regression | PASS | `python -B -m unittest tests.test_build_05_b` — 16 tests passed. |
+| Full pure suite | PASS | `python -B -m unittest discover -s tests` — 297 tests passed. |
 | Compile check | PASS | `python -m compileall -q japanese_house_modeler tests`. |
 | Diff whitespace checks | PASS | `git diff --check` and `git diff --cached --check`. |
 
-## Scope remaining in progress
+## Final status and out-of-scope work
 
-Build 06-B overall remains **IN PROGRESS**. Remaining work is:
+- **Build 06-B Stage 1: ACCEPTED**
+- **Build 06-B Stage 2-A: ACCEPTED**
+- **Build 06-B Stage 2-B: ACCEPTED**
+- **Build 06-B Stage 3: ACCEPTED**
+- **Build 06-B overall: ACCEPTED**
 
-- Stage 3: Custom Profile Registration, project-local immutable Profile
-  snapshot/revision, and final production Baseboard acceptance —
-  **NOT YET ACCEPTED**.
-
-This record does not accept Crown Moulding, closed FinishRuns, Door/Window
+This acceptance does not include Crown Moulding, closed FinishRuns, Door/Window
 integration, automatic Room recognition, or any later build.

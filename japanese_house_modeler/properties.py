@@ -163,6 +163,33 @@ class JHM_FinishExclusion(bpy.types.PropertyGroup):
     enabled: bpy.props.BoolProperty(name="有効", default=False)
 
 
+
+
+class JHM_CustomProfilePoint(bpy.types.PropertyGroup):
+    """One immutable canonical point in a registered Profile snapshot."""
+
+    x: bpy.props.FloatProperty(options={"HIDDEN"})
+    y: bpy.props.FloatProperty(options={"HIDDEN"})
+    smooth_to_next: bpy.props.BoolProperty(default=False, options={"HIDDEN"})
+
+
+class JHM_CustomProfileDefinition(bpy.types.PropertyGroup):
+    """Persistent project-local Custom Profile definition (revision 1)."""
+
+    profile_id: bpy.props.StringProperty(default="", options={"HIDDEN"})
+    profile_revision: bpy.props.IntProperty(default=1, options={"HIDDEN"})
+    schema_version: bpy.props.IntProperty(default=1, options={"HIDDEN"})
+    display_name: bpy.props.StringProperty(name="表示名", default="Custom Profile")
+    source_type: bpy.props.StringProperty(default="", options={"HIDDEN"})
+    source_object_name: bpy.props.StringProperty(default="", options={"HIDDEN"})
+    sampling_segments: bpy.props.IntProperty(default=0, options={"HIDDEN"})
+    min_x: bpy.props.FloatProperty(options={"HIDDEN"})
+    max_x: bpy.props.FloatProperty(options={"HIDDEN"})
+    min_y: bpy.props.FloatProperty(options={"HIDDEN"})
+    max_y: bpy.props.FloatProperty(options={"HIDDEN"})
+    winding: bpy.props.StringProperty(default="CW", options={"HIDDEN"})
+    points: bpy.props.CollectionProperty(type=JHM_CustomProfilePoint)
+
 class JHM_FinishProperties(bpy.types.PropertyGroup):
     is_finish: bpy.props.BoolProperty(default=False, options={"HIDDEN"})
     finish_id: bpy.props.StringProperty(default="", options={"HIDDEN"})
@@ -181,6 +208,8 @@ class JHM_FinishProperties(bpy.types.PropertyGroup):
         name="出幅", default=10.0, min=0.1, max=10000.0, precision=1)
     profile_bevel_mm: bpy.props.FloatProperty(
         name="面取り", default=5.0, min=0.1, max=10000.0, precision=1)
+    profile_uniform_scale: bpy.props.FloatProperty(
+        name="均一スケール", default=1.0, min=0.000001, max=1000000.0, precision=4)
     profile_radius_mm: bpy.props.FloatProperty(
         name="半径", default=5.0, min=0.1, max=10000.0, precision=1)
     vertical_reference: bpy.props.EnumProperty(

@@ -29,8 +29,13 @@ from .connections import connection_collection, is_reciprocal_connection
 from .finish_surface import (
     face_segment, resolve_surface_path, validate_profile_miter_space, wall_axis,
 )
+from .finish_custom_profiles import (
+    CUSTOM_BEZIER_SEGMENTS_PER_SPAN_R1, make_snapshot,
+    profile_is_referenced,
+)
 from .finish_path import (
-    backspace_pending, propagate_canonical_side, traversal_for_connection,
+    backspace_pending, profile_horizontal_sign, propagate_canonical_side,
+    traversal_for_connection,
 )
 
 
@@ -464,6 +469,114 @@ class JHM_OT_regenerate_finish(bpy.types.Operator):
         return {"FINISHED"}
 
 
+def _profile_items(_owner, context):
+    items = [("SIMPLE", "SIMPLE", "標準の矩形Profile"),
+             ("BEVEL", "BEVEL", "上部室内側を45度面取り"),
+             ("ROUNDED", "ROUNDED", "上部室内側を丸める")]
+    if context and context.scene:
+        items.extend((item.profile_id, item.display_name,
+                      f"Custom Profile revision {item.profile_revision}")
+                     for item in context.scene.jhm_custom_profiles)
+    return items
+
+
+class JHM_OT_register_custom_profile(bpy.types.Operator):
+    """Snapshot the selected user Curve into the project library."""
+
+    bl_idname = "jhm.register_custom_profile"
+    bl_label = "選択CurveをCustom Profile登録"
+    bl_options = {"REGISTER", "UNDO"}
+    display_name: bpy.props.StringProperty(name="表示名", default="Custom Profile")
+
+    def invoke(self, context, _event):
+        if context.active_object:
+            self.display_name = context.active_object.name
+        return context.window_manager.invoke_props_dialog(self)
+
+    def execute(self, context):
+        obj = context.active_object
+        definition = None
+        try:
+            if obj is None or obj.type != "CURVE" or obj.data.dimensions != "2D":
+                raise ValueError("2D Curve Objectを選択してください。")
+            if not obj.matrix_basis.is_identity:
+                raise ValueError("Object Transformをidentityにしてください。")
+            if obj.parent is not None:
+                raise ValueError("Parent付きCurveは登録元にできません。")
+            if obj.constraints:
+                raise ValueError("Constraint付きCurveは登録元にできません。")
+            if obj.get("jhm_managed_profile") or obj.jhm_finish.is_finish:
+                raise ValueError("JHM管理Curveは登録元にできません。")
+            if obj.modifiers:
+                raise ValueError("Modifier付きCurveは登録元にできません。")
+            curve = obj.data
+            if curve.shape_keys is not None:
+                raise ValueError("Shape Key付きCurveは登録元にできません。")
+            if (curve.bevel_depth or curve.extrude or curve.offset
+                    or curve.taper_object or curve.bevel_object):
+                raise ValueError("bevel/extrude/offset/taperのないCurveを使用してください。")
+            if len(curve.splines) != 1:
+                raise ValueError("Splineは1個だけ必要です。")
+            spline = curve.splines[0]
+            if not spline.use_cyclic_u or spline.type not in {"POLY", "BEZIER"}:
+                raise ValueError("閉じたPOLYまたはBEZIER Splineが必要です。")
+            if spline.type == "POLY":
+                points = [(point.co.x, point.co.y) for point in spline.points]
+                snapshot = make_snapshot("POLY", points=points)
+            else:
+                knots = [((point.co.x, point.co.y),
+                          (point.handle_right.x, point.handle_right.y),
+                          (point.handle_left.x, point.handle_left.y))
+                         for point in spline.bezier_points]
+                snapshot = make_snapshot("BEZIER", knots=knots)
+            definition = context.scene.jhm_custom_profiles.add()
+            definition.profile_id = snapshot.profile_id
+            definition.profile_revision = snapshot.profile_revision
+            definition.schema_version = snapshot.schema_version
+            definition.display_name = self.display_name.strip() or "Custom Profile"
+            definition.source_type = snapshot.source_type
+            definition.source_object_name = obj.name
+            definition.sampling_segments = (CUSTOM_BEZIER_SEGMENTS_PER_SPAN_R1
+                                            if snapshot.source_type == "BEZIER" else 0)
+            (definition.min_x, definition.max_x,
+             definition.min_y, definition.max_y) = snapshot.bounds
+            for index, (x, y) in enumerate(snapshot.contour):
+                point = definition.points.add(); point.x = x; point.y = y
+                point.smooth_to_next = index in snapshot.smooth_edges
+            context.scene.jhm_custom_profile_index = len(context.scene.jhm_custom_profiles) - 1
+        except Exception as error:
+            if definition is not None:
+                index = next((index for index, item in
+                              enumerate(context.scene.jhm_custom_profiles)
+                              if item == definition), None)
+                if index is not None:
+                    context.scene.jhm_custom_profiles.remove(index)
+            self.report({"ERROR"}, f"Custom Profileを登録できませんでした: {error}")
+            return {"CANCELLED"}
+        return {"FINISHED"}
+
+
+class JHM_OT_delete_custom_profile(bpy.types.Operator):
+    bl_idname = "jhm.delete_custom_profile"
+    bl_label = "選択Custom Profileを削除"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        library = context.scene.jhm_custom_profiles
+        index = context.scene.jhm_custom_profile_index
+        if not 0 <= index < len(library):
+            self.report({"ERROR"}, "削除するCustom Profileがありません。")
+            return {"CANCELLED"}
+        item = library[index]
+        if profile_is_referenced(context.scene.objects, item.profile_id,
+                                 item.profile_revision, item.schema_version):
+            self.report({"ERROR"}, "このProfileは使用中のため削除できません。")
+            return {"CANCELLED"}
+        library.remove(index)
+        context.scene.jhm_custom_profile_index = max(0, min(index, len(library) - 1))
+        return {"FINISHED"}
+
+
 class JHM_OT_edit_finish_profile(bpy.types.Operator):
     """Transactionally switch or edit one Run's standard Profile."""
 
@@ -471,12 +584,7 @@ class JHM_OT_edit_finish_profile(bpy.types.Operator):
     bl_label = "Profileを変更"
     bl_options = {"REGISTER", "UNDO"}
 
-    profile: bpy.props.EnumProperty(
-        name="Profile", items=(
-            ("SIMPLE", "SIMPLE", "標準の矩形Profile"),
-            ("BEVEL", "BEVEL", "上部室内側を45度面取り"),
-            ("ROUNDED", "ROUNDED", "上部室内側を丸める")),
-        default="SIMPLE")
+    profile: bpy.props.EnumProperty(name="Profile", items=_profile_items)
     height_mm: bpy.props.FloatProperty(
         name="高さ (mm)", default=DEFAULT_HEIGHT_MM,
         min=0.1, max=100000.0, precision=1)
@@ -489,12 +597,17 @@ class JHM_OT_edit_finish_profile(bpy.types.Operator):
     radius_mm: bpy.props.FloatProperty(
         name="半径 (mm)", default=DEFAULT_RADIUS_MM,
         min=0.1, max=10000.0, precision=1)
+    uniform_scale: bpy.props.FloatProperty(
+        name="均一スケール", default=1.0, min=0.000001, max=1000000.0)
 
     def draw(self, _context):
         layout = self.layout
         layout.prop(self, "profile")
-        layout.prop(self, "height_mm")
-        layout.prop(self, "projection_mm")
+        if self.profile not in (SIMPLE_PROFILE_ID, BEVEL_PROFILE_ID, ROUNDED_PROFILE_ID):
+            layout.prop(self, "uniform_scale")
+        else:
+            layout.prop(self, "height_mm")
+            layout.prop(self, "projection_mm")
         if self.profile == BEVEL_PROFILE_ID:
             layout.prop(self, "bevel_mm")
         elif self.profile == ROUNDED_PROFILE_ID:
@@ -506,7 +619,7 @@ class JHM_OT_edit_finish_profile(bpy.types.Operator):
 
     def invoke(self, context, _event):
         try:
-            resolved = resolve_finish_profile(context.active_object.jhm_finish)
+            resolved = resolve_finish_profile(context.active_object.jhm_finish, context.scene.jhm_custom_profiles)
         except ValueError as error:
             self.report({"ERROR"}, str(error))
             return {"CANCELLED"}
@@ -515,20 +628,32 @@ class JHM_OT_edit_finish_profile(bpy.types.Operator):
         self.projection_mm = resolved.projection_mm
         self.bevel_mm = resolved.bevel_mm
         self.radius_mm = resolved.radius_mm
+        self.uniform_scale = resolved.uniform_scale
         return context.window_manager.invoke_props_dialog(self)
 
     def execute(self, context):
         obj = context.active_object
         finish = obj.jhm_finish
-        new = (self.profile, SIMPLE_PROFILE_REVISION,
-               PROFILE_SCHEMA_VERSION, self.height_mm, self.projection_mm,
-               self.bevel_mm, self.radius_mm)
+        custom = self.profile not in (SIMPLE_PROFILE_ID, BEVEL_PROFILE_ID,
+                                      ROUNDED_PROFILE_ID)
+        if custom:
+            definition = next((item for item in context.scene.jhm_custom_profiles
+                               if item.profile_id == self.profile), None)
+            if definition is None:
+                self.report({"ERROR"}, "Custom Profile定義が見つかりません。")
+                return {"CANCELLED"}
+            revision, schema = definition.profile_revision, definition.schema_version
+        else:
+            revision, schema = SIMPLE_PROFILE_REVISION, PROFILE_SCHEMA_VERSION
+        new = (self.profile, revision, schema, self.height_mm, self.projection_mm,
+               self.bevel_mm, self.radius_mm, self.uniform_scale)
         try:
             # Preparation performs Profile, path, miter and blocker validation
             # while the previous valid Curve remains installed.
             transactional_profile_edit(
                 finish, new,
-                lambda: prepare_finish_regeneration(obj, context.scene))
+                lambda: prepare_finish_regeneration(obj, context.scene),
+                context.scene.jhm_custom_profiles)
         except Exception as error:
             self.report({"ERROR"}, f"Profileを変更できませんでした: {error}")
             return {"CANCELLED"}
@@ -579,7 +704,7 @@ class JHM_OT_repair_finish(bpy.types.Operator):
                         raise ValueError("Wall参照を一意に復元できません。")
                     span.wall_object = candidate
             obj.matrix_basis.identity()
-            problems = diagnose_finish(obj)
+            problems = diagnose_finish(obj, context.scene)
             if problems:
                 raise ValueError("Finish canonical dataを安全に復元できません。")
             regenerate_finish(obj, context.scene)
@@ -663,7 +788,14 @@ class JHM_OT_convert_finish_mesh(bpy.types.Operator):
             # unwelded boundary vertices.  Finalize topology while the managed
             # source still exists so any failure remains fully recoverable.
             weld_and_validate_finish_mesh(mesh)
-            apply_profile_shading(mesh, resolve_finish_profile(obj.jhm_finish))
+            first_span = obj.jhm_finish.spans[0]
+            apply_profile_shading(
+                mesh,
+                resolve_finish_profile(
+                    obj.jhm_finish, context.scene.jhm_custom_profiles),
+                profile_horizontal_sign(first_span.side,
+                                        first_span.traversal_direction),
+                prepared.ranges)
         except Exception as error:
             recovery = OperationRecovery()
             recovery.add(remove_temporary)

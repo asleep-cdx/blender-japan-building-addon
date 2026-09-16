@@ -26,6 +26,7 @@ from .finish_hardening import (
     finish_intervals_are_valid,
     validate_finish_configuration,
 )
+from .finish_custom_profiles import oriented_edge_indices
 
 
 def managed_walls():
@@ -90,7 +91,7 @@ def validate_path_footprints(spans, segments, intervals, projection_m,
 
 def _resolved_canonical_path(finish, scene, resolved_profile=None):
     """Validate canonical truth and return unsafed span geometry metadata."""
-    resolved_profile = resolved_profile or resolve_finish_profile(finish)
+    resolved_profile = resolved_profile or resolve_finish_profile(finish, scene.jhm_custom_profiles)
     walls = managed_walls()
     from .finish_dependencies import validate_finish_references
     # This also validates every persisted exclusion before dependency work.
@@ -145,7 +146,7 @@ def _resolved_canonical_path(finish, scene, resolved_profile=None):
 
 def resolved_finish_points(finish, scene, resolved_profile=None):
     """Accepted Stage 1 full-path resolution when no subtraction is needed."""
-    resolved_profile = resolved_profile or resolve_finish_profile(finish)
+    resolved_profile = resolved_profile or resolve_finish_profile(finish, scene.jhm_custom_profiles)
     spans, segments, intervals, z = _resolved_canonical_path(
         finish, scene, resolved_profile)
     from .finish_surface import validate_profile_miter_space
@@ -159,7 +160,7 @@ def resolved_finish_points(finish, scene, resolved_profile=None):
 
 def _visible_range_plan(finish, scene, resolved_profile=None):
     """Validate canonical data and group subtraction results before safety."""
-    resolved_profile = resolved_profile or resolve_finish_profile(finish)
+    resolved_profile = resolved_profile or resolve_finish_profile(finish, scene.jhm_custom_profiles)
     canonical_spans, _segments, canonical_intervals, z = _resolved_canonical_path(
         finish, scene, resolved_profile)
     from .finish_exclusions import piece_reaches_boundary, subtract_intervals
@@ -263,7 +264,7 @@ def canonical_visible_range_state(finish, scene, resolved_profile=None):
 
 def resolved_finish_ranges(finish, scene, resolved_profile=None):
     """Resolve and safety-check each independent visible range."""
-    resolved_profile = resolved_profile or resolve_finish_profile(finish)
+    resolved_profile = resolved_profile or resolve_finish_profile(finish, scene.jhm_custom_profiles)
     groups, z, enabled_count = _visible_range_plan(
         finish, scene, resolved_profile)
     ranges = []
@@ -311,7 +312,10 @@ def spans_topologically_continuous(spans):
     return True
 
 
-def diagnose_finish(obj):
+def diagnose_finish(obj, scene=None):
+    if scene is None:
+        scene = next((candidate for candidate in bpy.data.scenes
+                      if obj.name in candidate.objects), None)
     walls = managed_walls()
     index = id_index(walls, lambda wall: wall.jhm_wall.wall_id)
     references, span_intervals, exclusion_intervals = [], [], []
@@ -397,7 +401,7 @@ def diagnose_finish(obj):
     except (AttributeError, ReferenceError, TypeError, ValueError):
         extras.append("EXCLUSION")
     try:
-        resolve_finish_profile(obj.jhm_finish)
+        resolve_finish_profile(obj.jhm_finish, scene.jhm_custom_profiles if scene else None)
     except (TypeError, ValueError):
         extras.append("PROFILE")
     if not finish_id_is_valid(obj.jhm_finish.finish_id,
@@ -418,6 +422,9 @@ def _production_profile(resolved, horizontal_sign, vertical_base_m):
             f"Z{vertical_base_mm:g} "
             + ("Negative" if sign < 0 else "Positive"))
     orientation = "NEGATIVE" if sign < 0 else "POSITIVE"
+    oriented_smooth_edges = oriented_edge_indices(
+        len(resolved.contour), resolved.shading.smooth_contour_edges, sign)
+    smooth_edge_metadata = ",".join(str(index) for index in oriented_smooth_edges)
     for candidate in bpy.data.objects:
         data_type = ("CURVE" if isinstance(getattr(candidate, "data", None),
                                            bpy.types.Curve) else "")
@@ -430,6 +437,14 @@ def _production_profile(resolved, horizontal_sign, vertical_base_m):
                 and candidate.get("jhm_profile_projection_mm") == resolved.projection_mm
                 and candidate.get("jhm_profile_bevel_mm") == resolved.bevel_mm
                 and candidate.get("jhm_profile_radius_mm") == resolved.radius_mm
+                # Defaults preserve reuse of accepted pre-Stage-3 standard
+                # derived Profiles; Custom Profiles always write both keys.
+                and candidate.get("jhm_profile_uniform_scale", 1.0)
+                == resolved.uniform_scale
+                and candidate.get("jhm_profile_contour", repr(resolved.contour))
+                == repr(resolved.contour)
+                and candidate.get("jhm_profile_smooth_edges", smooth_edge_metadata)
+                == smooth_edge_metadata
                 and candidate.get("jhm_profile_orientation") == orientation
                 and candidate.get("jhm_profile_vertical_base_mm")
                 == vertical_base_mm):
@@ -458,6 +473,9 @@ def _production_profile(resolved, horizontal_sign, vertical_base_m):
         obj["jhm_profile_projection_mm"] = resolved.projection_mm
         obj["jhm_profile_bevel_mm"] = resolved.bevel_mm
         obj["jhm_profile_radius_mm"] = resolved.radius_mm
+        obj["jhm_profile_uniform_scale"] = resolved.uniform_scale
+        obj["jhm_profile_contour"] = repr(resolved.contour)
+        obj["jhm_profile_smooth_edges"] = smooth_edge_metadata
         obj["jhm_profile_orientation"] = orientation
         obj["jhm_profile_vertical_base_mm"] = vertical_base_mm
         obj.hide_viewport = True
@@ -502,7 +520,7 @@ def prepare_finish_regeneration(obj, scene):
     duplicates = duplicate_finish_ids(managed)
     if not finish_id_is_valid(obj.jhm_finish.finish_id, duplicates):
         raise ValueError("Finish IDが空、空白、または重複しています。")
-    resolved_profile = resolve_finish_profile(obj.jhm_finish)
+    resolved_profile = resolve_finish_profile(obj.jhm_finish, scene.jhm_custom_profiles if scene else None)
     ranges, enabled_count = resolved_finish_ranges(
         obj.jhm_finish, scene, resolved_profile)
     points = tuple(point for visible in ranges for point in visible)
