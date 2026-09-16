@@ -31,6 +31,52 @@ def managed_walls():
             if getattr(getattr(obj, "jhm_wall", None), "is_wall", False)]
 
 
+def validate_path_footprints(spans, segments, intervals, miter_limit=4.0):
+    """Reject unselected junction walls obstructing a resolved Finish path."""
+    for index, (first, second) in enumerate(zip(spans, spans[1:])):
+        first_object, _first_side, first_traversal = first
+        second_object, _second_side, _second_traversal = second
+        _, first_endpoint = traversal_endpoints(first_traversal)
+        blockers = []
+        for blocker, endpoint in junction_members(first_object, first_endpoint):
+            if blocker in {first_object, second_object}:
+                continue
+            wall = blocker.jhm_wall
+            junction = wall.start if endpoint == "START" else wall.end
+            other = wall.end if endpoint == "START" else wall.start
+            blockers.append((junction, other, wall.wall_thickness / 1000.0))
+        if transition_blocked_by_footprints(
+                segments[index], segments[index + 1], blockers,
+                miter_limit=miter_limit):
+            raise ValueError("選択していない接続Wallが仕上げ経路を遮っています。")
+
+    selected = {span[0] for span in spans}
+    for span_index, at_start in ((0, True), (len(spans) - 1, False)):
+        wall_object, side, traversal = spans[span_index]
+        wall = wall_object.jhm_wall
+        arrival, departure = traversal_endpoints(traversal)
+        endpoint = arrival if at_start else departure
+        distance = intervals[span_index][0 if at_start else 1]
+        _, length_m = wall_axis(wall.start, wall.end)
+        if not boundary_reaches_endpoint(distance, length_m * 1000.0, endpoint):
+            continue
+        blockers = []
+        for blocker, blocker_endpoint in junction_members(wall_object, endpoint):
+            if blocker in selected:
+                continue
+            blocker_wall = blocker.jhm_wall
+            junction = (blocker_wall.start if blocker_endpoint == "START"
+                        else blocker_wall.end)
+            other = (blocker_wall.end if blocker_endpoint == "START"
+                     else blocker_wall.start)
+            blockers.append((junction, other,
+                             blocker_wall.wall_thickness / 1000.0))
+        point = segments[span_index][0 if at_start else 1]
+        if endpoint_blocked_by_footprints(
+                point, side_normal(wall.start, wall.end, side), blockers):
+            raise ValueError("接続Wallが仕上げ端部を遮っています。")
+
+
 def resolved_finish_points(finish, scene):
     walls = managed_walls()
     from .finish_dependencies import validate_finish_references
@@ -54,6 +100,8 @@ def resolved_finish_points(finish, scene):
             wall.start, wall.end, wall.wall_thickness / 1000.0,
             span.side, interval, span.traversal_direction,
         ))
+    spans = [(span.wall_object, span.side, span.traversal_direction)
+             for span in finish.spans]
     for index, (first, second) in enumerate(zip(finish.spans, finish.spans[1:])):
         _, first_endpoint = traversal_endpoints(first.traversal_direction)
         second_endpoint, _ = traversal_endpoints(second.traversal_direction)
@@ -74,43 +122,9 @@ def resolved_finish_points(finish, scene):
             for connection in connection_collection(first.wall_object, first_endpoint))
         if not connected:
             raise ValueError("Finish経路の相互接続情報が不正です。")
-        blockers = []
-        for blocker, endpoint in junction_members(first.wall_object, first_endpoint):
-            if blocker in {first.wall_object, second.wall_object}:
-                continue
-            wall = blocker.jhm_wall
-            junction = wall.start if endpoint == "START" else wall.end
-            other = wall.end if endpoint == "START" else wall.start
-            blockers.append((junction, other, wall.wall_thickness / 1000.0))
-        if transition_blocked_by_footprints(
-                segments[index], segments[index + 1], blockers,
-                miter_limit=finish.miter_limit):
-            raise ValueError("選択していない接続Wallが仕上げ経路を遮っています。")
     # Endpoint safety applies independently of transition count, including a
     # single-span FinishRun.  Interior boundaries deliberately skip this test.
-    selected = {span.wall_object for span in finish.spans}
-    for span_index, at_start in ((0, True), (len(finish.spans) - 1, False)):
-        span = finish.spans[span_index]
-        wall = span.wall_object.jhm_wall
-        arrival, departure = traversal_endpoints(span.traversal_direction)
-        endpoint = arrival if at_start else departure
-        distance = intervals[span_index][0 if at_start else 1]
-        _, length_m = wall_axis(wall.start, wall.end)
-        length = length_m * 1000.0
-        if not boundary_reaches_endpoint(distance, length, endpoint):
-            continue
-        blockers = []
-        for blocker, blocker_endpoint in junction_members(span.wall_object, endpoint):
-            if blocker in selected:
-                continue
-            blocker_wall = blocker.jhm_wall
-            junction = blocker_wall.start if blocker_endpoint == "START" else blocker_wall.end
-            other = blocker_wall.end if blocker_endpoint == "START" else blocker_wall.start
-            blockers.append((junction, other, blocker_wall.wall_thickness / 1000.0))
-        point = segments[span_index][0 if at_start else 1]
-        outward = side_normal(wall.start, wall.end, span.side)
-        if endpoint_blocked_by_footprints(point, outward, blockers):
-            raise ValueError("接続Wallが仕上げ端部を遮っています。")
+    validate_path_footprints(spans, segments, intervals, finish.miter_limit)
     defaults = scene.jhm_new_wall_defaults
     z = resolve_vertical(
         finish.vertical_reference, finish.vertical_offset_mm, finish.absolute_z_mm,
@@ -207,6 +221,8 @@ def _verification_profile(horizontal_sign):
                                            bpy.types.Curve) else "")
         if profile_identity_matches(candidate.type, data_type, candidate,
                                     orientation):
+            for spline in candidate.data.splines:
+                spline.use_smooth = False
             return candidate, None
     data = bpy.data.curves.new(name, "CURVE")
     obj = None
@@ -218,6 +234,7 @@ def _verification_profile(horizontal_sign):
                                  verification_profile_points(sign)):
             target.co = (*point, 0.0, 1.0)
         spline.use_cyclic_u = True
+        spline.use_smooth = False
         obj = bpy.data.objects.new(name, data)
         bpy.context.scene.collection.objects.link(obj)
         obj["jhm_managed_profile"] = True
@@ -285,6 +302,7 @@ def prepare_finish_regeneration(obj, scene):
         for target, point in zip(spline.points, points):
             target.co = (*point, 1.0)
         spline.use_cyclic_u = False
+        spline.use_smooth = False
         curve.update_tag()
     except Exception as operation_error:
         from .dependency_transaction import OperationRecovery, recover_operation
