@@ -6,7 +6,7 @@ bl_info = {
     "version": (0, 6, 3),
     "blender": (5, 2, 0),
     "location": "View3D > Sidebar > 日本住宅",
-    "description": "Build 06-B Stage 3 Candidate: Custom Profile Registration and Final Baseboard",
+    "description": "Build 06-B: Custom Profile Registration and Final Baseboard",
     "category": "3D View",
 }
 
