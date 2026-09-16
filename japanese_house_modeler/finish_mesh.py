@@ -1,10 +1,27 @@
-"""Mesh-finalization helpers for managed SIMPLE Finish conversion."""
+"""Mesh-finalization and Profile-aware shading helpers."""
 
 import math
 
 
 MESH_WELD_DISTANCE_M = 1.0e-6
 MIN_CLOSED_VOLUME_M3 = 1.0e-15
+
+
+def polygon_should_be_smooth(profile, normal_z, epsilon=1.0e-6):
+    """Return shading intent for a swept polygon from its profile normal.
+
+    Revision-1 ROUNDED arc facets have normals between vertical and horizontal;
+    caps and all planar standard-Profile regions remain flat.
+    """
+    z = abs(float(normal_z))
+    return (profile.shading.smooth_round and math.isfinite(z)
+            and epsilon < z < 1.0 - epsilon)
+
+
+def apply_profile_shading(mesh, profile):
+    """Apply deterministic flat/round shading without changing materials."""
+    for polygon in mesh.polygons:
+        polygon.use_smooth = polygon_should_be_smooth(profile, polygon.normal.z)
 
 
 def closed_volume_topology_is_valid(boundary_edges, non_manifold_edges,
