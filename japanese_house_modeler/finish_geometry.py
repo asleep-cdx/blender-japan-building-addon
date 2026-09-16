@@ -7,8 +7,8 @@ from .dependency_transaction import DependencyTransaction, PreparedChange
 from .finish_path import (
     boundary_reaches_endpoint, profile_horizontal_sign, resolve_interval,
     resolve_vertical, transition_boundaries_reach, traversal_endpoints,
-    verification_profile_points,
 )
+from .finish_profiles import oriented_contour, resolve_finish_profile
 from .finish_surface import (
     endpoint_blocked_by_footprints, face_segment, resolve_surface_path,
     side_normal, transition_blocked_by_footprints, wall_axis,
@@ -19,10 +19,9 @@ from .connections import (
 from .finish_identity import id_index
 from .finish_state import finish_problem_keys
 from .finish_hardening import (
-    VERIFICATION_PROFILE_ROLE, VERIFICATION_PROFILE_VERSION,
     duplicate_finish_ids, finish_configuration_problems, finish_id_is_valid,
     finish_intervals_are_valid,
-    profile_identity_matches, validate_finish_configuration,
+    validate_finish_configuration,
 )
 
 
@@ -31,7 +30,8 @@ def managed_walls():
             if getattr(getattr(obj, "jhm_wall", None), "is_wall", False)]
 
 
-def validate_path_footprints(spans, segments, intervals, miter_limit=4.0):
+def validate_path_footprints(spans, segments, intervals, projection_m,
+                             miter_limit=4.0):
     """Reject unselected junction walls obstructing a resolved Finish path."""
     for index, (first, second) in enumerate(zip(spans, spans[1:])):
         first_object, _first_side, first_traversal = first
@@ -47,7 +47,7 @@ def validate_path_footprints(spans, segments, intervals, miter_limit=4.0):
             blockers.append((junction, other, wall.wall_thickness / 1000.0))
         if transition_blocked_by_footprints(
                 segments[index], segments[index + 1], blockers,
-                miter_limit=miter_limit):
+                miter_limit=miter_limit, projection_m=projection_m):
             raise ValueError("選択していない接続Wallが仕上げ経路を遮っています。")
 
     selected = {span[0] for span in spans}
@@ -73,11 +73,13 @@ def validate_path_footprints(spans, segments, intervals, miter_limit=4.0):
                              blocker_wall.wall_thickness / 1000.0))
         point = segments[span_index][0 if at_start else 1]
         if endpoint_blocked_by_footprints(
-                point, side_normal(wall.start, wall.end, side), blockers):
+                point, side_normal(wall.start, wall.end, side), blockers,
+                projection_m):
             raise ValueError("接続Wallが仕上げ端部を遮っています。")
 
 
-def resolved_finish_points(finish, scene):
+def resolved_finish_points(finish, scene, resolved_profile=None):
+    resolved_profile = resolved_profile or resolve_finish_profile(finish)
     walls = managed_walls()
     from .finish_dependencies import validate_finish_references
     # This also validates every persisted exclusion before dependency work.
@@ -124,7 +126,11 @@ def resolved_finish_points(finish, scene):
             raise ValueError("Finish経路の相互接続情報が不正です。")
     # Endpoint safety applies independently of transition count, including a
     # single-span FinishRun.  Interior boundaries deliberately skip this test.
-    validate_path_footprints(spans, segments, intervals, finish.miter_limit)
+    from .finish_surface import validate_profile_miter_space
+    validate_profile_miter_space(segments, resolved_profile.projection_m,
+                                 finish.miter_limit)
+    validate_path_footprints(spans, segments, intervals,
+                             resolved_profile.projection_m, finish.miter_limit)
     defaults = scene.jhm_new_wall_defaults
     z = resolve_vertical(
         finish.vertical_reference, finish.vertical_offset_mm, finish.absolute_z_mm,
@@ -203,6 +209,10 @@ def diagnose_finish(obj):
                 if getattr(getattr(item, "jhm_finish", None), "is_finish", False)]
     extras = list(finish_configuration_problems(
         obj.jhm_finish.join_policy, obj.jhm_finish.closed))
+    try:
+        resolve_finish_profile(obj.jhm_finish)
+    except (TypeError, ValueError):
+        extras.append("PROFILE")
     if not finish_id_is_valid(obj.jhm_finish.finish_id,
                               duplicate_finish_ids(finishes)):
         extras.append("FINISH_ID")
@@ -211,16 +221,24 @@ def diagnose_finish(obj):
                                extras)
 
 
-def _verification_profile(horizontal_sign):
-    """Return ``(object, owned_cleanup)`` for borrowed/transaction-owned data."""
+def _production_profile(resolved, horizontal_sign):
+    """Return a dimension-keyed derived Profile and optional owned cleanup."""
     sign = -1.0 if float(horizontal_sign) < 0.0 else 1.0
-    name = "JHM Verification Profile 10x60 " + ("Negative" if sign < 0 else "Positive")
+    name = (f"JHM SIMPLE r{resolved.profile_revision} "
+            f"{resolved.projection_mm:g}x{resolved.height_mm:g} "
+            + ("Negative" if sign < 0 else "Positive"))
     orientation = "NEGATIVE" if sign < 0 else "POSITIVE"
     for candidate in bpy.data.objects:
         data_type = ("CURVE" if isinstance(getattr(candidate, "data", None),
                                            bpy.types.Curve) else "")
-        if profile_identity_matches(candidate.type, data_type, candidate,
-                                    orientation):
+        if (candidate.type == "CURVE" and data_type == "CURVE"
+                and candidate.get("jhm_managed_profile") is True
+                and candidate.get("jhm_profile_id") == resolved.profile_id
+                and candidate.get("jhm_profile_revision") == resolved.profile_revision
+                and candidate.get("jhm_profile_schema_version") == resolved.schema_version
+                and candidate.get("jhm_profile_height_mm") == resolved.height_mm
+                and candidate.get("jhm_profile_projection_mm") == resolved.projection_mm
+                and candidate.get("jhm_profile_orientation") == orientation):
             for spline in candidate.data.splines:
                 spline.use_smooth = False
             return candidate, None
@@ -231,15 +249,18 @@ def _verification_profile(horizontal_sign):
         spline = data.splines.new("POLY")
         spline.points.add(3)
         for target, point in zip(spline.points,
-                                 verification_profile_points(sign)):
+                                 oriented_contour(resolved, sign)):
             target.co = (*point, 0.0, 1.0)
         spline.use_cyclic_u = True
         spline.use_smooth = False
         obj = bpy.data.objects.new(name, data)
         bpy.context.scene.collection.objects.link(obj)
         obj["jhm_managed_profile"] = True
-        obj["jhm_profile_role"] = VERIFICATION_PROFILE_ROLE
-        obj["jhm_profile_version"] = VERIFICATION_PROFILE_VERSION
+        obj["jhm_profile_id"] = resolved.profile_id
+        obj["jhm_profile_revision"] = resolved.profile_revision
+        obj["jhm_profile_schema_version"] = resolved.schema_version
+        obj["jhm_profile_height_mm"] = resolved.height_mm
+        obj["jhm_profile_projection_mm"] = resolved.projection_mm
         obj["jhm_profile_orientation"] = orientation
         obj.hide_viewport = True
         obj.hide_render = True
@@ -283,7 +304,8 @@ def prepare_finish_regeneration(obj, scene):
     duplicates = duplicate_finish_ids(managed)
     if not finish_id_is_valid(obj.jhm_finish.finish_id, duplicates):
         raise ValueError("Finish IDが空、空白、または重複しています。")
-    points = resolved_finish_points(obj.jhm_finish, scene)
+    resolved_profile = resolve_finish_profile(obj.jhm_finish)
+    points = resolved_finish_points(obj.jhm_finish, scene, resolved_profile)
     old_curve = obj.data
     curve = old_curve.copy()
     owned_profile_cleanup = None
@@ -292,10 +314,12 @@ def prepare_finish_regeneration(obj, scene):
         curve.resolution_u = 1
         curve.bevel_mode = "OBJECT"
         first_span = obj.jhm_finish.spans[0]
-        profile, owned_profile_cleanup = _verification_profile(
+        profile, owned_profile_cleanup = _production_profile(
+            resolved_profile,
             profile_horizontal_sign(first_span.side,
                                     first_span.traversal_direction))
         curve.bevel_object = profile
+        curve.use_fill_caps = True
         curve.splines.clear()
         spline = curve.splines.new("POLY")
         spline.points.add(len(points) - 1)

@@ -271,7 +271,9 @@ def validate_finish_references(finish_object, walls, require_topology=True):
     return True
 
 
-_STYLE_FIELDS = ("finish_type", "profile_id", "vertical_reference",
+_STYLE_FIELDS = ("finish_type", "profile_id", "profile_revision",
+                 "profile_schema_version", "profile_height_mm",
+                 "profile_projection_mm", "vertical_reference",
                  "vertical_offset_mm", "absolute_z_mm", "join_policy",
                  "miter_limit", "closed")
 _SPAN_FIELDS = ("expected_wall_id", "side", "entry_boundary_kind",

@@ -6,7 +6,7 @@ bl_info = {
     "version": (0, 6, 3),
     "blender": (5, 2, 0),
     "location": "View3D > Sidebar > 日本住宅",
-    "description": "Build 06-A Stage 3 Candidate: managed Walls and FinishRuns",
+    "description": "Build 06-B Stage 1 Candidate: Standard Baseboard Foundation",
     "category": "3D View",
 }
 
@@ -28,6 +28,7 @@ _CLASSES = (
     operators.JHM_OT_delete_wall,
     finish_operators.JHM_OT_start_finish_path,
     finish_operators.JHM_OT_regenerate_finish,
+    finish_operators.JHM_OT_edit_finish_profile,
     finish_operators.JHM_OT_regenerate_all_finishes,
     finish_operators.JHM_OT_repair_finish,
     finish_operators.JHM_OT_delete_finish,

@@ -274,18 +274,19 @@ class Build06ASurfaceTests(unittest.TestCase):
         upward = [((1, 0), (1, 2), .2)]
         downward = [((1, 0), (1, -2), .2)]
         self.assertTrue(endpoint_blocked_by_footprints(
-            (1, .1), (0, 1), upward))
+            (1, .1), (0, 1), upward, .01))
         self.assertFalse(endpoint_blocked_by_footprints(
-            (1, -.1), (0, -1), upward))
+            (1, -.1), (0, -1), upward, .01))
         self.assertTrue(endpoint_blocked_by_footprints(
-            (1, -.1), (0, -1), downward))
-        self.assertFalse(endpoint_blocked_by_footprints((1, .1), (0, 1), ()))
+            (1, -.1), (0, -1), downward, .01))
+        self.assertFalse(endpoint_blocked_by_footprints(
+            (1, .1), (0, 1), (), .01))
 
     def test_endpoint_blocker_rejects_invalid_thickness(self):
         for thickness in (math.nan, math.inf, -math.inf, 0.0, -0.1):
             with self.subTest(thickness=thickness), self.assertRaises(ValueError):
                 endpoint_blocked_by_footprints(
-                    (1, .1), (0, 1), [((1, 0), (1, 2), thickness)])
+                    (1, .1), (0, 1), [((1, 0), (1, 2), thickness)], .01)
 
     def test_left_right_normals(self):
         self.assertEqual(side_normal((0, 0), (2, 0), "LEFT"), (0.0, 1.0))

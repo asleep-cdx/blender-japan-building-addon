@@ -11,6 +11,7 @@ STATUS_LABELS = {
     "FINISH_ID": "Finish ID不整合",
     "JOIN_POLICY": "未対応join_policy",
     "CLOSED": "未対応closed状態",
+    "PROFILE": "Profile不整合",
 }
 
 

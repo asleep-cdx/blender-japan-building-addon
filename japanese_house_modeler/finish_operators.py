@@ -10,6 +10,11 @@ from .finish_geometry import (
     create_finish_object, diagnose_finish, prepare_finish_regeneration,
     regenerate_finish, regenerate_finishes_atomic, validate_path_footprints,
 )
+from .finish_profiles import (
+    DEFAULT_HEIGHT_MM, DEFAULT_PROJECTION_MM, PROFILE_SCHEMA_VERSION,
+    SIMPLE_PROFILE_ID, SIMPLE_PROFILE_REVISION, resolve_finish_profile,
+    transactional_profile_edit,
+)
 from .finish_hardening import managed_finish_objects
 from .dependency_transaction import OperationRecovery, recover_operation
 from .finish_identity import (
@@ -158,7 +163,9 @@ class JHM_OT_start_finish_path(bpy.types.Operator):
                 length *= 1000.0
                 intervals.append((0.0, length) if traversal == "FORWARD"
                                  else (length, 0.0))
-            validate_path_footprints(spans, segments_resolved, intervals)
+            validate_path_footprints(
+                spans, segments_resolved, intervals,
+                DEFAULT_PROJECTION_MM / 1000.0)
             color = (0.1, 0.8, 1.0, 1.0)
         except ValueError:
             # Keep the raw guide visible, but never present a join which the
@@ -249,6 +256,55 @@ class JHM_OT_regenerate_finish(bpy.types.Operator):
             regenerate_finish(context.active_object, context.scene)
         except Exception as error:
             self.report({"ERROR"}, str(error)); return {"CANCELLED"}
+        return {"FINISHED"}
+
+
+class JHM_OT_edit_finish_profile(bpy.types.Operator):
+    """Transactionally edit one Run's production SIMPLE parameters."""
+
+    bl_idname = "jhm.edit_finish_profile"
+    bl_label = "Profile寸法を変更"
+    bl_options = {"REGISTER", "UNDO"}
+
+    profile: bpy.props.EnumProperty(
+        name="Profile", items=(("SIMPLE", "SIMPLE", "標準の矩形Profile"),),
+        default="SIMPLE")
+    height_mm: bpy.props.FloatProperty(
+        name="高さ", unit="LENGTH", default=DEFAULT_HEIGHT_MM,
+        min=0.1, max=100000.0, precision=1)
+    projection_mm: bpy.props.FloatProperty(
+        name="出幅", unit="LENGTH", default=DEFAULT_PROJECTION_MM,
+        min=0.1, max=10000.0, precision=1)
+
+    @classmethod
+    def poll(cls, context):
+        return _finish_poll(context)
+
+    def invoke(self, context, _event):
+        try:
+            resolved = resolve_finish_profile(context.active_object.jhm_finish)
+        except ValueError as error:
+            self.report({"ERROR"}, str(error))
+            return {"CANCELLED"}
+        self.profile = SIMPLE_PROFILE_ID
+        self.height_mm = resolved.height_mm
+        self.projection_mm = resolved.projection_mm
+        return context.window_manager.invoke_props_dialog(self)
+
+    def execute(self, context):
+        obj = context.active_object
+        finish = obj.jhm_finish
+        new = (SIMPLE_PROFILE_ID, SIMPLE_PROFILE_REVISION,
+               PROFILE_SCHEMA_VERSION, self.height_mm, self.projection_mm)
+        try:
+            # Preparation performs Profile, path, miter and blocker validation
+            # while the previous valid Curve remains installed.
+            transactional_profile_edit(
+                finish, new,
+                lambda: prepare_finish_regeneration(obj, context.scene))
+        except Exception as error:
+            self.report({"ERROR"}, f"Profile寸法を変更できませんでした: {error}")
+            return {"CANCELLED"}
         return {"FINISHED"}
 
 

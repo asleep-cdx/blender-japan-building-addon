@@ -166,7 +166,15 @@ class JHM_FinishProperties(bpy.types.PropertyGroup):
         items=(("BASEBOARD", "Baseboard Test", ""), ("CROWN", "Crown", "")),
         default="BASEBOARD",
     )
-    profile_id: bpy.props.StringProperty(default="SIMPLE_10X60")
+    # String storage preserves the accepted 06-A ``SIMPLE_10X60`` identifier;
+    # the Stage 1 selector is intentionally constrained by its edit operator.
+    profile_id: bpy.props.StringProperty(default="SIMPLE")
+    profile_revision: bpy.props.IntProperty(default=1, options={"HIDDEN"})
+    profile_schema_version: bpy.props.IntProperty(default=1, options={"HIDDEN"})
+    profile_height_mm: bpy.props.FloatProperty(
+        name="高さ", default=60.0, min=0.1, max=100000.0, precision=1)
+    profile_projection_mm: bpy.props.FloatProperty(
+        name="出幅", default=10.0, min=0.1, max=10000.0, precision=1)
     vertical_reference: bpy.props.EnumProperty(
         items=(("FLOOR", "床", ""), ("CEILING", "天井", ""),
                ("ABSOLUTE", "絶対高さ", "")), default="FLOOR",
