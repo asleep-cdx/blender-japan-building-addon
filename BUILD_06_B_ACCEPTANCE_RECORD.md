@@ -4,13 +4,14 @@
 
 - **Build 06-B Stage 1: ACCEPTED**
 - **Build 06-B Stage 2-A: ACCEPTED**
+- **Build 06-B Stage 2-B: ACCEPTED**
 - **Build 06-B overall: IN PROGRESS**
-- **Stage 2-B: NOT YET ACCEPTED**
 - **Stage 3: NOT YET ACCEPTED**
 
 This record accepts Stage 1, **Standard Baseboard Foundation**, and Stage 2-A,
-**Manual Exclusion and Partial Placement**. It does not accept Build 06-B as a
-whole and does not provide acceptance evidence for Stage 2-B or Stage 3.
+**Manual Exclusion and Partial Placement**, and Stage 2-B, **BEVEL, ROUNDED,
+and Profile-aware Shading**. It does not accept Build 06-B as a whole and does
+not provide acceptance evidence for Stage 3.
 
 ## Tested revisions and artifact
 
@@ -31,6 +32,14 @@ whole and does not provide acceptance evidence for Stage 2-B or Stage 3.
   `e4e5bcdf9809c808f4b6ac406c7aa4ea089158c1`
 - Accepted Stage 2-A build identification:
   `Build 06-B Stage 2-A: Manual Exclusion and Partial Placement`
+- Stage 2-B Blender 5.2 LTS runtime-tested production revision:
+  `dcd586e7704ebe0c4039b99ef58a41969d66a85f`
+- Stage 2-B runtime artifact:
+  `Japanese_House_Modeler_Build_06_B_Stage2B_Candidate_r1.zip`
+- Automated-test local source revision before the Stage 2-B record-only commit:
+  `5c313ca34e7eb83c40c3cabc92d96a300662c2b7`
+- Accepted Stage 2-B build identification:
+  `Build 06-B Stage 2-B: BEVEL, ROUNDED, and Profile-aware Shading`
 
 The runtime evidence below was supplied from Blender 5.2 LTS execution. Pure
 Python automation is recorded separately and is not represented as Blender
@@ -104,13 +113,62 @@ The Blender 5.2 LTS evidence above satisfies the Stage 2-A gates:
 - Save/reopen passes.
 - Legacy 06-A Exclusion records do not alter old appearance unless explicitly activated.
 
-## Automated evidence at latest local Stage 2-A source
+## Stage 2-B runtime acceptance
+
+The following evidence was obtained in Blender 5.2 LTS from production
+revision `dcd586e7704ebe0c4039b99ef58a41969d66a85f` using artifact
+`Japanese_House_Modeler_Build_06_B_Stage2B_Candidate_r1.zip`.
+
+| # | Test | Result | Runtime evidence |
+|---:|---|---|---|
+| 1 | SIMPLE regression | PASS | SIMPLE 60 × 10 mm retained normal management, one visible range, and the unchanged rectangular Profile. |
+| 2 | BEVEL generation | PASS | BEVEL 60 / 10 / bevel 5 produced the correct upper room-facing 45-degree chamfer, planar appearance, and normal management. |
+| 3 | ROUNDED generation | PASS | ROUNDED 60 / 10 / radius 5 produced a visually smooth quarter-round upper room-facing corner. Planar regions remained planar, with no twist, bulge, or discontinuity. |
+| 4 | ROUNDED radius edit | PASS | Editing radius 5 → 2 retained height/projection, updated derived geometry correctly, and retained normal management. |
+| 5 | Profile switch Undo / Redo | PASS | ROUNDED radius 2 → BEVEL bevel 3; Undo restored ROUNDED radius 2 and Redo restored BEVEL bevel 3, with normal management throughout. |
+| 6 | Invalid BEVEL rollback | PASS | Height 60 / projection 10 / bevel 10 was rejected. Previous BEVEL bevel 3 identity, parameters, geometry, and normal management remained intact. |
+| 7 | BEVEL editable Mesh | PASS | `BOUNDARY 0`, `NON_MANIFOLD 0`, positive signed volume, `SMOOTH 0`, scale `(1,1,1)`, closed Mesh, and retained flat planar shading. |
+| 8 | ROUNDED editable Mesh and Profile-aware shading | PASS | `BOUNDARY 0`, `NON_MANIFOLD 0`, positive signed volume, `SMOOTH 16`, `FLAT 40`, `POLYGONS 56`, scale `(1,1,1)`. Rounded regions were smooth and planar regions flat. |
+| 9 | ROUNDED + Manual Exclusion | PASS | One Manual Exclusion produced two visible ranges, no join across the gap, no triangles/spikes, and retained ROUNDED shape on both ranges. |
+| 10 | ROUNDED + Exclusion Mesh | PASS | `BOUNDARY 0`, `NON_MANIFOLD 0`, positive signed volume, `SMOOTH 32`, `FLAT 80`, `POLYGONS 112`, scale `(1,1,1)`. Both ranges were closed with BUTT ends. |
+| 11 | Material preservation across Profile and Exclusion edits | PASS | `Stage2B_Test_Mat` remained assigned after ROUNDED → BEVEL, BEVEL parameter edit, and Exclusion edit: `JHM Finish ['Stage2B_Test_Mat']`. |
+| 12 | BEVEL + Exclusion save/reopen | PASS | Reopen retained BEVEL, height 60, projection 10, bevel 4, one Manual Exclusion, two visible ranges, normal management, and `Stage2B_Test_Mat`. |
+| 13 | ROUNDED 90-degree Miter | PASS | A two-span L path had no gap, overlap, triangle, or spike; the rounded Profile remained continuous through the supported Miter and management remained normal. |
+| 14 | ROUNDED orientation matrix | PASS | LEFT/RIGHT × FORWARD/REVERSE all projected to the selected Wall face side with no negative scale, inversion, or twist; Miter geometry and management remained valid. |
+| 15 | BEVEL orientation matrix | PASS | LEFT/RIGHT × FORWARD/REVERSE all projected to the correct side with no inversion/twist; supported Miter geometry and management remained valid. |
+| 16 | BEVEL + Manual Exclusion + Mesh | PASS | `BOUNDARY 0`, `NON_MANIFOLD 0`, positive signed volume, `SMOOTH 0`, `POLYGONS 22`, scale `(1,1,1)`. The gap remained and both Exclusion-created ends were closed BUTT ends. |
+| 17 | ROUNDED junction-aware Exclusion managed state | PASS | An Exclusion reaching the canonical L-junction created no Miter across the excluded junction. The survivor terminated independently with no triangle/spike or visible penetration; management remained normal with two visible ranges. |
+| 18 | ROUNDED junction-aware Exclusion Mesh | PASS | `BOUNDARY 0`, `NON_MANIFOLD 0`, positive signed volume, `SMOOTH 32`, `FLAT 80`, `POLYGONS 112`, scale `(1,1,1)`. Closed topology and Profile-aware shading were preserved. |
+| 19 | Material preservation through Mesh conversion | PASS | Before: `JHM Finish.003 ['Stage2B_Mesh_Mat']`; after: `JHM Finish.003 Mesh.001 ['Stage2B_Mesh_Mat']`. Material indices remained assigned while Profile-aware shading was applied. |
+| 20 | Run-local Profile isolation | PASS | Run A was ROUNDED 80 / 12 / radius 4. Run B remained BEVEL 60 / 10 / bevel 5; changing Run A did not mutate Run B. |
+| 21 | Invalid ROUNDED rollback + save/reopen | PASS | Height 80 / projection 12 / radius 12 was rejected. Rollback restored ROUNDED 80 / 12 / radius 4 and normal management. Reopen retained those values, two FinishSpans, one Manual Exclusion, two visible ranges, normal management, and preserved geometry. |
+
+## Stage 2-B completion gate
+
+The Blender 5.2 LTS evidence above satisfies the Stage 2-B gates:
+
+- BEVEL and ROUNDED are selectable.
+- Run-local parameters persist.
+- Profile switching is transactional.
+- SIMPLE / BEVEL / ROUNDED use Profile-aware safety data.
+- LEFT / RIGHT normals and orientation remain correct.
+- Miter and BUTT results remain valid.
+- ROUNDED is visually smooth where intended.
+- Planar areas remain planar.
+- Editable Mesh preserves the intended appearance.
+- BEVEL/ROUNDED Exclusion behavior remains correct.
+- Undo/Redo passes.
+- Save/reopen passes.
+- Material preservation passes.
+
+## Automated evidence at latest local Stage 2-B source
 
 | Check | Result | Details |
 |---|---|---|
+| Stage 2-B targeted pure suite | PASS | `python -B -m unittest tests.test_build_06_b_stage2b` — 20 tests passed. |
 | Stage 2-A targeted pure suite | PASS | `python -B -m unittest tests.test_build_06_b_stage2a` — 51 tests passed. |
 | Stage 1 targeted pure suite | PASS | `python -B -m unittest tests.test_build_06_b_stage1` — 20 tests passed. |
-| Full pure suite | PASS | `python -B -m unittest discover -s tests` — 237 tests passed. |
+| Full pure suite | PASS | `python -B -m unittest discover -s tests` — 257 tests passed. |
 | Compile check | PASS | `python -m compileall -q japanese_house_modeler tests`. |
 | Diff whitespace checks | PASS | `git diff --check` and `git diff --cached --check`. |
 
@@ -118,8 +176,8 @@ The Blender 5.2 LTS evidence above satisfies the Stage 2-A gates:
 
 Build 06-B overall remains **IN PROGRESS**. Remaining work is:
 
-- Stage 2-B: BEVEL / ROUNDED / Profile-aware shading — **NOT YET ACCEPTED**.
-- Stage 3: Custom Profile Registration / final Baseboard acceptance —
+- Stage 3: Custom Profile Registration, project-local immutable Profile
+  snapshot/revision, and final production Baseboard acceptance —
   **NOT YET ACCEPTED**.
 
 This record does not accept Crown Moulding, closed FinishRuns, Door/Window
