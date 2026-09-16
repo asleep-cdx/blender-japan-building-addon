@@ -34,7 +34,8 @@ from .finish_custom_profiles import (
     profile_is_referenced,
 )
 from .finish_path import (
-    backspace_pending, propagate_canonical_side, traversal_for_connection,
+    backspace_pending, profile_horizontal_sign, propagate_canonical_side,
+    traversal_for_connection,
 )
 
 
@@ -703,7 +704,7 @@ class JHM_OT_repair_finish(bpy.types.Operator):
                         raise ValueError("Wall参照を一意に復元できません。")
                     span.wall_object = candidate
             obj.matrix_basis.identity()
-            problems = diagnose_finish(obj)
+            problems = diagnose_finish(obj, context.scene)
             if problems:
                 raise ValueError("Finish canonical dataを安全に復元できません。")
             regenerate_finish(obj, context.scene)
@@ -793,7 +794,8 @@ class JHM_OT_convert_finish_mesh(bpy.types.Operator):
                 resolve_finish_profile(
                     obj.jhm_finish, context.scene.jhm_custom_profiles),
                 profile_horizontal_sign(first_span.side,
-                                        first_span.traversal_direction))
+                                        first_span.traversal_direction),
+                prepared.ranges)
         except Exception as error:
             recovery = OperationRecovery()
             recovery.add(remove_temporary)

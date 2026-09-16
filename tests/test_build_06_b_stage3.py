@@ -211,13 +211,41 @@ class ScaleOrientationShadingTests(unittest.TestCase):
                        (1, .01, .06), (1, .01, 0))
         hard_quad = ((0, 0, 0), (0, .01, 0),
                      (1, .01, 0), (1, 0, 0))
+        path = (((0, 0, 0), (1, 0, 0)),)
         self.assertTrue(custom_polygon_should_be_smooth(
-            profile, smooth_quad, 1, 0))
+            profile, smooth_quad, 1, 0, path))
         self.assertFalse(custom_polygon_should_be_smooth(
-            profile, hard_quad, 1, 0))
+            profile, hard_quad, 1, 0, path))
         self.assertFalse(custom_polygon_should_be_smooth(
             profile, ((0, 0, 0), (0, .01, 0), (0, .01, .06),
-                      (0, .005, .07), (0, 0, .06)), 1, 0))  # cap stays flat
+                      (0, .005, .07), (0, 0, .06)), 1, 0, path))  # cap stays flat
+
+    def test_equal_height_opposite_edges_are_not_ambiguous(self):
+        profile = types.SimpleNamespace(
+            contour=((0, 0), (.01, 0), (.01, .06), (0, .06)),
+            shading=types.SimpleNamespace(smooth_contour_edges=(1,)))
+        path = (((0, 0, 0), (1, 0, 0)),)
+        right = ((0, .01, 0), (0, .01, .06),
+                 (1, .01, .06), (1, .01, 0))
+        left = ((0, 0, .06), (0, 0, 0), (1, 0, 0), (1, 0, .06))
+        self.assertTrue(custom_polygon_should_be_smooth(
+            profile, right, 1, 0, path))
+        self.assertFalse(custom_polygon_should_be_smooth(
+            profile, left, 1, 0, path))
+
+    def test_equal_height_opposite_edges_mirrored_orientation(self):
+        profile = types.SimpleNamespace(
+            contour=((0, 0), (.01, 0), (.01, .06), (0, .06)),
+            shading=types.SimpleNamespace(smooth_contour_edges=(1,)))
+        path = (((0, 0, 0), (1, 0, 0)),)
+        mirrored_right = ((0, -.01, .06), (0, -.01, 0),
+                          (1, -.01, 0), (1, -.01, .06))
+        mirrored_left = ((0, 0, 0), (0, 0, .06),
+                         (1, 0, .06), (1, 0, 0))
+        self.assertTrue(custom_polygon_should_be_smooth(
+            profile, mirrored_right, -1, 0, path))
+        self.assertFalse(custom_polygon_should_be_smooth(
+            profile, mirrored_left, -1, 0, path))
 
     def test_standard_stage2b_shading_unchanged(self):
         for name in ("SIMPLE", "BEVEL"):
