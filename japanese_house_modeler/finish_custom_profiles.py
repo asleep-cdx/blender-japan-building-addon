@@ -193,6 +193,27 @@ def mirrored_contour(contour):
     return tuple((-x, y) for x, y in reversed(contour))
 
 
+def mirrored_edge_indices(point_count, edge_indices):
+    """Remap canonical edges after ``reversed(mirror(contour))``.
+
+    Canonical edge ``i`` joins ``p[i]`` to ``p[i+1]``.  In the reversed
+    contour that same physical edge starts at ``n - 2 - i``.
+    """
+    count = int(point_count)
+    if count < 1:
+        return ()
+    return tuple(sorted((count - 2 - int(index)) % count
+                        for index in edge_indices))
+
+
+def oriented_edge_indices(point_count, edge_indices, horizontal_sign):
+    if not math.isfinite(float(horizontal_sign)):
+        raise ValueError("Profile orientationが不正です。")
+    canonical = tuple(sorted(int(index) for index in edge_indices))
+    return (canonical if float(horizontal_sign) >= 0.0
+            else mirrored_edge_indices(point_count, canonical))
+
+
 def make_snapshot(source_type, points=None, knots=None, profile_id=None):
     source_type = str(source_type).upper()
     if source_type == "POLY":

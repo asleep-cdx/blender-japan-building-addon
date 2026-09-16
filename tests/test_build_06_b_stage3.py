@@ -17,13 +17,17 @@ from japanese_house_modeler.finish_custom_profiles import (
     CUSTOM_COORDINATE_TOLERANCE_M, RESERVED_PROFILE_IDS, contour_bounds,
     cubic_bezier, find_definition, has_self_intersection, make_snapshot,
     mirrored_contour, new_custom_profile_id, normalize_poly_contour,
-    profile_is_referenced, sample_cyclic_bezier, scaled_contour, signed_area,
+    oriented_edge_indices, profile_is_referenced, sample_cyclic_bezier,
+    scaled_contour, signed_area,
     validate_custom_profile_id, validate_uniform_scale,
 )
 from japanese_house_modeler.finish_profiles import (
     BEVEL_PROFILE_ID, PROFILE_INSTANCE_FIELDS, ROUNDED_PROFILE_ID,
     SIMPLE_PROFILE_ID, derived_profile_cache_identity, oriented_contour,
     resolve_custom_profile, resolve_profile, transactional_profile_edit,
+)
+from japanese_house_modeler.finish_mesh import (
+    custom_polygon_should_be_smooth, polygon_should_be_smooth,
 )
 
 
@@ -38,6 +42,14 @@ def circle_knots():
            ((1, 2), (1 - k, 2), (1 + k, 2)),
            ((0, 1), (0, 1 - k), (0, 1 + k)))
     return tuple(tuple((x + 1, y + 1) for x, y in knot) for knot in raw)
+
+
+def mixed_knots():
+    """Convex contour whose first span is straight and second is curved."""
+    return (((0, 0), (.5, 0), (0, .5)),
+            ((2, 0), (2.8, .5), (1.5, 0)),
+            ((2, 2), (1.5, 2), (2.8, 1.5)),
+            ((0, 2), (0, 1.5), (.5, 2)))
 
 
 class CustomContourTests(unittest.TestCase):
@@ -100,6 +112,10 @@ class BezierTests(unittest.TestCase):
         knots = list(circle_knots()); knots[0] = (knots[0][0], (math.nan, 0), knots[0][2])
         with self.assertRaises(ValueError): sample_cyclic_bezier(knots)
 
+    def test_mixed_straight_and_curved_span_intent(self):
+        snapshot = make_snapshot("BEZIER", knots=mixed_knots())
+        self.assertEqual(tuple(range(16, 32)), snapshot.smooth_edges)
+
 
 class IdentityAndResolutionTests(unittest.TestCase):
     def test_ids_are_unique_and_reserved(self):
@@ -153,6 +169,14 @@ class ScaleOrientationShadingTests(unittest.TestCase):
         self.assertNotEqual(derived_profile_cache_identity(base, 1, 0),
                             derived_profile_cache_identity(changed, 1, 0))
 
+    def test_cache_identity_includes_shading_intent(self):
+        base = resolve_profile("SIMPLE", 1, 1, 60, 10)
+        shading = types.SimpleNamespace(smooth_round=True,
+                                        smooth_contour_edges=(1,))
+        changed = types.SimpleNamespace(**{**base.__dict__, "shading": shading})
+        self.assertNotEqual(derived_profile_cache_identity(base, 1, 0),
+                            derived_profile_cache_identity(changed, 1, 0))
+
     def test_poly_shading_is_hard(self):
         self.assertEqual((), make_snapshot("POLY", points=SQUARE).smooth_edges)
 
@@ -161,6 +185,48 @@ class ScaleOrientationShadingTests(unittest.TestCase):
         second = make_snapshot("BEZIER", knots=circle_knots())
         self.assertEqual(first.smooth_edges, second.smooth_edges)
         self.assertEqual(tuple(range(len(first.contour))), first.smooth_edges)
+
+    def test_mirrored_edge_remap_preserves_physical_edge(self):
+        contour = ((0, 0), (3, 0), (2, 2), (0, 1))
+        canonical = (0, 1)
+        mirrored = oriented_edge_indices(len(contour), canonical, -1)
+        self.assertEqual((0, 1), oriented_edge_indices(len(contour), canonical, 1))
+        self.assertEqual((1, 2), mirrored)
+        derived = mirrored_contour(contour)
+        canonical_edges = {
+            frozenset(((-contour[index][0], contour[index][1]),
+                       (-contour[(index + 1) % len(contour)][0],
+                        contour[(index + 1) % len(contour)][1])))
+            for index in canonical}
+        derived_edges = {frozenset((derived[index],
+                                    derived[(index + 1) % len(derived)]))
+                         for index in mirrored}
+        self.assertEqual(canonical_edges, derived_edges)
+
+    def test_custom_quad_consumes_explicit_edge_intent(self):
+        profile = types.SimpleNamespace(
+            contour=((0, 0), (.01, 0), (.01, .06), (0, .06)),
+            shading=types.SimpleNamespace(smooth_contour_edges=(1,)))
+        smooth_quad = ((0, .01, 0), (0, .01, .06),
+                       (1, .01, .06), (1, .01, 0))
+        hard_quad = ((0, 0, 0), (0, .01, 0),
+                     (1, .01, 0), (1, 0, 0))
+        self.assertTrue(custom_polygon_should_be_smooth(
+            profile, smooth_quad, 1, 0))
+        self.assertFalse(custom_polygon_should_be_smooth(
+            profile, hard_quad, 1, 0))
+        self.assertFalse(custom_polygon_should_be_smooth(
+            profile, ((0, 0, 0), (0, .01, 0), (0, .01, .06),
+                      (0, .005, .07), (0, 0, .06)), 1, 0))  # cap stays flat
+
+    def test_standard_stage2b_shading_unchanged(self):
+        for name in ("SIMPLE", "BEVEL"):
+            self.assertFalse(polygon_should_be_smooth(
+                resolve_profile(name, 1, 1, 60, 10, 5, 5), .5))
+        rounded = resolve_profile("ROUNDED", 1, 1, 60, 10, 5, 5)
+        self.assertTrue(polygon_should_be_smooth(rounded, .5))
+        self.assertFalse(polygon_should_be_smooth(rounded, 0))
+        self.assertFalse(polygon_should_be_smooth(rounded, 1))
 
 
 class SafetyTransactionTests(unittest.TestCase):

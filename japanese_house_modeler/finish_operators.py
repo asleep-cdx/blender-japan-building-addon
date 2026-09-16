@@ -500,11 +500,17 @@ class JHM_OT_register_custom_profile(bpy.types.Operator):
                 raise ValueError("2D Curve Objectを選択してください。")
             if not obj.matrix_basis.is_identity:
                 raise ValueError("Object Transformをidentityにしてください。")
+            if obj.parent is not None:
+                raise ValueError("Parent付きCurveは登録元にできません。")
+            if obj.constraints:
+                raise ValueError("Constraint付きCurveは登録元にできません。")
             if obj.get("jhm_managed_profile") or obj.jhm_finish.is_finish:
                 raise ValueError("JHM管理Curveは登録元にできません。")
             if obj.modifiers:
                 raise ValueError("Modifier付きCurveは登録元にできません。")
             curve = obj.data
+            if curve.shape_keys is not None:
+                raise ValueError("Shape Key付きCurveは登録元にできません。")
             if (curve.bevel_depth or curve.extrude or curve.offset
                     or curve.taper_object or curve.bevel_object):
                 raise ValueError("bevel/extrude/offset/taperのないCurveを使用してください。")
@@ -781,7 +787,13 @@ class JHM_OT_convert_finish_mesh(bpy.types.Operator):
             # unwelded boundary vertices.  Finalize topology while the managed
             # source still exists so any failure remains fully recoverable.
             weld_and_validate_finish_mesh(mesh)
-            apply_profile_shading(mesh, resolve_finish_profile(obj.jhm_finish, context.scene.jhm_custom_profiles))
+            first_span = obj.jhm_finish.spans[0]
+            apply_profile_shading(
+                mesh,
+                resolve_finish_profile(
+                    obj.jhm_finish, context.scene.jhm_custom_profiles),
+                profile_horizontal_sign(first_span.side,
+                                        first_span.traversal_direction))
         except Exception as error:
             recovery = OperationRecovery()
             recovery.add(remove_temporary)

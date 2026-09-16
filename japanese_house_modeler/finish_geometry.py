@@ -26,6 +26,7 @@ from .finish_hardening import (
     finish_intervals_are_valid,
     validate_finish_configuration,
 )
+from .finish_custom_profiles import oriented_edge_indices
 
 
 def managed_walls():
@@ -421,6 +422,9 @@ def _production_profile(resolved, horizontal_sign, vertical_base_m):
             f"Z{vertical_base_mm:g} "
             + ("Negative" if sign < 0 else "Positive"))
     orientation = "NEGATIVE" if sign < 0 else "POSITIVE"
+    oriented_smooth_edges = oriented_edge_indices(
+        len(resolved.contour), resolved.shading.smooth_contour_edges, sign)
+    smooth_edge_metadata = ",".join(str(index) for index in oriented_smooth_edges)
     for candidate in bpy.data.objects:
         data_type = ("CURVE" if isinstance(getattr(candidate, "data", None),
                                            bpy.types.Curve) else "")
@@ -439,6 +443,8 @@ def _production_profile(resolved, horizontal_sign, vertical_base_m):
                 == resolved.uniform_scale
                 and candidate.get("jhm_profile_contour", repr(resolved.contour))
                 == repr(resolved.contour)
+                and candidate.get("jhm_profile_smooth_edges", smooth_edge_metadata)
+                == smooth_edge_metadata
                 and candidate.get("jhm_profile_orientation") == orientation
                 and candidate.get("jhm_profile_vertical_base_mm")
                 == vertical_base_mm):
@@ -469,6 +475,7 @@ def _production_profile(resolved, horizontal_sign, vertical_base_m):
         obj["jhm_profile_radius_mm"] = resolved.radius_mm
         obj["jhm_profile_uniform_scale"] = resolved.uniform_scale
         obj["jhm_profile_contour"] = repr(resolved.contour)
+        obj["jhm_profile_smooth_edges"] = smooth_edge_metadata
         obj["jhm_profile_orientation"] = orientation
         obj["jhm_profile_vertical_base_mm"] = vertical_base_mm
         obj.hide_viewport = True
