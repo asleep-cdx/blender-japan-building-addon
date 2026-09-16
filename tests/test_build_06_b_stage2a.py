@@ -13,7 +13,8 @@ sys.modules.setdefault("japanese_house_modeler", package)
 from japanese_house_modeler.finish_exclusions import (
     activated_identity, calculate_visible_intervals, classify_visible_state,
     exclusion_split_identities, merge_coverage, subtract_intervals,
-    piece_reaches_boundary, run_boundary_field, transactional_edit,
+    normalize_distance_from_start, piece_reaches_boundary, run_boundary_field,
+    transactional_edit,
 )
 from japanese_house_modeler.finish_path import resolve_boundary
 
@@ -115,6 +116,46 @@ class Stage2AReverseGroupingTests(unittest.TestCase):
 
 
 class Stage2ABoundaryAndMigrationTests(unittest.TestCase):
+    def test_displayed_rounded_wall_end_normalizes_semantically(self):
+        self.assertEqual(normalize_distance_from_start(3031.00, 3030.9994),
+                         ("WALL_END", 0.0))
+
+    def test_zero_normalizes_to_wall_start(self):
+        self.assertEqual(normalize_distance_from_start(0.00, 3030.9994),
+                         ("WALL_START", 0.0))
+
+    def test_interior_distance_is_unchanged(self):
+        self.assertEqual(normalize_distance_from_start(725.25, 3030.9994),
+                         ("DISTANCE_FROM_START", 725.25))
+
+    def test_clearly_outside_distance_is_rejected(self):
+        with self.assertRaises(ValueError):
+            normalize_distance_from_start(3031.02, 3030.9994)
+
+    def test_wall_end_exclusion_round_trip_preserves_coverage(self):
+        length = 3030.9994
+        displayed = round(resolve_boundary("WALL_END", 0.0, length), 2)
+        kind, value = normalize_distance_from_start(displayed, length)
+        self.assertEqual((kind, value), ("WALL_END", 0.0))
+        self.assertEqual(resolve_boundary(kind, value, length), length)
+
+    def test_partial_wall_end_round_trip_remains_valid(self):
+        length = 3030.9994
+        displayed = round(resolve_boundary("WALL_END", 0.0, length), 2)
+        kind, value = normalize_distance_from_start(displayed, length)
+        self.assertEqual(resolve_boundary(kind, value, length), length)
+
+    def test_normalized_full_span_is_valid_empty(self):
+        length = 3030.9994
+        start = normalize_distance_from_start(0.0, length)
+        end = normalize_distance_from_start(3031.0, length)
+        coverage = ((resolve_boundary(*start, length),
+                     resolve_boundary(*end, length)),)
+        visible = subtract_intervals((0.0, length), coverage)
+        self.assertEqual(visible, ())
+        self.assertEqual(classify_visible_state(True, len(visible), 1),
+                         "VALID_EMPTY")
+
     def test_single_forward_fields(self):
         self.assertEqual((run_boundary_field("FORWARD", "START"),
                           run_boundary_field("FORWARD", "END")),

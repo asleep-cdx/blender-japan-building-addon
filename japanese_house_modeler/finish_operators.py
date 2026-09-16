@@ -65,8 +65,10 @@ class JHM_OT_add_finish_exclusion(bpy.types.Operator):
     bl_label = "Manual Exclusionを追加"
     bl_options = {"REGISTER", "UNDO"}
     span_index: bpy.props.IntProperty(name="対象FinishSpan", default=0, min=0)
-    start_mm: bpy.props.FloatProperty(name="開始 (Wall始点からmm)", min=0.0)
-    end_mm: bpy.props.FloatProperty(name="終了 (Wall始点からmm)", min=0.0)
+    start_mm: bpy.props.FloatProperty(
+        name="開始 (Wall始点からmm)", min=0.0, precision=2)
+    end_mm: bpy.props.FloatProperty(
+        name="終了 (Wall始点からmm)", min=0.0, precision=2)
 
     @classmethod
     def poll(cls, context): return _finish_poll(context)
@@ -78,14 +80,24 @@ class JHM_OT_add_finish_exclusion(bpy.types.Operator):
         obj, finish = context.active_object, context.active_object.jhm_finish
         if self.span_index >= len(finish.spans):
             self.report({"ERROR"}, "対象FinishSpanがありません。"); return {"CANCELLED"}
-        from .finish_exclusions import new_exclusion_id
+        from .finish_exclusions import (
+            new_exclusion_id, normalize_distance_from_start,
+        )
         def mutate():
             span = finish.spans[self.span_index]
+            wall = span.wall_object.jhm_wall
+            length_mm = wall_axis(wall.start, wall.end)[1] * 1000.0
+            start_kind, start_value = normalize_distance_from_start(
+                self.start_mm, length_mm)
+            end_kind, end_value = normalize_distance_from_start(
+                self.end_mm, length_mm)
             item = finish.exclusions.add()
             item.wall_object, item.expected_wall_id = span.wall_object, span.expected_wall_id
             item.side = span.side
-            item.start_boundary_kind = item.end_boundary_kind = "DISTANCE_FROM_START"
-            item.start_boundary_value_mm, item.end_boundary_value_mm = self.start_mm, self.end_mm
+            item.start_boundary_kind, item.start_boundary_value_mm = (
+                start_kind, start_value)
+            item.end_boundary_kind, item.end_boundary_value_mm = (
+                end_kind, end_value)
             item.exclusion_type = "MANUAL"
             item.exclusion_id = new_exclusion_id()
             item.fragment_id = new_exclusion_id()
@@ -101,8 +113,10 @@ class JHM_OT_edit_finish_exclusion(bpy.types.Operator):
     bl_idname = "jhm.edit_finish_exclusion"
     bl_label = "Exclusionを編集"
     bl_options = {"REGISTER", "UNDO"}
-    start_mm: bpy.props.FloatProperty(name="開始 (Wall始点からmm)", min=0.0)
-    end_mm: bpy.props.FloatProperty(name="終了 (Wall始点からmm)", min=0.0)
+    start_mm: bpy.props.FloatProperty(
+        name="開始 (Wall始点からmm)", min=0.0, precision=2)
+    end_mm: bpy.props.FloatProperty(
+        name="終了 (Wall始点からmm)", min=0.0, precision=2)
 
     @classmethod
     def poll(cls, context): return _finish_poll(context)
@@ -124,10 +138,15 @@ class JHM_OT_edit_finish_exclusion(bpy.types.Operator):
         obj, finish = context.active_object, context.active_object.jhm_finish
         index = finish.active_exclusion_index
         if index >= len(finish.exclusions): return {"CANCELLED"}
+        from .finish_exclusions import normalize_distance_from_start
         def mutate():
             item = finish.exclusions[index]
-            item.start_boundary_kind = item.end_boundary_kind = "DISTANCE_FROM_START"
-            item.start_boundary_value_mm, item.end_boundary_value_mm = self.start_mm, self.end_mm
+            wall = item.wall_object.jhm_wall
+            length_mm = wall_axis(wall.start, wall.end)[1] * 1000.0
+            item.start_boundary_kind, item.start_boundary_value_mm = (
+                normalize_distance_from_start(self.start_mm, length_mm))
+            item.end_boundary_kind, item.end_boundary_value_mm = (
+                normalize_distance_from_start(self.end_mm, length_mm))
         try: _transactional_finish_mutation(obj, context.scene, mutate)
         except Exception as error:
             self.report({"ERROR"}, f"Exclusionを編集できませんでした: {error}"); return {"CANCELLED"}
@@ -174,8 +193,10 @@ class JHM_OT_toggle_finish_exclusion(bpy.types.Operator):
 class JHM_OT_edit_finish_boundaries(bpy.types.Operator):
     bl_idname = "jhm.edit_finish_boundaries"; bl_label = "開始/終了位置を変更"
     bl_options = {"REGISTER", "UNDO"}
-    start_mm: bpy.props.FloatProperty(name="最初のSpan開始 (Wall始点からmm)", min=0.0)
-    end_mm: bpy.props.FloatProperty(name="最後のSpan終了 (Wall始点からmm)", min=0.0)
+    start_mm: bpy.props.FloatProperty(
+        name="最初のSpan開始 (Wall始点からmm)", min=0.0, precision=2)
+    end_mm: bpy.props.FloatProperty(
+        name="最後のSpan終了 (Wall始点からmm)", min=0.0, precision=2)
     @classmethod
     def poll(cls, context): return _finish_poll(context)
     def invoke(self, context, _event):
@@ -196,16 +217,23 @@ class JHM_OT_edit_finish_boundaries(bpy.types.Operator):
             getattr(last, end_field + "_boundary_value_mm"), length(last))
         return context.window_manager.invoke_props_dialog(self)
     def execute(self, context):
-        from .finish_exclusions import run_boundary_field
+        from .finish_exclusions import (
+            normalize_distance_from_start, run_boundary_field,
+        )
         obj, finish = context.active_object, context.active_object.jhm_finish
         def mutate():
             first, last = finish.spans[0], finish.spans[-1]
+            def length(span):
+                wall = span.wall_object.jhm_wall
+                return wall_axis(wall.start, wall.end)[1] * 1000.0
             start_field = run_boundary_field(first.traversal_direction, "START")
             end_field = run_boundary_field(last.traversal_direction, "END")
-            setattr(first, start_field + "_boundary_kind", "DISTANCE_FROM_START")
-            setattr(first, start_field + "_boundary_value_mm", self.start_mm)
-            setattr(last, end_field + "_boundary_kind", "DISTANCE_FROM_START")
-            setattr(last, end_field + "_boundary_value_mm", self.end_mm)
+            start = normalize_distance_from_start(self.start_mm, length(first))
+            end = normalize_distance_from_start(self.end_mm, length(last))
+            setattr(first, start_field + "_boundary_kind", start[0])
+            setattr(first, start_field + "_boundary_value_mm", start[1])
+            setattr(last, end_field + "_boundary_kind", end[0])
+            setattr(last, end_field + "_boundary_value_mm", end[1])
         try: _transactional_finish_mutation(obj, context.scene, mutate)
         except Exception as error:
             self.report({"ERROR"}, str(error)); return {"CANCELLED"}

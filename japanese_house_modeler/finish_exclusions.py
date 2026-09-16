@@ -5,11 +5,32 @@ import uuid
 
 
 EPSILON_MM = 1.0e-7
+# Blender dialogs display these distances to 0.01 mm.  Half one displayed unit
+# plus 0.0001 mm floating noise absorbs endpoint round trips without turning
+# arbitrary outside values valid.
+UI_ENDPOINT_TOLERANCE_MM = 0.0051
 
 
 def new_exclusion_id():
     """Return an object-name-independent collision-resistant identity."""
     return uuid.uuid4().hex
+
+
+def normalize_distance_from_start(
+        value_mm, wall_length_mm, tolerance_mm=UI_ENDPOINT_TOLERANCE_MM):
+    """Convert a dialog distance to a semantic canonical Wall boundary."""
+    value, length, tolerance = map(
+        float, (value_mm, wall_length_mm, tolerance_mm))
+    if (not all(map(math.isfinite, (value, length, tolerance)))
+            or length <= 0.0 or tolerance < 0.0):
+        raise ValueError("invalid Wall boundary normalization")
+    if abs(value) <= tolerance:
+        return "WALL_START", 0.0
+    if abs(value - length) <= tolerance:
+        return "WALL_END", 0.0
+    if 0.0 < value < length:
+        return "DISTANCE_FROM_START", value
+    raise ValueError("入力した境界位置がWallの範囲外です。")
 
 
 def merge_coverage(intervals, epsilon=EPSILON_MM):
