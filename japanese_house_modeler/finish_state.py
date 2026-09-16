@@ -12,6 +12,7 @@ STATUS_LABELS = {
     "JOIN_POLICY": "未対応join_policy",
     "CLOSED": "未対応closed状態",
     "PROFILE": "Profile不整合",
+    "EXCLUSION": "Exclusion不整合",
 }
 
 

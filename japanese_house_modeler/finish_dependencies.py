@@ -281,7 +281,8 @@ _SPAN_FIELDS = ("expected_wall_id", "side", "entry_boundary_kind",
                 "exit_boundary_value_mm", "traversal_direction")
 _EXCLUSION_FIELDS = ("expected_wall_id", "side", "start_boundary_kind",
                      "start_boundary_value_mm", "end_boundary_kind",
-                     "end_boundary_value_mm", "exclusion_type", "source_id")
+                     "end_boundary_value_mm", "exclusion_type", "source_id",
+                     "exclusion_id", "fragment_id", "enabled")
 
 
 def snapshot_finish_data(objects):
@@ -338,6 +339,9 @@ def _write_semantic(target, piece, source, original, successor, exclusion=False)
     if exclusion:
         target.exclusion_type = source["exclusion_type"]
         target.source_id = source["source_id"]
+        target.exclusion_id = source["exclusion_id"]
+        target.fragment_id = source["fragment_id"]
+        target.enabled = source["enabled"]
     else:
         target.traversal_direction = source["traversal_direction"]
 
@@ -380,10 +384,16 @@ def remap_finish_objects_for_split(objects, event):
             source = {"wall_object": item.wall_object,
                       **{name: getattr(item, name) for name in _EXCLUSION_FIELDS}}
             if item.wall_object is event.original_object:
-                for piece in remap_semantic_interval(
+                pieces = tuple(remap_semantic_interval(
                         item.start_boundary_kind, item.start_boundary_value_mm,
                         item.end_boundary_kind, item.end_boundary_value_mm,
-                        event.old_length_mm, event.split_distance_mm):
+                        event.old_length_mm, event.split_distance_mm))
+                from .finish_exclusions import exclusion_split_identities
+                identities = exclusion_split_identities(
+                    source["exclusion_id"], source["fragment_id"], len(pieces))
+                for piece, identity in zip(pieces, identities):
+                    source = dict(source, exclusion_id=identity[0],
+                                  fragment_id=identity[1])
                     exclusions.append((piece, source))
             else:
                 exclusions.append((None, source))

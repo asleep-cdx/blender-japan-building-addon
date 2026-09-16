@@ -150,6 +150,97 @@ def resolved_finish_points(finish, scene, resolved_profile=None):
     ))
 
 
+def resolved_finish_ranges(finish, scene, resolved_profile=None):
+    """Resolve exclusions into independent, path-ordered visible ranges."""
+    resolved_profile = resolved_profile or resolve_finish_profile(finish)
+    # Preserve all accepted Stage 1 canonical/topology/blocker validation.
+    resolved_finish_points(finish, scene, resolved_profile)
+    from .finish_exclusions import subtract_intervals
+    from .finish_path import resolve_boundary
+
+    coverage = {}
+    enabled_count = 0
+    spans_by_wall = {}
+    for span in finish.spans:
+        spans_by_wall.setdefault(span.wall_object, []).append(span)
+    for exclusion in finish.exclusions:
+        if not exclusion.enabled:
+            continue
+        enabled_count += 1
+        target = exclusion.wall_object
+        wall = target.jhm_wall
+        _, length_m = wall_axis(wall.start, wall.end)
+        length_mm = length_m * 1000.0
+        start = resolve_boundary(exclusion.start_boundary_kind,
+                                 exclusion.start_boundary_value_mm, length_mm)
+        end = resolve_boundary(exclusion.end_boundary_kind,
+                               exclusion.end_boundary_value_mm, length_mm)
+        if end - start <= 1.0e-7:
+            raise ValueError("Exclusion区間は正の長さが必要です。")
+        applicable = spans_by_wall.get(target, ())
+        if not applicable or not any(span.side == exclusion.side for span in applicable):
+            raise ValueError("ExclusionのWallまたは側面がFinishSpanと一致しません。")
+        overlaps = False
+        for span in applicable:
+            if span.side != exclusion.side:
+                continue
+            s0, s1 = resolve_interval(
+                span.entry_boundary_kind, span.entry_boundary_value_mm,
+                span.exit_boundary_kind, span.exit_boundary_value_mm, length_mm)
+            if start < s1 - 1.0e-7 and end > s0 + 1.0e-7:
+                overlaps = True
+        if not overlaps:
+            raise ValueError("Exclusionが対応するFinishSpanと重なりません。")
+        coverage.setdefault((target, exclusion.side), []).append((start, end))
+
+    groups, current = [], []
+    for span in finish.spans:
+        wall = span.wall_object.jhm_wall
+        _, length_m = wall_axis(wall.start, wall.end)
+        length_mm = length_m * 1000.0
+        canonical = resolve_interval(
+            span.entry_boundary_kind, span.entry_boundary_value_mm,
+            span.exit_boundary_kind, span.exit_boundary_value_mm, length_mm)
+        ascending = tuple(sorted(canonical))
+        pieces = subtract_intervals(
+            ascending, coverage.get((span.wall_object, span.side), ()))
+        if span.traversal_direction == "REVERSE":
+            pieces = tuple(reversed(pieces))
+        if not pieces and current:
+            groups.append(current); current = []
+        for piece_index, (start, end) in enumerate(pieces):
+            interval = ("DISTANCE_FROM_START", start,
+                        "DISTANCE_FROM_START", end)
+            segment = face_segment(wall.start, wall.end,
+                                   wall.wall_thickness / 1000.0, span.side,
+                                   interval, span.traversal_direction)
+            # Only an uncut boundary may participate in the accepted miter
+            # transition. Every exclusion boundary starts a new BUTT range.
+            joins_previous = (piece_index == 0 and current and
+                              abs(canonical[0] - (end if span.traversal_direction == "REVERSE" else start)) <= 0.001)
+            if current and not joins_previous:
+                groups.append(current); current = []
+            current.append(segment)
+            visible_departure = end if span.traversal_direction == "FORWARD" else start
+            if abs(visible_departure - canonical[1]) > 0.001:
+                groups.append(current); current = []
+    if current:
+        groups.append(current)
+
+    defaults = scene.jhm_new_wall_defaults
+    z = resolve_vertical(
+        finish.vertical_reference, finish.vertical_offset_mm, finish.absolute_z_mm,
+        defaults.floor_reference_z_mm, defaults.ceiling_reference_z_mm)
+    ranges = []
+    for segments in groups:
+        from .finish_surface import validate_profile_miter_space
+        validate_profile_miter_space(segments, resolved_profile.projection_m,
+                                     finish.miter_limit)
+        ranges.append(tuple((x, y, z) for x, y in resolve_surface_path(
+            segments, finish.miter_limit)))
+    return tuple(ranges), enabled_count
+
+
 def spans_topologically_continuous(spans):
     for first, second in zip(spans, spans[1:]):
         first_endpoint = "END" if first.traversal_direction == "FORWARD" else "START"
@@ -218,6 +309,38 @@ def diagnose_finish(obj):
                 if getattr(getattr(item, "jhm_finish", None), "is_finish", False)]
     extras = list(finish_configuration_problems(
         obj.jhm_finish.join_policy, obj.jhm_finish.closed))
+    try:
+        spans_by_wall = {}
+        for span in obj.jhm_finish.spans:
+            spans_by_wall.setdefault(span.wall_object, []).append(span)
+        for exclusion in obj.jhm_finish.exclusions:
+            if not exclusion.enabled:
+                continue
+            applicable = spans_by_wall.get(exclusion.wall_object, ())
+            if not applicable or not any(
+                    span.side == exclusion.side for span in applicable):
+                raise ValueError
+            wall = exclusion.wall_object.jhm_wall
+            _, length_m = wall_axis(wall.start, wall.end)
+            exclusion_interval = resolve_interval(
+                exclusion.start_boundary_kind, exclusion.start_boundary_value_mm,
+                exclusion.end_boundary_kind, exclusion.end_boundary_value_mm,
+                length_m * 1000.0)
+            overlaps = False
+            for span in applicable:
+                if span.side != exclusion.side:
+                    continue
+                span_interval = sorted(resolve_interval(
+                    span.entry_boundary_kind, span.entry_boundary_value_mm,
+                    span.exit_boundary_kind, span.exit_boundary_value_mm,
+                    length_m * 1000.0, span.traversal_direction))
+                if (max(span_interval[0], exclusion_interval[0]) <
+                        min(span_interval[1], exclusion_interval[1])):
+                    overlaps = True
+            if not overlaps:
+                raise ValueError
+    except (AttributeError, ReferenceError, TypeError, ValueError):
+        extras.append("EXCLUSION")
     try:
         resolve_finish_profile(obj.jhm_finish)
     except (TypeError, ValueError):
@@ -321,8 +444,10 @@ def prepare_finish_regeneration(obj, scene):
     if not finish_id_is_valid(obj.jhm_finish.finish_id, duplicates):
         raise ValueError("Finish IDが空、空白、または重複しています。")
     resolved_profile = resolve_finish_profile(obj.jhm_finish)
-    points = resolved_finish_points(obj.jhm_finish, scene, resolved_profile)
-    vertical_base_m = uniform_vertical_base(points)
+    ranges, enabled_count = resolved_finish_ranges(
+        obj.jhm_finish, scene, resolved_profile)
+    points = tuple(point for visible in ranges for point in visible)
+    vertical_base_m = uniform_vertical_base(points) if points else 0.0
     old_curve = obj.data
     curve = old_curve.copy()
     owned_profile_cleanup = None
@@ -339,12 +464,13 @@ def prepare_finish_regeneration(obj, scene):
         curve.bevel_object = profile
         curve.use_fill_caps = True
         curve.splines.clear()
-        spline = curve.splines.new("POLY")
-        spline.points.add(len(points) - 1)
-        for target, point in zip(spline.points, points):
-            target.co = (point[0], point[1], 0.0, 1.0)
-        spline.use_cyclic_u = False
-        spline.use_smooth = False
+        for visible in ranges:
+            spline = curve.splines.new("POLY")
+            spline.points.add(len(visible) - 1)
+            for target, point in zip(spline.points, visible):
+                target.co = (point[0], point[1], 0.0, 1.0)
+            spline.use_cyclic_u = False
+            spline.use_smooth = False
         curve.update_tag()
     except Exception as operation_error:
         from .dependency_transaction import OperationRecovery, recover_operation
@@ -378,6 +504,8 @@ def prepare_finish_regeneration(obj, scene):
 
     change = PreparedChange(curve, commit, rollback, discard, dispose_old)
     change.points = points
+    change.ranges = ranges
+    change.enabled_exclusion_count = enabled_count
     return change
 
 

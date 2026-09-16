@@ -10,6 +10,7 @@ from .finish_geometry import (
     create_finish_object, diagnose_finish, prepare_finish_regeneration,
     regenerate_finish, regenerate_finishes_atomic, validate_path_footprints,
 )
+from .finish_dependencies import restore_finish_data, snapshot_finish_data
 from .finish_profiles import (
     DEFAULT_HEIGHT_MM, DEFAULT_PROJECTION_MM, PROFILE_SCHEMA_VERSION,
     SIMPLE_PROFILE_ID, SIMPLE_PROFILE_REVISION, resolve_finish_profile,
@@ -17,7 +18,7 @@ from .finish_profiles import (
 )
 from .finish_hardening import managed_finish_objects
 from .finish_mesh import weld_and_validate_finish_mesh
-from .dependency_transaction import OperationRecovery, recover_operation
+from .dependency_transaction import DependencyTransaction, OperationRecovery, recover_operation
 from .finish_identity import (
     duplicate_ids, ensure_persistent_id, id_index, new_persistent_id,
 )
@@ -40,6 +41,146 @@ def _wall_id_duplicates():
 def _finish_poll(context):
     finish = getattr(context.active_object, "jhm_finish", None)
     return context.mode == "OBJECT" and finish is not None and finish.is_finish
+
+
+def _transactional_finish_mutation(obj, scene, mutate):
+    """Commit canonical and generated Finish state together."""
+    snapshot = snapshot_finish_data((obj,))
+    transaction = DependencyTransaction(snapshot, restore_finish_data)
+    try:
+        mutate()
+        transaction.prepare((lambda: prepare_finish_regeneration(obj, scene),))
+        transaction.commit()
+    except Exception:
+        if transaction.state not in {"ROLLED_BACK", "FINALIZED"}:
+            transaction.rollback()
+        raise
+
+
+class JHM_OT_add_finish_exclusion(bpy.types.Operator):
+    bl_idname = "jhm.add_finish_exclusion"
+    bl_label = "Manual Exclusionを追加"
+    bl_options = {"REGISTER", "UNDO"}
+    span_index: bpy.props.IntProperty(name="対象FinishSpan", default=0, min=0)
+    start_mm: bpy.props.FloatProperty(name="開始 (Wall始点からmm)", min=0.0)
+    end_mm: bpy.props.FloatProperty(name="終了 (Wall始点からmm)", min=0.0)
+
+    @classmethod
+    def poll(cls, context): return _finish_poll(context)
+
+    def invoke(self, context, _event):
+        return context.window_manager.invoke_props_dialog(self)
+
+    def execute(self, context):
+        obj, finish = context.active_object, context.active_object.jhm_finish
+        if self.span_index >= len(finish.spans):
+            self.report({"ERROR"}, "対象FinishSpanがありません。"); return {"CANCELLED"}
+        from .finish_exclusions import new_exclusion_id
+        def mutate():
+            span = finish.spans[self.span_index]
+            item = finish.exclusions.add()
+            item.wall_object, item.expected_wall_id = span.wall_object, span.expected_wall_id
+            item.side = span.side
+            item.start_boundary_kind = item.end_boundary_kind = "DISTANCE_FROM_START"
+            item.start_boundary_value_mm, item.end_boundary_value_mm = self.start_mm, self.end_mm
+            item.exclusion_type = "MANUAL"
+            item.exclusion_id = new_exclusion_id()
+            item.fragment_id = new_exclusion_id()
+            item.enabled = True
+            finish.active_exclusion_index = len(finish.exclusions) - 1
+        try: _transactional_finish_mutation(obj, context.scene, mutate)
+        except Exception as error:
+            self.report({"ERROR"}, f"Exclusionを追加できませんでした: {error}"); return {"CANCELLED"}
+        return {"FINISHED"}
+
+
+class JHM_OT_edit_finish_exclusion(bpy.types.Operator):
+    bl_idname = "jhm.edit_finish_exclusion"
+    bl_label = "Exclusionを編集"
+    bl_options = {"REGISTER", "UNDO"}
+    start_mm: bpy.props.FloatProperty(name="開始 (Wall始点からmm)", min=0.0)
+    end_mm: bpy.props.FloatProperty(name="終了 (Wall始点からmm)", min=0.0)
+
+    @classmethod
+    def poll(cls, context): return _finish_poll(context)
+
+    def invoke(self, context, _event):
+        finish = context.active_object.jhm_finish
+        if not finish.exclusions: return {"CANCELLED"}
+        item = finish.exclusions[min(finish.active_exclusion_index, len(finish.exclusions)-1)]
+        self.start_mm, self.end_mm = item.start_boundary_value_mm, item.end_boundary_value_mm
+        return context.window_manager.invoke_props_dialog(self)
+
+    def execute(self, context):
+        obj, finish = context.active_object, context.active_object.jhm_finish
+        index = finish.active_exclusion_index
+        if index >= len(finish.exclusions): return {"CANCELLED"}
+        def mutate():
+            item = finish.exclusions[index]
+            item.start_boundary_kind = item.end_boundary_kind = "DISTANCE_FROM_START"
+            item.start_boundary_value_mm, item.end_boundary_value_mm = self.start_mm, self.end_mm
+        try: _transactional_finish_mutation(obj, context.scene, mutate)
+        except Exception as error:
+            self.report({"ERROR"}, f"Exclusionを編集できませんでした: {error}"); return {"CANCELLED"}
+        return {"FINISHED"}
+
+
+class JHM_OT_remove_finish_exclusion(bpy.types.Operator):
+    bl_idname = "jhm.remove_finish_exclusion"; bl_label = "Exclusionを削除"
+    bl_options = {"REGISTER", "UNDO"}
+    @classmethod
+    def poll(cls, context): return _finish_poll(context)
+    def execute(self, context):
+        obj, finish, index = context.active_object, context.active_object.jhm_finish, context.active_object.jhm_finish.active_exclusion_index
+        if index >= len(finish.exclusions): return {"CANCELLED"}
+        try: _transactional_finish_mutation(obj, context.scene, lambda: finish.exclusions.remove(index))
+        except Exception as error:
+            self.report({"ERROR"}, str(error)); return {"CANCELLED"}
+        finish.active_exclusion_index = max(0, min(index, len(finish.exclusions)-1))
+        return {"FINISHED"}
+
+
+class JHM_OT_toggle_finish_exclusion(bpy.types.Operator):
+    bl_idname = "jhm.toggle_finish_exclusion"; bl_label = "Exclusionの有効/無効"
+    bl_options = {"REGISTER", "UNDO"}
+    @classmethod
+    def poll(cls, context): return _finish_poll(context)
+    def execute(self, context):
+        obj, finish, index = context.active_object, context.active_object.jhm_finish, context.active_object.jhm_finish.active_exclusion_index
+        if index >= len(finish.exclusions): return {"CANCELLED"}
+        try: _transactional_finish_mutation(obj, context.scene, lambda: setattr(finish.exclusions[index], "enabled", not finish.exclusions[index].enabled))
+        except Exception as error:
+            self.report({"ERROR"}, str(error)); return {"CANCELLED"}
+        return {"FINISHED"}
+
+
+class JHM_OT_edit_finish_boundaries(bpy.types.Operator):
+    bl_idname = "jhm.edit_finish_boundaries"; bl_label = "開始/終了位置を変更"
+    bl_options = {"REGISTER", "UNDO"}
+    start_mm: bpy.props.FloatProperty(name="最初のSpan開始 (Wall始点からmm)", min=0.0)
+    end_mm: bpy.props.FloatProperty(name="最後のSpan終了 (Wall始点からmm)", min=0.0)
+    @classmethod
+    def poll(cls, context): return _finish_poll(context)
+    def invoke(self, context, _event):
+        from .finish_path import resolve_boundary
+        finish = context.active_object.jhm_finish
+        first, last = finish.spans[0], finish.spans[-1]
+        def length(span):
+            wall = span.wall_object.jhm_wall
+            return wall_axis(wall.start, wall.end)[1] * 1000.0
+        self.start_mm = resolve_boundary(first.entry_boundary_kind, first.entry_boundary_value_mm, length(first))
+        self.end_mm = resolve_boundary(last.exit_boundary_kind, last.exit_boundary_value_mm, length(last))
+        return context.window_manager.invoke_props_dialog(self)
+    def execute(self, context):
+        obj, finish = context.active_object, context.active_object.jhm_finish
+        def mutate():
+            first, last = finish.spans[0], finish.spans[-1]
+            first.entry_boundary_kind = last.exit_boundary_kind = "DISTANCE_FROM_START"
+            first.entry_boundary_value_mm, last.exit_boundary_value_mm = self.start_mm, self.end_mm
+        try: _transactional_finish_mutation(obj, context.scene, mutate)
+        except Exception as error:
+            self.report({"ERROR"}, str(error)); return {"CANCELLED"}
+        return {"FINISHED"}
 
 
 class JHM_OT_start_finish_path(bpy.types.Operator):
@@ -426,6 +567,8 @@ class JHM_OT_convert_finish_mesh(bpy.types.Operator):
             # Prepare every disposable resource while the managed source remains
             # untouched.  A newly-created Object has no copied Finish identity.
             prepared = prepare_finish_regeneration(obj, context.scene)
+            if not prepared.ranges:
+                raise ValueError("生成可能な巾木形状がありません。")
             temporary = bpy.data.objects.new(
                 "JHM Finish Conversion Temporary", prepared.replacement)
             temporary.jhm_finish.is_finish = False
