@@ -17,7 +17,8 @@ from japanese_house_modeler.finish_profiles import (
 )
 from japanese_house_modeler.finish_path import profile_horizontal_sign
 from japanese_house_modeler.finish_surface import (
-    endpoint_blocked_by_footprints, validate_profile_miter_space,
+    endpoint_blocked_by_footprints, transition_blocked_by_footprints,
+    validate_profile_miter_space,
 )
 
 
@@ -109,6 +110,60 @@ class Build06BStage1SafetyTests(unittest.TestCase):
                           run.profile_schema_version, run.profile_height_mm,
                           run.profile_projection_mm),
                          ("SIMPLE", 1, 1, 60.0, 10.0))
+
+    def test_valid_provisional_edit_rolls_back_when_prepare_fails(self):
+        class Run:
+            profile_id = "SIMPLE"
+            profile_revision = 1
+            profile_schema_version = 1
+            profile_height_mm = 60.0
+            profile_projection_mm = 10.0
+
+        run = Run()
+
+        def fail_prepare():
+            self.assertEqual((run.profile_id, run.profile_revision,
+                              run.profile_schema_version, run.profile_height_mm,
+                              run.profile_projection_mm),
+                             ("SIMPLE", 1, 1, 85.0, 17.0))
+            raise ValueError("injected preparation failure")
+
+        with self.assertRaisesRegex(ValueError, "injected"):
+            transactional_profile_edit(
+                run, ("SIMPLE", 1, 1, 85.0, 17.0), fail_prepare)
+        self.assertEqual((run.profile_id, run.profile_revision,
+                          run.profile_schema_version, run.profile_height_mm,
+                          run.profile_projection_mm),
+                         ("SIMPLE", 1, 1, 60.0, 10.0))
+
+    def test_transition_blocker_checks_only_actual_profile_side(self):
+        transition = (((0, 0), (1, 0)), ((1, 0), (2, 0)))
+        upper = (((1, .03), (1, .2), .01),)
+        lower = (((1, -.2), (1, -.03), .01),)
+        outward = ((0.0, 1.0), (0.0, 1.0))
+        self.assertTrue(transition_blocked_by_footprints(
+            *transition, upper, projection_m=.05, outward_normals=outward))
+        self.assertFalse(transition_blocked_by_footprints(
+            *transition, lower, projection_m=.05, outward_normals=outward))
+
+    def test_transition_blocker_rejects_outer_miter_envelope_only(self):
+        transition = (((0, 0), (1, 0)), ((1, 0), (1, 1)))
+        # Neither straight outer edge reaches this thin vertical footprint;
+        # only the horizontal edge from the first outer endpoint to the outer
+        # miter vertex crosses it.
+        blocker = (((1.05, .095), (1.05, .2), .005),)
+        self.assertTrue(transition_blocked_by_footprints(
+            *transition, blocker, projection_m=.1,
+            outward_normals=((0.0, 1.0), (1.0, 0.0))))
+
+    def test_resolved_join_length_rejects_overlapping_miters(self):
+        # Raw middle length is 300 mm, but its two resolved joins are only
+        # 100 mm apart.  Two 60 mm miter extensions therefore overlap.
+        segments = (((0, 0), (1, 0)),
+                    ((1.02, -.1), (1.02, .2)),
+                    ((1, .1), (2, .1)))
+        with self.assertRaisesRegex(ValueError, "短すぎ"):
+            validate_profile_miter_space(segments, .06)
 
 
 if __name__ == "__main__":

@@ -47,7 +47,13 @@ def validate_path_footprints(spans, segments, intervals, projection_m,
             blockers.append((junction, other, wall.wall_thickness / 1000.0))
         if transition_blocked_by_footprints(
                 segments[index], segments[index + 1], blockers,
-                miter_limit=miter_limit, projection_m=projection_m):
+                miter_limit=miter_limit, projection_m=projection_m,
+                outward_normals=(
+                    side_normal(first_object.jhm_wall.start,
+                                first_object.jhm_wall.end, first[1]),
+                    side_normal(second_object.jhm_wall.start,
+                                second_object.jhm_wall.end, second[1]),
+                )):
             raise ValueError("選択していない接続Wallが仕上げ経路を遮っています。")
 
     selected = {span[0] for span in spans}

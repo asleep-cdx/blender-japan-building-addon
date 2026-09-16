@@ -270,10 +270,10 @@ class JHM_OT_edit_finish_profile(bpy.types.Operator):
         name="Profile", items=(("SIMPLE", "SIMPLE", "標準の矩形Profile"),),
         default="SIMPLE")
     height_mm: bpy.props.FloatProperty(
-        name="高さ", unit="LENGTH", default=DEFAULT_HEIGHT_MM,
+        name="高さ (mm)", default=DEFAULT_HEIGHT_MM,
         min=0.1, max=100000.0, precision=1)
     projection_mm: bpy.props.FloatProperty(
-        name="出幅", unit="LENGTH", default=DEFAULT_PROJECTION_MM,
+        name="出幅 (mm)", default=DEFAULT_PROJECTION_MM,
         min=0.1, max=10000.0, precision=1)
 
     @classmethod

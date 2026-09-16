@@ -109,7 +109,8 @@ def _segment_intersects_box(first, second, minimum, maximum, epsilon=1e-9):
 def transition_intersects_wall_solid(first_segment, second_segment,
                                      blocker_junction, blocker_other,
                                      blocker_thickness_m, miter_limit=4.0,
-                                     max_reach_m=1.0, projection_m=0.0):
+                                     max_reach_m=1.0, projection_m=0.0,
+                                     outward_normals=None):
     """Test a local Finish transition against a canonical blocker footprint."""
     axis, length = wall_axis(blocker_junction, blocker_other)
     thickness = float(blocker_thickness_m)
@@ -132,24 +133,40 @@ def transition_intersects_wall_solid(first_segment, second_segment,
     projection = float(projection_m)
     if not math.isfinite(projection) or projection < 0.0:
         raise ValueError("invalid Finish profile projection")
-    for segment in (first_segment, second_segment):
-        direction, _ = wall_axis(*segment)
-        normal = -direction[1], direction[0]
-        for sign in (-1.0, 1.0):
-            paths.append(tuple((point[0] + normal[0] * projection * sign,
-                                point[1] + normal[1] * projection * sign)
-                               for point in segment))
+    if outward_normals is not None:
+        if len(outward_normals) != 2:
+            raise ValueError("invalid Finish Profile orientation")
+        offset_segments = []
+        for segment, normal in zip((first_segment, second_segment),
+                                   outward_normals):
+            nx, ny = map(float, normal)
+            if (not all(map(math.isfinite, (nx, ny)))
+                    or abs(math.hypot(nx, ny) - 1.0) > 1.0e-6):
+                raise ValueError("invalid Finish Profile orientation")
+            offset = tuple((point[0] + nx * projection,
+                            point[1] + ny * projection) for point in segment)
+            offset_segments.append(offset)
+            paths.append(offset)
+        outer_join = resolve_join(offset_segments[0], offset_segments[1],
+                                  miter_limit, max_reach_m)
+        if outer_join is None:
+            return True
+        # This is the actual one-sided SIMPLE outer corner envelope: the end
+        # of the first straight edge, its resolved outer miter vertex, and the
+        # start of the next straight edge.
+        paths.append((offset_segments[0][1], outer_join,
+                      offset_segments[1][0]))
     return any(_segment_intersects_box(local(a), local(b), bounds_min, bounds_max)
                for path in paths for a, b in zip(path, path[1:]))
 
 
 def transition_blocked_by_footprints(first_segment, second_segment, blockers,
                                      miter_limit=4.0, max_reach_m=1.0,
-                                     projection_m=0.0):
+                                     projection_m=0.0, outward_normals=None):
     """Return true only for canonical footprints supplied by trusted topology."""
     return any(transition_intersects_wall_solid(
         first_segment, second_segment, junction, other, thickness,
-        miter_limit, max_reach_m, projection_m)
+        miter_limit, max_reach_m, projection_m, outward_normals)
         for junction, other, thickness in blockers)
 
 
@@ -184,7 +201,12 @@ def validate_profile_miter_space(segments, projection_m, miter_limit=4.0):
     if not math.isfinite(projection) or projection <= 0.0:
         raise ValueError("invalid Finish profile projection")
     extensions = [0.0] * (len(segments) + 1)
+    joins = []
     for index, (first, second) in enumerate(zip(segments, segments[1:]), 1):
+        join = resolve_join(first, second, miter_limit)
+        if join is None:
+            raise ValueError("unsafe Finish corner")
+        joins.append(join)
         first_axis, first_length = wall_axis(first[0], first[1])
         second_axis, second_length = wall_axis(second[0], second[1])
         dot = max(-1.0, min(1.0, first_axis[0] * second_axis[0]
@@ -201,7 +223,9 @@ def validate_profile_miter_space(segments, projection_m, miter_limit=4.0):
             raise ValueError("unsafe Finish Profile miter")
         extensions[index] = extension
     for index, segment in enumerate(segments):
-        length = math.dist(*segment)
+        resolved_start = joins[index - 1] if index else segment[0]
+        resolved_end = joins[index] if index < len(joins) else segment[1]
+        length = math.dist(resolved_start, resolved_end)
         if extensions[index] + extensions[index + 1] >= length - EPSILON:
             raise ValueError("Finish区間がProfileの留め加工には短すぎます。")
     return tuple(extensions)
