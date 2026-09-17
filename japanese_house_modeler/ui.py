@@ -187,8 +187,7 @@ class JHM_PT_house_modeler(bpy.types.Panel):
                     selected_box.label(text="表示区間: 解決不能")
             selected_box.operator(
                 "jhm.edit_finish_profile",
-                text=("SIMPLE寸法を変更" if finish.finish_type == "CROWN"
-                      else "Profileを変更"))
+                text="Profileを変更")
             selected_box.operator("jhm.edit_finish_boundaries", text="開始/終了位置を変更")
             exclusions = selected_box.box()
             exclusions.label(text=f"Manual Exclusion ({len(finish.exclusions)})")

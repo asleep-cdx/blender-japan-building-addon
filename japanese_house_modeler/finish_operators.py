@@ -484,12 +484,8 @@ class JHM_OT_regenerate_finish(bpy.types.Operator):
 
 def _profile_items(_owner, context):
     items = [("SIMPLE", "SIMPLE", "標準の矩形Profile"),
-             ("BEVEL", "BEVEL", "上部室内側を45度面取り"),
-             ("ROUNDED", "ROUNDED", "上部室内側を丸める")]
-    active_finish = getattr(getattr(context, "active_object", None),
-                            "jhm_finish", None) if context else None
-    if active_finish is not None and active_finish.finish_type == "CROWN":
-        return items[:1]
+             ("BEVEL", "BEVEL", "45度面取りProfile"),
+             ("ROUNDED", "ROUNDED", "丸み付きProfile")]
     if context and context.scene:
         items.extend((item.profile_id, item.display_name,
                       f"Custom Profile revision {item.profile_revision}")
