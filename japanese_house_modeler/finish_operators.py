@@ -19,6 +19,7 @@ from .finish_profiles import (
 )
 from .finish_hardening import managed_finish_objects
 from .finish_mesh import apply_profile_shading, weld_and_validate_finish_mesh
+from .finish_orientation import finish_vertical_sign
 from .dependency_transaction import DependencyTransaction, OperationRecovery, recover_operation
 from .finish_identity import (
     duplicate_ids, ensure_persistent_id, id_index, new_persistent_id,

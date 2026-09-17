@@ -1,5 +1,6 @@
 """Pure coverage for Build 06-C Stage 2 Crown Profile support."""
 
+import ast
 import pathlib
 import sys
 import types
@@ -175,6 +176,22 @@ class ProfileSwitchTransactionTests(unittest.TestCase):
         self.assertEqual(before, tuple(getattr(owner, field)
                                       for field in PROFILE_INSTANCE_FIELDS))
         prepare.assert_called_once_with()
+
+
+class ProductionDependencyTests(unittest.TestCase):
+    def test_mesh_conversion_imports_authoritative_vertical_sign(self):
+        """Keep the Blender-only conversion call resolvable at runtime."""
+        source = (ROOT / "japanese_house_modeler" /
+                  "finish_operators.py").read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        imported = {
+            alias.name
+            for node in tree.body
+            if isinstance(node, ast.ImportFrom)
+            and node.module == "finish_orientation"
+            for alias in node.names
+        }
+        self.assertIn("finish_vertical_sign", imported)
 
 
 if __name__ == "__main__":
