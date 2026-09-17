@@ -3,6 +3,8 @@
 from dataclasses import dataclass
 import math
 
+from .finish_orientation import oriented_profile_contour
+
 
 SIMPLE_PROFILE_ID = "SIMPLE"
 BEVEL_PROFILE_ID = "BEVEL"
@@ -169,13 +171,15 @@ def resolve_default_simple_profile():
                            DEFAULT_PROJECTION_MM)
 
 
-def oriented_contour(profile, horizontal_sign):
+def oriented_contour(profile, horizontal_sign, vertical_sign=1.0):
     """Return a mirrored derived contour while preserving its winding."""
-    if not math.isfinite(float(horizontal_sign)):
-        raise ValueError("Profile orientationが不正です。")
-    if horizontal_sign >= 0.0:
-        return profile.contour
-    return tuple((-x, y) for x, y in reversed(profile.contour))
+    try:
+        return oriented_profile_contour(
+            profile.contour,
+            -1.0 if float(horizontal_sign) < 0.0 else 1.0,
+            -1.0 if float(vertical_sign) < 0.0 else 1.0)
+    except (TypeError, ValueError) as error:
+        raise ValueError("Profile orientationが不正です。") from error
 
 
 def vertical_base_mm(vertical_base_m):
@@ -185,18 +189,22 @@ def vertical_base_mm(vertical_base_m):
     return round(value * 1000.0, 6)
 
 
-def placement_adjusted_contour(profile, horizontal_sign, vertical_base_m):
+def placement_adjusted_contour(profile, horizontal_sign, vertical_base_m,
+                               vertical_sign=1.0):
     base = vertical_base_mm(vertical_base_m) / 1000.0
     return tuple((x, y + base)
-                 for x, y in oriented_contour(profile, horizontal_sign))
+                 for x, y in oriented_contour(profile, horizontal_sign,
+                                               vertical_sign))
 
 
-def derived_profile_cache_identity(profile, horizontal_sign, vertical_base_m):
+def derived_profile_cache_identity(profile, horizontal_sign, vertical_base_m,
+                                   vertical_sign=1.0):
     orientation = "NEGATIVE" if float(horizontal_sign) < 0.0 else "POSITIVE"
     return (profile.profile_id, profile.profile_revision, profile.schema_version,
             profile.height_mm, profile.projection_mm,
             profile.bevel_mm, profile.radius_mm, profile.uniform_scale,
             profile.contour, profile.shading.smooth_contour_edges, orientation,
+            "UP" if float(vertical_sign) > 0.0 else "DOWN",
             vertical_base_mm(vertical_base_m))
 
 

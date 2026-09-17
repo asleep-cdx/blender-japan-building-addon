@@ -6,7 +6,7 @@ bl_info = {
     "version": (0, 6, 3),
     "blender": (5, 2, 0),
     "location": "View3D > Sidebar > 日本住宅",
-    "description": "Build 06-B: Custom Profile Registration and Final Baseboard",
+    "description": "Build 06-C Stage 1: Crown Foundation and SIMPLE",
     "category": "3D View",
 }
 
@@ -59,6 +59,8 @@ def register():
     bpy.types.Scene.jhm_custom_profiles = bpy.props.CollectionProperty(
         type=properties.JHM_CustomProfileDefinition)
     bpy.types.Scene.jhm_custom_profile_index = bpy.props.IntProperty(default=0, min=0)
+    bpy.types.Scene.jhm_finish_regeneration_required = bpy.props.BoolProperty(
+        name="仕上げ再生成が必要", default=False, options={"HIDDEN"})
     bpy.types.Object.jhm_wall = bpy.props.PointerProperty(
         type=properties.JHM_WallProperties
     )
@@ -76,6 +78,7 @@ def unregister():
     del bpy.types.Scene.jhm_new_wall_defaults
     del bpy.types.Scene.jhm_custom_profile_index
     del bpy.types.Scene.jhm_custom_profiles
+    del bpy.types.Scene.jhm_finish_regeneration_required
 
     for cls in reversed(_CLASSES):
         bpy.utils.unregister_class(cls)

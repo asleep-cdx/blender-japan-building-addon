@@ -3,6 +3,13 @@
 import bpy
 
 
+def _mark_finish_reference_stale(self, _context):
+    """Reference edits remain separate from explicit Finish regeneration."""
+    scene = getattr(self, "id_data", None)
+    if scene is not None and hasattr(scene, "jhm_finish_regeneration_required"):
+        scene.jhm_finish_regeneration_required = True
+
+
 _MIN_THICKNESS_MM = 0.1
 _MAX_THICKNESS_MM = 10_000.0
 _MIN_HEIGHT_MM = 0.1
@@ -30,9 +37,11 @@ class JHM_NewWallDefaults(bpy.types.PropertyGroup):
     )
     floor_reference_z_mm: bpy.props.FloatProperty(
         name="床基準高さ", default=0.0, precision=1,
+        update=_mark_finish_reference_stale,
     )
     ceiling_reference_z_mm: bpy.props.FloatProperty(
         name="天井基準高さ", default=2500.0, precision=1,
+        update=_mark_finish_reference_stale,
     )
 
 
