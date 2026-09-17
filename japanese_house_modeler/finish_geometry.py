@@ -27,6 +27,7 @@ from .finish_hardening import (
     validate_finish_configuration,
 )
 from .finish_custom_profiles import oriented_edge_indices
+from .finish_orientation import finish_vertical_sign
 
 
 def managed_walls():
@@ -92,6 +93,9 @@ def validate_path_footprints(spans, segments, intervals, projection_m,
 def _resolved_canonical_path(finish, scene, resolved_profile=None):
     """Validate canonical truth and return unsafed span geometry metadata."""
     resolved_profile = resolved_profile or resolve_finish_profile(finish, scene.jhm_custom_profiles)
+    finish_vertical_sign(finish.finish_type)
+    if finish.finish_type == "CROWN" and resolved_profile.profile_id != "SIMPLE":
+        raise ValueError("Build 06-C Stage 1のCROWNはSIMPLE Profileのみ対応します。")
     walls = managed_walls()
     from .finish_dependencies import validate_finish_references
     # This also validates every persisted exclusion before dependency work.
@@ -401,7 +405,12 @@ def diagnose_finish(obj, scene=None):
     except (AttributeError, ReferenceError, TypeError, ValueError):
         extras.append("EXCLUSION")
     try:
-        resolve_finish_profile(obj.jhm_finish, scene.jhm_custom_profiles if scene else None)
+        profile = resolve_finish_profile(
+            obj.jhm_finish, scene.jhm_custom_profiles if scene else None)
+        finish_vertical_sign(obj.jhm_finish.finish_type)
+        if (obj.jhm_finish.finish_type == "CROWN"
+                and profile.profile_id != "SIMPLE"):
+            raise ValueError
     except (TypeError, ValueError):
         extras.append("PROFILE")
     if not finish_id_is_valid(obj.jhm_finish.finish_id,
@@ -412,16 +421,19 @@ def diagnose_finish(obj, scene=None):
                                extras)
 
 
-def _production_profile(resolved, horizontal_sign, vertical_base_m):
+def _production_profile(resolved, horizontal_sign, vertical_base_m,
+                        vertical_sign=1.0):
     """Return a dimension-keyed derived Profile and optional owned cleanup."""
     sign = -1.0 if float(horizontal_sign) < 0.0 else 1.0
-    identity = derived_profile_cache_identity(resolved, sign, vertical_base_m)
+    identity = derived_profile_cache_identity(
+        resolved, sign, vertical_base_m, vertical_sign)
     vertical_base_mm = identity[-1]
     name = (f"JHM {resolved.profile_id} r{resolved.profile_revision} "
             f"{resolved.projection_mm:g}x{resolved.height_mm:g} "
             f"Z{vertical_base_mm:g} "
             + ("Negative" if sign < 0 else "Positive"))
     orientation = "NEGATIVE" if sign < 0 else "POSITIVE"
+    vertical_orientation = "DOWN" if vertical_sign < 0 else "UP"
     oriented_smooth_edges = oriented_edge_indices(
         len(resolved.contour), resolved.shading.smooth_contour_edges, sign)
     smooth_edge_metadata = ",".join(str(index) for index in oriented_smooth_edges)
@@ -446,6 +458,8 @@ def _production_profile(resolved, horizontal_sign, vertical_base_m):
                 and candidate.get("jhm_profile_smooth_edges", smooth_edge_metadata)
                 == smooth_edge_metadata
                 and candidate.get("jhm_profile_orientation") == orientation
+                and candidate.get("jhm_profile_vertical_orientation", "UP")
+                == vertical_orientation
                 and candidate.get("jhm_profile_vertical_base_mm")
                 == vertical_base_mm):
             for spline in candidate.data.splines:
@@ -459,7 +473,8 @@ def _production_profile(resolved, horizontal_sign, vertical_base_m):
         spline.points.add(len(resolved.contour) - 1)
         for target, point in zip(spline.points,
                                  placement_adjusted_contour(
-                                     resolved, sign, vertical_base_m)):
+                                     resolved, sign, vertical_base_m,
+                                     vertical_sign)):
             target.co = (*point, 0.0, 1.0)
         spline.use_cyclic_u = True
         spline.use_smooth = False
@@ -477,6 +492,7 @@ def _production_profile(resolved, horizontal_sign, vertical_base_m):
         obj["jhm_profile_contour"] = repr(resolved.contour)
         obj["jhm_profile_smooth_edges"] = smooth_edge_metadata
         obj["jhm_profile_orientation"] = orientation
+        obj["jhm_profile_vertical_orientation"] = vertical_orientation
         obj["jhm_profile_vertical_base_mm"] = vertical_base_mm
         obj.hide_viewport = True
         obj.hide_render = True
@@ -521,6 +537,10 @@ def prepare_finish_regeneration(obj, scene):
     if not finish_id_is_valid(obj.jhm_finish.finish_id, duplicates):
         raise ValueError("Finish IDが空、空白、または重複しています。")
     resolved_profile = resolve_finish_profile(obj.jhm_finish, scene.jhm_custom_profiles if scene else None)
+    vertical_sign = finish_vertical_sign(obj.jhm_finish.finish_type)
+    if (obj.jhm_finish.finish_type == "CROWN"
+            and resolved_profile.profile_id != "SIMPLE"):
+        raise ValueError("Build 06-C Stage 1のCROWNはSIMPLE Profileのみ対応します。")
     ranges, enabled_count = resolved_finish_ranges(
         obj.jhm_finish, scene, resolved_profile)
     points = tuple(point for visible in ranges for point in visible)
@@ -537,7 +557,7 @@ def prepare_finish_regeneration(obj, scene):
             resolved_profile,
             profile_horizontal_sign(first_span.side,
                                     first_span.traversal_direction),
-            vertical_base_m)
+            vertical_base_m, vertical_sign)
         curve.bevel_object = profile
         curve.use_fill_caps = True
         curve.splines.clear()

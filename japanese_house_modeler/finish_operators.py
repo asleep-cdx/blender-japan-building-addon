@@ -254,6 +254,9 @@ class JHM_OT_start_finish_path(bpy.types.Operator):
     bl_options = {"REGISTER", "UNDO"}
 
     side: bpy.props.EnumProperty(items=(("LEFT", "左", ""), ("RIGHT", "右", "")))
+    finish_type: bpy.props.EnumProperty(items=(
+        ("BASEBOARD", "巾木", ""), ("CROWN", "廻り縁", "")),
+        default="BASEBOARD")
 
     @classmethod
     def poll(cls, context):
@@ -385,8 +388,11 @@ class JHM_OT_start_finish_path(bpy.types.Operator):
         try:
             gpu.state.line_width_set(3.0)
             shader.bind(); shader.uniform_float("color", color)
+            preview_z = (.02 if self.finish_type == "BASEBOARD" else
+                         bpy.context.scene.jhm_new_wall_defaults.ceiling_reference_z_mm
+                         / 1000.0)
             batch_for_shader(
-                shader, "LINES", {"pos": [(x, y, .02) for x, y in vertices]}
+                shader, "LINES", {"pos": [(x, y, preview_z) for x, y in vertices]}
             ).draw(shader)
         finally:
             gpu.state.line_width_set(previous_line_width)
@@ -406,6 +412,13 @@ class JHM_OT_start_finish_path(bpy.types.Operator):
             def configure(finish):
                 finish.is_finish = True
                 finish.finish_id = new_persistent_id()
+                finish.finish_type = self.finish_type
+                finish.profile_id = SIMPLE_PROFILE_ID
+                finish.profile_revision = SIMPLE_PROFILE_REVISION
+                finish.profile_schema_version = PROFILE_SCHEMA_VERSION
+                finish.vertical_reference = (
+                    "CEILING" if self.finish_type == "CROWN" else "FLOOR")
+                finish.vertical_offset_mm = 0.0
                 for wall, side, traversal in self._pending:
                     span = finish.spans.add()
                     span.wall_object = wall
@@ -473,6 +486,10 @@ def _profile_items(_owner, context):
     items = [("SIMPLE", "SIMPLE", "標準の矩形Profile"),
              ("BEVEL", "BEVEL", "上部室内側を45度面取り"),
              ("ROUNDED", "ROUNDED", "上部室内側を丸める")]
+    active_finish = getattr(getattr(context, "active_object", None),
+                            "jhm_finish", None) if context else None
+    if active_finish is not None and active_finish.finish_type == "CROWN":
+        return items[:1]
     if context and context.scene:
         items.extend((item.profile_id, item.display_name,
                       f"Custom Profile revision {item.profile_revision}")
@@ -629,11 +646,16 @@ class JHM_OT_edit_finish_profile(bpy.types.Operator):
         self.bevel_mm = resolved.bevel_mm
         self.radius_mm = resolved.radius_mm
         self.uniform_scale = resolved.uniform_scale
+        if context.active_object.jhm_finish.finish_type == "CROWN":
+            self.profile = SIMPLE_PROFILE_ID
         return context.window_manager.invoke_props_dialog(self)
 
     def execute(self, context):
         obj = context.active_object
         finish = obj.jhm_finish
+        if finish.finish_type == "CROWN" and self.profile != SIMPLE_PROFILE_ID:
+            self.report({"ERROR"}, "Build 06-C Stage 1の廻り縁はSIMPLE Profileのみ対応します。")
+            return {"CANCELLED"}
         custom = self.profile not in (SIMPLE_PROFILE_ID, BEVEL_PROFILE_ID,
                                       ROUNDED_PROFILE_ID)
         if custom:
@@ -671,11 +693,14 @@ class JHM_OT_regenerate_all_finishes(bpy.types.Operator):
         objects = managed_finish_objects(
             (obj, bool(getattr(getattr(obj, "jhm_finish", None), "is_finish", False)))
             for obj in context.scene.objects)
+        reference_was_stale = context.scene.jhm_finish_regeneration_required
         try:
             regenerate_finishes_atomic(objects, context.scene)
         except Exception as error:
+            context.scene.jhm_finish_regeneration_required = reference_was_stale
             self.report({"ERROR"}, f"一括再生成できませんでした: {error}")
             return {"CANCELLED"}
+        context.scene.jhm_finish_regeneration_required = False
         self.report({"INFO"}, f"{len(objects)}件の仕上げを再生成しました。")
         return {"FINISHED"}
 
@@ -773,7 +798,7 @@ class JHM_OT_convert_finish_mesh(bpy.types.Operator):
             # untouched.  A newly-created Object has no copied Finish identity.
             prepared = prepare_finish_regeneration(obj, context.scene)
             if not prepared.ranges:
-                raise ValueError("生成可能な巾木形状がありません。")
+                raise ValueError("生成可能な仕上げ形状がありません。")
             temporary = bpy.data.objects.new(
                 "JHM Finish Conversion Temporary", prepared.replacement)
             temporary.jhm_finish.is_finish = False

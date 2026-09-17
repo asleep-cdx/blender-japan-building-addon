@@ -37,6 +37,8 @@ class JHM_PT_house_modeler(bpy.types.Panel):
         new_wall_box.prop(defaults, "floor_reference_z_mm", text="床基準高さ (mm)")
         new_wall_box.prop(defaults, "ceiling_reference_z_mm", text="天井基準高さ (mm)")
         new_wall_box.operator("jhm.regenerate_all_finishes", text="仕上げを一括再生成")
+        if context.scene.jhm_finish_regeneration_required:
+            new_wall_box.label(text="仕上げ形状は参照高さに対して未更新です", icon="ERROR")
 
         profile_box = layout.box()
         profile_box.label(text="Project Custom Profile Library")
@@ -132,15 +134,30 @@ class JHM_PT_house_modeler(bpy.types.Panel):
             selected_box.operator("jhm.delete_wall", text="壁を削除")
             finish_box = layout.box()
             finish_box.label(text="仕上げ経路")
-            left = finish_box.operator("jhm.start_finish_path", text="左側面から開始")
-            left.side = "LEFT"
-            right = finish_box.operator("jhm.start_finish_path", text="右側面から開始")
-            right.side = "RIGHT"
+            for finish_type, label in (("BASEBOARD", "巾木"), ("CROWN", "廻り縁")):
+                left = finish_box.operator(
+                    "jhm.start_finish_path", text=f"{label} 左側面から開始")
+                left.side, left.finish_type = "LEFT", finish_type
+                right = finish_box.operator(
+                    "jhm.start_finish_path", text=f"{label} 右側面から開始")
+                right.side, right.finish_type = "RIGHT", finish_type
         elif (active_object and
               getattr(getattr(active_object, "jhm_finish", None), "is_finish", False)):
             finish = active_object.jhm_finish
             selected_box.label(text="選択中の仕上げ")
             selected_box.label(text=f"種類: {finish.finish_type}")
+            selected_box.label(text=f"基準: {finish.vertical_reference}")
+            if finish.vertical_reference == "FLOOR":
+                selected_box.label(
+                    text=f"基準高さ: {defaults.floor_reference_z_mm:.1f} mm")
+            elif finish.vertical_reference == "CEILING":
+                selected_box.label(
+                    text=f"基準高さ: {defaults.ceiling_reference_z_mm:.1f} mm")
+            elif finish.vertical_reference == "ABSOLUTE":
+                selected_box.label(
+                    text=f"絶対高さ: {finish.absolute_z_mm:.1f} mm")
+            selected_box.label(
+                text=f"オフセット: {finish.vertical_offset_mm:.1f} mm")
             try:
                 from .finish_profiles import resolve_finish_profile
                 profile = resolve_finish_profile(finish, context.scene.jhm_custom_profiles)
@@ -168,7 +185,10 @@ class JHM_PT_house_modeler(bpy.types.Panel):
                         selected_box.label(text="状態: 全区間除外")
                 except (AttributeError, ReferenceError, TypeError, ValueError):
                     selected_box.label(text="表示区間: 解決不能")
-            selected_box.operator("jhm.edit_finish_profile", text="Profileを変更")
+            selected_box.operator(
+                "jhm.edit_finish_profile",
+                text=("SIMPLE寸法を変更" if finish.finish_type == "CROWN"
+                      else "Profileを変更"))
             selected_box.operator("jhm.edit_finish_boundaries", text="開始/終了位置を変更")
             exclusions = selected_box.box()
             exclusions.label(text=f"Manual Exclusion ({len(finish.exclusions)})")
