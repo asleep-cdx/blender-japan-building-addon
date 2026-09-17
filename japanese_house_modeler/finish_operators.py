@@ -646,16 +646,11 @@ class JHM_OT_edit_finish_profile(bpy.types.Operator):
         self.bevel_mm = resolved.bevel_mm
         self.radius_mm = resolved.radius_mm
         self.uniform_scale = resolved.uniform_scale
-        if context.active_object.jhm_finish.finish_type == "CROWN":
-            self.profile = SIMPLE_PROFILE_ID
         return context.window_manager.invoke_props_dialog(self)
 
     def execute(self, context):
         obj = context.active_object
         finish = obj.jhm_finish
-        if finish.finish_type == "CROWN" and self.profile != SIMPLE_PROFILE_ID:
-            self.report({"ERROR"}, "Build 06-C Stage 1の廻り縁はSIMPLE Profileのみ対応します。")
-            return {"CANCELLED"}
         custom = self.profile not in (SIMPLE_PROFILE_ID, BEVEL_PROFILE_ID,
                                       ROUNDED_PROFILE_ID)
         if custom:
@@ -820,7 +815,8 @@ class JHM_OT_convert_finish_mesh(bpy.types.Operator):
                     obj.jhm_finish, context.scene.jhm_custom_profiles),
                 profile_horizontal_sign(first_span.side,
                                         first_span.traversal_direction),
-                prepared.ranges)
+                prepared.ranges,
+                finish_vertical_sign(obj.jhm_finish.finish_type))
         except Exception as error:
             recovery = OperationRecovery()
             recovery.add(remove_temporary)

@@ -6,7 +6,7 @@ bl_info = {
     "version": (0, 6, 3),
     "blender": (5, 2, 0),
     "location": "View3D > Sidebar > 日本住宅",
-    "description": "Build 06-C Stage 1: Crown Foundation and SIMPLE",
+    "description": "Build 06-C Stage 2: Standard and Custom Crown Profiles",
     "category": "3D View",
 }
 
