@@ -146,6 +146,18 @@ class JHM_PT_house_modeler(bpy.types.Panel):
             finish = active_object.jhm_finish
             selected_box.label(text="選択中の仕上げ")
             selected_box.label(text=f"種類: {finish.finish_type}")
+            selected_box.label(text=f"基準: {finish.vertical_reference}")
+            if finish.vertical_reference == "FLOOR":
+                selected_box.label(
+                    text=f"基準高さ: {defaults.floor_reference_z_mm:.1f} mm")
+            elif finish.vertical_reference == "CEILING":
+                selected_box.label(
+                    text=f"基準高さ: {defaults.ceiling_reference_z_mm:.1f} mm")
+            elif finish.vertical_reference == "ABSOLUTE":
+                selected_box.label(
+                    text=f"絶対高さ: {finish.absolute_z_mm:.1f} mm")
+            selected_box.label(
+                text=f"オフセット: {finish.vertical_offset_mm:.1f} mm")
             try:
                 from .finish_profiles import resolve_finish_profile
                 profile = resolve_finish_profile(finish, context.scene.jhm_custom_profiles)

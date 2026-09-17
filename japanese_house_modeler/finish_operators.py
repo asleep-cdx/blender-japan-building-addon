@@ -693,10 +693,11 @@ class JHM_OT_regenerate_all_finishes(bpy.types.Operator):
         objects = managed_finish_objects(
             (obj, bool(getattr(getattr(obj, "jhm_finish", None), "is_finish", False)))
             for obj in context.scene.objects)
+        reference_was_stale = context.scene.jhm_finish_regeneration_required
         try:
             regenerate_finishes_atomic(objects, context.scene)
         except Exception as error:
-            context.scene.jhm_finish_regeneration_required = True
+            context.scene.jhm_finish_regeneration_required = reference_was_stale
             self.report({"ERROR"}, f"一括再生成できませんでした: {error}")
             return {"CANCELLED"}
         context.scene.jhm_finish_regeneration_required = False

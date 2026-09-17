@@ -3,6 +3,14 @@
 import math
 
 
+def normalized_orientation_sign(value):
+    """Normalize a finite orientation value without accepting NaN or infinity."""
+    sign = float(value)
+    if not math.isfinite(sign):
+        raise ValueError("invalid Finish profile orientation")
+    return -1.0 if sign < 0.0 else 1.0
+
+
 def finish_vertical_sign(finish_type):
     """Return the sole authoritative canonical-Y to world-Z orientation."""
     if finish_type == "BASEBOARD":
@@ -40,11 +48,12 @@ def placed_vertical_bounds(bounds, reference_z_m, vertical_sign):
     return min(values), max(values)
 
 
-def regeneration_state_after_bulk(previous_geometry, replacements, error=None):
+def regeneration_state_after_bulk(previous_geometry, replacements, error=None,
+                                  regeneration_required=False):
     """Pure atomic bulk decision used by tests and the Blender operator policy."""
     old = tuple(previous_geometry)
     if error is not None:
-        return old, True
+        return old, bool(regeneration_required)
     new = tuple(replacements)
     if len(new) != len(old):
         raise ValueError("bulk replacement count mismatch")

@@ -3,7 +3,9 @@
 from dataclasses import dataclass
 import math
 
-from .finish_orientation import oriented_profile_contour
+from .finish_orientation import (
+    normalized_orientation_sign, oriented_profile_contour,
+)
 
 
 SIMPLE_PROFILE_ID = "SIMPLE"
@@ -176,8 +178,8 @@ def oriented_contour(profile, horizontal_sign, vertical_sign=1.0):
     try:
         return oriented_profile_contour(
             profile.contour,
-            -1.0 if float(horizontal_sign) < 0.0 else 1.0,
-            -1.0 if float(vertical_sign) < 0.0 else 1.0)
+            normalized_orientation_sign(horizontal_sign),
+            normalized_orientation_sign(vertical_sign))
     except (TypeError, ValueError) as error:
         raise ValueError("Profile orientationが不正です。") from error
 
@@ -199,12 +201,14 @@ def placement_adjusted_contour(profile, horizontal_sign, vertical_base_m,
 
 def derived_profile_cache_identity(profile, horizontal_sign, vertical_base_m,
                                    vertical_sign=1.0):
-    orientation = "NEGATIVE" if float(horizontal_sign) < 0.0 else "POSITIVE"
+    horizontal = normalized_orientation_sign(horizontal_sign)
+    vertical = normalized_orientation_sign(vertical_sign)
+    orientation = "NEGATIVE" if horizontal < 0.0 else "POSITIVE"
     return (profile.profile_id, profile.profile_revision, profile.schema_version,
             profile.height_mm, profile.projection_mm,
             profile.bevel_mm, profile.radius_mm, profile.uniform_scale,
             profile.contour, profile.shading.smooth_contour_edges, orientation,
-            "UP" if float(vertical_sign) > 0.0 else "DOWN",
+            "UP" if vertical > 0.0 else "DOWN",
             vertical_base_mm(vertical_base_m))
 
 

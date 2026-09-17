@@ -76,6 +76,24 @@ class FinishOrientationTests(unittest.TestCase):
         downward = derived_profile_cache_identity(self.simple, 1, 2.5, -1)
         self.assertNotEqual(upward, downward)
 
+    def test_horizontal_positive_infinity_is_rejected_by_profile_path(self):
+        with self.assertRaises(ValueError):
+            placement_adjusted_contour(self.simple, float("inf"), 0, 1)
+        with self.assertRaises(ValueError):
+            derived_profile_cache_identity(self.simple, float("inf"), 0, 1)
+
+    def test_horizontal_nan_is_rejected_by_profile_path(self):
+        with self.assertRaises(ValueError):
+            placement_adjusted_contour(self.simple, float("nan"), 0, 1)
+
+    def test_vertical_positive_infinity_is_rejected_by_profile_path(self):
+        with self.assertRaises(ValueError):
+            placement_adjusted_contour(self.simple, 1, 0, float("inf"))
+
+    def test_vertical_nan_is_rejected_by_cache_identity(self):
+        with self.assertRaises(ValueError):
+            derived_profile_cache_identity(self.simple, 1, 0, float("nan"))
+
     def test_vertical_offset_keeps_world_z_sign(self):
         self.assertAlmostEqual(resolve_vertical("CEILING", -20, 0, 0, 2500),
                                2.48)
@@ -94,12 +112,20 @@ class FinishStateTests(unittest.TestCase):
     def test_empty_without_exclusion_is_not_valid_empty(self):
         self.assertEqual(classify_visible_state(True, 0, 0), "NORMAL")
 
-    def test_failed_bulk_retains_all_old_geometry_and_marks_stale(self):
+    def test_failed_bulk_after_reference_edit_retains_geometry_and_stale(self):
         old = ("baseboard-old", "crown-old")
         installed, stale = regeneration_state_after_bulk(
-            old, ("baseboard-new",), RuntimeError("injected"))
+            old, ("baseboard-new",), RuntimeError("injected"),
+            regeneration_required=True)
         self.assertEqual(installed, old)
         self.assertTrue(stale)
+
+    def test_unrelated_bulk_failure_does_not_create_reference_stale_state(self):
+        old = ("baseboard-old", "crown-old")
+        installed, stale = regeneration_state_after_bulk(
+            old, (), RuntimeError("unrelated"), regeneration_required=False)
+        self.assertEqual(installed, old)
+        self.assertFalse(stale)
 
     def test_successful_bulk_installs_all_and_clears_stale(self):
         installed, stale = regeneration_state_after_bulk(
