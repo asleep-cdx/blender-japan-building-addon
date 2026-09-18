@@ -182,6 +182,77 @@ class ProductionRoutingStaticTests(unittest.TestCase):
         apply_button = ui_source.index('card.operator("jhm.apply_profile_thumbnail"')
         self.assertLess(thumbnail, apply_button)
 
+    def test_panel_draw_uses_read_only_lookup_and_deferred_request(self):
+        ui_source = (ROOT / "japanese_house_modeler" / "ui.py").read_text()
+        ui_tree = ast.parse(ui_source)
+        draw_browser = next(node for node in ast.walk(ui_tree)
+                            if isinstance(node, ast.FunctionDef)
+                            and node.name == "_draw_profile_browser")
+        calls = {ast.unparse(node.func) for node in ast.walk(draw_browser)
+                 if isinstance(node, ast.Call)}
+        self.assertIn("cached_preview_icon", calls)
+        self.assertIn("request_preview_build", calls)
+        self.assertNotIn("_build_preview_image", calls)
+        self.assertNotIn("prune_preview_cache", calls)
+        draw_source = ast.unparse(draw_browser)
+        self.assertNotIn("bpy.data.images", draw_source)
+        self.assertNotIn("pixels.foreach_set", draw_source)
+
+    def test_cached_icon_helper_is_read_only(self):
+        source = (ROOT / "japanese_house_modeler" /
+                  "finish_preview_images.py").read_text()
+        tree = ast.parse(source)
+        cached = next(node for node in ast.walk(tree)
+                      if isinstance(node, ast.FunctionDef)
+                      and node.name == "cached_preview_icon")
+        cached_source = ast.unparse(cached)
+        for mutation in ("images.new", "images.remove", "foreach_set",
+                         ".update(", "_CACHE.pop", "_CACHE["):
+            self.assertNotIn(mutation, cached_source)
+
+    def test_deferred_request_has_pending_guard(self):
+        source = (ROOT / "japanese_house_modeler" /
+                  "finish_preview_images.py").read_text()
+        tree = ast.parse(source)
+        request = next(node for node in ast.walk(tree)
+                       if isinstance(node, ast.FunctionDef)
+                       and node.name == "request_preview_build")
+        request_source = ast.unparse(request)
+        self.assertIn("not _BUILD_PENDING", request_source)
+        self.assertEqual(request_source.count("bpy.app.timers.register"), 1)
+
+    def test_image_creation_is_confined_to_deferred_builder_side(self):
+        source = (ROOT / "japanese_house_modeler" /
+                  "finish_preview_images.py").read_text()
+        tree = ast.parse(source)
+        owners = []
+        for function in (node for node in tree.body if isinstance(node, ast.FunctionDef)):
+            if "bpy.data.images.new" in ast.unparse(function):
+                owners.append(function.name)
+        self.assertEqual(owners, ["_build_preview_image"])
+        deferred = next(node for node in tree.body if isinstance(node, ast.FunctionDef)
+                        and node.name == "_deferred_preview_build")
+        self.assertIn("_build_preview_image", ast.unparse(deferred))
+
+    def test_failed_image_construction_removes_partial_image(self):
+        source = (ROOT / "japanese_house_modeler" /
+                  "finish_preview_images.py").read_text()
+        tree = ast.parse(source)
+        build = next(node for node in tree.body if isinstance(node, ast.FunctionDef)
+                     and node.name == "_build_preview_image")
+        build_source = ast.unparse(build)
+        self.assertIn("except Exception", build_source)
+        self.assertIn("_remove_image(image)", build_source)
+        self.assertIn("raise", build_source)
+
+    def test_cleanup_is_deferred_and_recognizes_candidate_r1_orphans(self):
+        source = (ROOT / "japanese_house_modeler" /
+                  "finish_preview_images.py").read_text()
+        self.assertIn('IMAGE_PREFIX = "JHM_DERIVED_PROFILE_PREVIEW"', source)
+        self.assertIn("image.name.startswith(IMAGE_PREFIX)", source)
+        self.assertIn("_cleanup_owned_orphans()", source)
+        self.assertIn("prune_preview_cache(_VALID_KEYS)", source)
+
     def test_referenced_profile_deletion_guard_is_unchanged(self):
         deletion = next(node for node in ast.walk(self.tree)
                         if isinstance(node, ast.ClassDef)

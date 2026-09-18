@@ -10,8 +10,8 @@ from .joints import has_identity_transform
 from .finish_identity import duplicate_ids
 from .finish_geometry import canonical_visible_range_state, diagnose_finish
 from .finish_state import status_label
-from .finish_profile_previews import browser_items, preview_cache_key, stable_profile_identity
-from .finish_preview_images import preview_icon, prune_preview_cache
+from .finish_profile_previews import browser_items, stable_profile_identity
+from .finish_preview_images import cached_preview_icon, request_preview_build
 
 
 def _draw_profile_browser(layout, context, finish=None):
@@ -21,19 +21,16 @@ def _draw_profile_browser(layout, context, finish=None):
         item for item in items if item.source_type != "STANDARD")
     finish_type = finish.finish_type if finish is not None else "LIBRARY"
     active = stable_profile_identity(finish) if finish is not None else None
-    # Retain all legitimate context variants.  This still removes deleted
-    # identities without making two browser sections evict one another.
-    prune_preview_cache(
-        preview_cache_key(item, orientation)
-        for item in items
-        for orientation in ("LIBRARY", "BASEBOARD", "CROWN"))
+    # Scheduling is the only write-like action here.  The timer callback owns
+    # all Image creation, pixel updates, cache pruning, and datablock removal.
+    request_preview_build(items)
     grid = layout.grid_flow(row_major=True, columns=2, even_columns=True)
     for item in shown:
         card = grid.box()
         selected = item.identity == active
         label = ("● " if selected else "") + item.display_name
         try:
-            icon = preview_icon(item, finish_type)
+            icon = cached_preview_icon(item, finish_type)
         except Exception:
             icon = 0
         if finish is not None:
