@@ -10,6 +10,46 @@ from .joints import has_identity_transform
 from .finish_identity import duplicate_ids
 from .finish_geometry import canonical_visible_range_state, diagnose_finish
 from .finish_state import status_label
+from .finish_profile_previews import browser_items, stable_profile_identity
+from .finish_preview_images import cached_preview_icon, request_preview_build
+
+
+def _draw_profile_browser(layout, context, finish=None):
+    """Draw the shared derived-image browser for library and Finish contexts."""
+    items = browser_items(context.scene.jhm_custom_profiles)
+    shown = items if finish is not None else tuple(
+        item for item in items if item.source_type != "STANDARD")
+    finish_type = finish.finish_type if finish is not None else "LIBRARY"
+    active = stable_profile_identity(finish) if finish is not None else None
+    # Scheduling is the only write-like action here.  The timer callback owns
+    # all Image creation, pixel updates, cache pruning, and datablock removal.
+    request_preview_build(items)
+    grid = layout.grid_flow(row_major=True, columns=2, even_columns=True)
+    for item in shown:
+        card = grid.box()
+        selected = item.identity == active
+        label = ("● " if selected else "") + item.display_name
+        try:
+            icon = cached_preview_icon(item, finish_type)
+        except Exception:
+            icon = 0
+        if finish is not None:
+            if icon:
+                card.template_icon(icon_value=icon, scale=3.0)
+            card.label(text=label)
+            button = card.operator("jhm.apply_profile_thumbnail",
+                                   text="選択中" if selected else "このProfileを適用",
+                                   depress=selected)
+            (button.profile_id, button.profile_revision,
+             button.profile_schema_version) = item.identity
+        else:
+            if icon:
+                card.template_icon(icon_value=icon, scale=3.0)
+            card.label(text=label or item.profile_id)
+        if not icon:
+            card.label(text="Preview unavailable", icon="IMAGE_DATA")
+        if item.source_type != "STANDARD":
+            card.label(text=f"{item.source_type} / r{item.profile_revision}")
 
 
 class JHM_PT_house_modeler(bpy.types.Panel):
@@ -43,7 +83,9 @@ class JHM_PT_house_modeler(bpy.types.Panel):
         profile_box = layout.box()
         profile_box.label(text="Project Custom Profile Library")
         profile_box.label(text="2D / 閉じた1 spline / POLY・BEZIER")
-        profile_box.label(text="+X = 出幅方向 / +Y = 上方向")
+        profile_box.label(text="Canonical: +X = Wallからの出幅方向")
+        profile_box.label(text="+Y = canonical vertical axis")
+        profile_box.label(text="巾木: +Y→上 / 廻り縁: +Y→天井から下")
         profile_box.label(text="Object Transform = identity")
         library = context.scene.jhm_custom_profiles
         if library:
@@ -54,6 +96,7 @@ class JHM_PT_house_modeler(bpy.types.Panel):
                                         f"({item.source_type}, r{item.profile_revision})"))
         else:
             profile_box.label(text="登録Profileなし")
+        _draw_profile_browser(profile_box, context)
         profile_box.operator("jhm.register_custom_profile")
         profile_box.operator("jhm.delete_custom_profile")
 
@@ -188,6 +231,11 @@ class JHM_PT_house_modeler(bpy.types.Panel):
             selected_box.operator(
                 "jhm.edit_finish_profile",
                 text="Profileを変更")
+            browser = selected_box.box()
+            browser.label(text="Profile Browser (representative shape)")
+            browser.label(text=("天井基準 / 下向き" if finish.finish_type == "CROWN"
+                                else "床基準 / 上向き"))
+            _draw_profile_browser(browser, context, finish)
             selected_box.operator("jhm.edit_finish_boundaries", text="開始/終了位置を変更")
             exclusions = selected_box.box()
             exclusions.label(text=f"Manual Exclusion ({len(finish.exclusions)})")

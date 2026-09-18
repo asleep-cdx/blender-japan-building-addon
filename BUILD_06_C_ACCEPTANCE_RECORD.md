@@ -4,12 +4,12 @@
 
 - **Build 06-C Stage 1: ACCEPTED**
 - **Build 06-C Stage 2: ACCEPTED**
-- **Build 06-C Stage 3: PENDING**
-- **Build 06-C overall: NOT YET ACCEPTED**
+- **Build 06-C Stage 3: ACCEPTED**
+- **Build 06-C overall: ACCEPTED**
 
-This record accepts Build 06-C Stage 1, **Crown Foundation and SIMPLE**, and Build 06-C Stage 2, **Standard and Custom Crown Profiles**.
+This record accepts Build 06-C Stage 1, **Crown Foundation and SIMPLE**, Build 06-C Stage 2, **Standard and Custom Crown Profiles**, and Build 06-C Stage 3, **Profile Thumbnail UI and Final Integration**.
 
-It does **not** accept Build 06-C overall. Profile Thumbnail UI and all later Build 06-C stages remain outside this acceptance.
+The final Stage 3 addendum at the end of this record supersedes the earlier stage-local statements that Stage 3 or Build 06-C overall were still pending. Those earlier statements are retained as historical acceptance snapshots for Stage 1 and Stage 2.
 
 ## Tested revision and runtime artifact
 
@@ -236,3 +236,181 @@ The accepted Stage 2 production behavior is the repository state at:
 `ce89f36ec5332da5078655458b1d4f87b1c043e7`
 
 This acceptance-record-only update is not a new production-runtime revision. Stage 3 and Build 06-C overall remain unaccepted.
+
+
+---
+
+# Build 06-C Stage 3 and Overall Acceptance Addendum
+
+## Final acceptance status
+
+- **Build 06-C Stage 1: ACCEPTED**
+- **Build 06-C Stage 2: ACCEPTED**
+- **Build 06-C Stage 3: ACCEPTED**
+- **Build 06-C overall: ACCEPTED**
+
+This addendum records final acceptance of **Build 06-C Stage 3: Profile Thumbnail UI and Final Integration** and closes Build 06-C overall.
+
+Earlier Stage 1 / Stage 2 sections in this file preserve the status that was true when those stages were accepted. Any earlier statement that Stage 3 or Build 06-C overall was pending is superseded by this final addendum.
+
+## Stage 3 tested revision and runtime artifact
+
+- Blender 5.2 LTS runtime-tested production revision:
+  `e213a357f9e4f3a72961f4146b922d7f048ab538`
+- Runtime-tested Git tree:
+  `7c7bdb912f61bee41bafa3b5138887d6020a061a`
+- Runtime artifact:
+  `Japanese_House_Modeler_Build_06_C_Stage3_Candidate_r4.zip`
+- Add-on version:
+  `(0, 6, 3)`
+- Build identification:
+  `Build 06-C Stage 3: Profile Thumbnail UI and Final Integration`
+- Automated-regression workspace commit:
+  `c0f5d2b69acf4d869c65956054fa7a4db8496ee4`
+- Automated-regression workspace tree:
+  `7c7bdb912f61bee41bafa3b5138887d6020a061a`
+
+The automated-regression workspace commit has a different commit history from the GitHub runtime-tested revision, but its Git tree SHA exactly matches Candidate r4. Therefore the repository contents tested by automation were byte-for-byte identical to the runtime-tested Candidate r4 source tree.
+
+The Blender runtime evidence below was supplied from Blender 5.2 LTS execution against Candidate r4. Pure Python automation is recorded separately and is not represented as Blender runtime evidence.
+
+## Candidate history relevant to acceptance
+
+Candidate r3 exposed a Blender add-on lifecycle defect during enable / registration:
+
+`RuntimeError: Error: '_RestrictData' object has no attribute 'images'`
+
+The defect was caused by preview cleanup touching `bpy.data.images` from a restricted registration lifecycle context. Candidate r4 removed that restricted-data access from registration / unregistration lifecycle handling and added regression coverage. Candidate r4 then passed install, enable, disable, and re-enable runtime smoke testing.
+
+Candidate r3 is therefore not accepted runtime evidence. Candidate r4, revision `e213a357f9e4f3a72961f4146b922d7f048ab538`, is the accepted Stage 3 production candidate.
+
+## Stage 3 automated and static verification
+
+The final automated regression was executed against a clean Codex Cloud workspace whose tree SHA exactly matched Candidate r4.
+
+| Check | Result |
+|---|---:|
+| `python -B -m unittest tests.test_build_06_c_stage3` | **30 passed** |
+| `python -B -m unittest tests.test_build_06_c_stage2` | **14 passed** |
+| `python -B -m unittest tests.test_build_06_c_stage1` | **22 passed** |
+| `python -B -m unittest tests.test_build_06_b_stage3` | **40 passed** |
+| `python -B -m unittest tests.test_build_06_b_stage2b` | **20 passed** |
+| `python -B -m unittest tests.test_build_06_b_stage2a` | **51 passed** |
+| `python -B -m unittest tests.test_build_06_b_stage1` | **20 passed** |
+| `python -B -m unittest tests.test_build_06_a` | **60 passed** |
+| `python -B -m unittest tests.test_build_05_b` | **16 passed** |
+| `python -B -m unittest discover -s tests` | **363 passed** |
+| `python -m compileall -q japanese_house_modeler tests` | **PASS** |
+| `git diff --check` | **PASS** |
+
+`compileall` created only untracked `__pycache__` directories. No tracked production source, tests, or acceptance documentation changed during the automated run.
+
+## Stage 3 Blender 5.2 LTS runtime acceptance
+
+| Gate | Test | Result | Runtime evidence |
+|---:|---|---|---|
+| 1 | Candidate r4 lifecycle | **PASS** | Add-on install, enable, disable, and re-enable completed without the Candidate r3 `_RestrictData.images` failure. |
+| 2 | Standard Profile thumbnail browser | **PASS** | SIMPLE, BEVEL, and ROUNDED appeared as distinct cached thumbnails. Baseboard browser showed the floor/upward orientation and current selection clearly. |
+| 3 | Baseboard thumbnail application | **PASS** | BEVEL and ROUNDED were applied through the thumbnail operator; generated geometry changed accordingly while managed state and canonical Finish data remained valid. |
+| 4 | Crown thumbnail context | **PASS** | Crown browser showed ceiling/downward orientation. SIMPLE and BEVEL generated below the ceiling reference with identity Object transform. |
+| 5 | Custom POLY thumbnail | **PASS** | A registered project-local Custom POLY appeared in the Project Library and Crown browser with a valid preview and persisted Profile identity. |
+| 6 | Custom BEZIER thumbnail | **PASS** | A registered cyclic BEZIER produced a 64-point snapshot with smooth-edge intent and appeared correctly in the browser. |
+| 7 | Custom source independence / cache rebuild | **PASS** | The BEZIER source Curve was deleted; its snapshot remained valid. Clearing the preview cache rebuilt usable thumbnails from the persisted snapshot without the source object. |
+| 8 | Save / reopen thumbnail rebuild | **PASS** | After save, full Blender exit, and reopen, the source Curve remained absent while Custom thumbnails, Profile identity, managed Crown state, and browser usability were restored. |
+| 9 | Unused Custom deletion + Undo / Redo | **PASS** | Deleting an unused Custom Profile removed it from the library/browser; Undo restored it and Redo removed it again. |
+| 10 | Thumbnail application of Custom BEZIER | **PASS** | Applying Stage3 BEZIER from the thumbnail browser changed the Crown to the Custom Profile through the production transactional path; resolved dimensions and ceiling/downward placement matched the snapshot. |
+| 11 | Custom uniform scale | **PASS** | Stage3 BEZIER scale 1.5 resolved to approximately 30 × 120 mm, Crown world-Z bounds became 2380–2500 mm at a 2500 mm ceiling, Object transform remained identity, and Span count remained unchanged. |
+| 12 | Referenced Custom deletion rejection | **PASS** | Attempting to delete the Custom Profile referenced by Crown was explicitly rejected with `このProfileは使用中のため削除できません。`; library count, Profile ID, scale, and managed diagnostics remained unchanged. |
+| 13 | Custom registration Undo / Redo | **PASS** | Custom POLY registration appeared in the library/browser, Undo removed it, and Redo restored it without changing the existing Crown Custom BEZIER reference or scale. |
+| 14 | Browser non-mutation | **PASS** | After explicit preview-cache clear and browser rebuild, complete canonical Finish and Custom Profile Library snapshots compared equal before/after browsing. |
+| 15 | Standard numeric editor compatibility | **PASS** | Baseboard was edited to BEVEL 75 × 12 mm with 4 mm bevel through the existing numeric editor; geometry, identity transform, and managed diagnostics remained valid. |
+| 16 | Mixed Baseboard + Crown Manual Exclusions | **PASS** | Baseboard and Crown coexisted on the same Wall topology with one enabled Manual Exclusion each. Both produced two visible ranges and normal diagnostics. |
+| 17 | Mixed Wall split remap + Undo / Redo | **PASS** | A T-junction split remapped both FinishRuns from one Span to two while preserving Finish IDs. Baseboard Exclusion remained on the START-side Wall and Crown Exclusion on the END-side Wall. Undo restored pre-split state and Redo restored remapped state. |
+| 18 | Mixed bulk regeneration failure atomicity | **PASS** | Crown was intentionally given a missing Custom Profile and ceiling reference changed from 2500 to 2600 mm. Bulk regeneration failed explicitly. Baseboard and Crown Curve data pointers both remained unchanged, Scene input remained 2600 mm, and stale state remained true. No partial commit occurred. |
+| 19 | Mixed bulk regeneration recovery | **PASS** | Restoring the valid Crown Custom Profile and rerunning bulk regeneration succeeded for both Finishes. Baseboard remained 0–75 mm; Crown became 2480–2600 mm; both retained two Spans / one Exclusion and normal diagnostics; stale state cleared. |
+| 20 | Final Baseboard regression | **PASS** | Baseboard switched to Custom BEZIER through the Stage 3 browser while preserving Material, two Spans, one Exclusion, two visible ranges, and managed diagnostics. Editable Mesh conversion produced a closed manifold positive-volume Mesh with identity transform and preserved Material; Undo restored the managed Finish. |
+| 21 | Final Crown Mesh regression | **PASS** | Crown Custom BEZIER scale 1.5 with two Spans and one Exclusion converted to an unmanaged Mesh with smooth and flat faces, boundary 0, non-manifold 0, finite positive signed volume, identity transform, and retained Material. Undo restored the managed Crown and, with a proper Undo checkpoint, retained Material. |
+| 22 | Final integrated save / reopen | **PASS** | Final mixed scene reopened with three Walls, two Custom Profile definitions, ceiling 2600 mm, stale false, deleted BEZIER source still absent, Baseboard and Crown Custom Profiles intact, Materials retained, identity transforms, valid Exclusions / Span Wall IDs, normal diagnostics, and rebuilt thumbnails. |
+| 23 | Final Crown ROUNDED regression | **PASS** | ROUNDED applied through the browser with ceiling/downward placement, two Spans, one Exclusion, two visible ranges, Material retention, and normal diagnostics. |
+| 24 | Final Crown Custom POLY regression | **PASS** | Stage3 POLY applied through the browser at scale 1.5, resolving to approximately 27 × 120 mm, with correct 2480–2600 mm Crown placement, two Spans, one Exclusion, Material retention, and normal diagnostics. |
+
+## Stage 3 completion gate
+
+The Stage 3 runtime and automated evidence satisfies the Profile Thumbnail UI and final-integration requirements:
+
+- Standard SIMPLE / BEVEL / ROUNDED thumbnails are visible and distinguishable.
+- Custom POLY and Custom BEZIER thumbnails are generated from project-local snapshots.
+- Baseboard and Crown contexts communicate opposite vertical orientation clearly.
+- The selected Profile is identifiable in the browser.
+- Thumbnail application uses the production Profile validation / transaction path.
+- Existing standard numeric Profile editing remains available.
+- Custom uniform scale remains Run-local and does not use Object Scale.
+- Custom preview generation is source-independent after registration.
+- Preview cache clear and save / reopen rebuild usable thumbnails.
+- Unused Custom Profile deletion updates the browser and supports Undo / Redo.
+- Referenced Custom Profile deletion is rejected explicitly.
+- Custom Profile registration supports Undo / Redo.
+- Browsing and thumbnail cache rebuild do not mutate canonical Finish or Profile Library data.
+- Candidate r4 add-on lifecycle no longer touches restricted Blender data during registration.
+- Mixed Baseboard / Crown Wall split remapping and Exclusion attachment remain valid.
+- Mixed bulk regeneration remains all-or-nothing on failure and recovers normally.
+- Material, managed identity, editable-Mesh topology, Undo, save / reopen, and prior Profile behavior remain valid.
+
+## Final 06-C regression coverage
+
+The final Build 06-C regression combines the targeted Candidate r4 runtime smoke above with the already accepted Stage 1 and Stage 2 runtime evidence in this same record.
+
+Stage 3 changed the Profile browser / preview lifecycle and Profile-thumbnail application surface; the accepted geometry core remained shared. The final regression therefore did not mechanically repeat every earlier geometry test when no Stage 3 failure indicated broader geometry risk.
+
+Final coverage includes:
+
+- Baseboard SIMPLE / ROUNDED / Custom BEZIER behavior from accepted earlier runtime evidence plus Candidate r4 targeted Baseboard Custom / Mesh / Material regression.
+- Crown SIMPLE and BEVEL Candidate r4 runtime smoke.
+- Crown ROUNDED, Custom POLY, and Custom BEZIER Candidate r4 runtime smoke.
+- LEFT / RIGHT and FORWARD / REVERSE from accepted Stage 1 / Stage 2 runtime evidence.
+- 90-degree and oblique Miter from accepted Stage 1 / Stage 2 runtime evidence.
+- Partial Run and junction-aware Exclusion from accepted Stage 1 / Stage 2 runtime evidence.
+- Manual Exclusion, Wall split remap, Undo / Redo, Material, save / reopen, editable Mesh conversion, and thumbnail browser from Candidate r4 runtime evidence.
+
+No Stage 3 runtime result indicated a need to reopen the already accepted geometry-foundation gates.
+
+## Build 06-C overall completion gate
+
+Build 06-C now satisfies the governing requirements for:
+
+- Crown as a first-class Finish type with ceiling/downward placement.
+- Standard SIMPLE / BEVEL / ROUNDED Crown Profiles.
+- Project-local Custom POLY / BEZIER Crown Profiles.
+- Custom Profile source independence and Run-local uniform scale.
+- Profile-aware shading and closed editable-Mesh conversion.
+- Manual Exclusion, Partial Run, Miter, Wall split dependency remap, and mixed Baseboard / Crown operation.
+- Transaction rollback and atomic bulk regeneration.
+- Save / reopen and Undo / Redo.
+- Profile Thumbnail UI, preview caching, cache rebuild, browser selection, and source-independent thumbnail reconstruction.
+- Existing Baseboard compatibility and focused final regression.
+- Pure automated regression through full test discovery.
+- Compilation and whitespace checks.
+
+## Final acceptance conclusion
+
+**Build 06-C Stage 1 — Crown Foundation and SIMPLE: ACCEPTED**
+
+**Build 06-C Stage 2 — Standard and Custom Crown Profiles: ACCEPTED**
+
+**Build 06-C Stage 3 — Profile Thumbnail UI and Final Integration: ACCEPTED**
+
+**Build 06-C overall: ACCEPTED**
+
+The accepted Stage 3 / final Build 06-C production behavior is the repository tree at:
+
+`7c7bdb912f61bee41bafa3b5138887d6020a061a`
+
+represented on GitHub by runtime-tested production revision:
+
+`e213a357f9e4f3a72961f4146b922d7f048ab538`
+
+and runtime artifact:
+
+`Japanese_House_Modeler_Build_06_C_Stage3_Candidate_r4.zip`
+
+Any later acceptance-record-only commit changes documentation only and must not be treated as a new production-runtime revision unless production code changes are introduced.
