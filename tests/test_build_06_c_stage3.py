@@ -192,7 +192,7 @@ class ProductionRoutingStaticTests(unittest.TestCase):
                  if isinstance(node, ast.Call)}
         self.assertIn("cached_preview_icon", calls)
         self.assertIn("request_preview_build", calls)
-        self.assertNotIn("_build_preview_image", calls)
+        self.assertNotIn("_build_custom_preview", calls)
         self.assertNotIn("prune_preview_cache", calls)
         draw_source = ast.unparse(draw_browser)
         self.assertNotIn("bpy.data.images", draw_source)
@@ -221,36 +221,56 @@ class ProductionRoutingStaticTests(unittest.TestCase):
         self.assertIn("not _BUILD_PENDING", request_source)
         self.assertEqual(request_source.count("bpy.app.timers.register"), 1)
 
-    def test_image_creation_is_confined_to_deferred_builder_side(self):
+    def test_custom_preview_creation_is_confined_to_deferred_builder_side(self):
         source = (ROOT / "japanese_house_modeler" /
                   "finish_preview_images.py").read_text()
         tree = ast.parse(source)
-        owners = []
-        for function in (node for node in tree.body if isinstance(node, ast.FunctionDef)):
-            if "bpy.data.images.new" in ast.unparse(function):
-                owners.append(function.name)
-        self.assertEqual(owners, ["_build_preview_image"])
+        self.assertNotIn("bpy.data.images.new", source)
+        build = next(node for node in tree.body if isinstance(node, ast.FunctionDef)
+                     and node.name == "_build_custom_preview")
+        build_source = ast.unparse(build)
+        self.assertIn("previews.new(name)", build_source)
+        self.assertIn("preview.icon_pixels_float = pixels", build_source)
+        self.assertIn("preview.image_pixels_float = pixels", build_source)
+        self.assertIn("preview.icon_size = (PREVIEW_SIZE, PREVIEW_SIZE)", build_source)
+        self.assertIn("preview.image_size = (PREVIEW_SIZE, PREVIEW_SIZE)", build_source)
         deferred = next(node for node in tree.body if isinstance(node, ast.FunctionDef)
                         and node.name == "_deferred_preview_build")
-        self.assertIn("_build_preview_image", ast.unparse(deferred))
+        self.assertIn("_build_custom_preview", ast.unparse(deferred))
 
-    def test_failed_image_construction_removes_partial_image(self):
+    def test_failed_custom_preview_construction_removes_partial_entry(self):
         source = (ROOT / "japanese_house_modeler" /
                   "finish_preview_images.py").read_text()
         tree = ast.parse(source)
         build = next(node for node in tree.body if isinstance(node, ast.FunctionDef)
-                     and node.name == "_build_preview_image")
+                     and node.name == "_build_custom_preview")
         build_source = ast.unparse(build)
         self.assertIn("except Exception", build_source)
-        self.assertIn("_remove_image(image)", build_source)
+        self.assertIn("del previews[name]", build_source)
         self.assertIn("raise", build_source)
 
-    def test_cleanup_is_deferred_and_recognizes_candidate_r1_orphans(self):
+    def test_preview_collection_lifecycle_and_load_recreation(self):
         source = (ROOT / "japanese_house_modeler" /
                   "finish_preview_images.py").read_text()
-        self.assertIn('IMAGE_PREFIX = "JHM_DERIVED_PROFILE_PREVIEW"', source)
-        self.assertIn("image.name.startswith(IMAGE_PREFIX)", source)
-        self.assertIn("_cleanup_owned_orphans()", source)
+        self.assertIn("bpy.utils.previews.new()", source)
+        self.assertIn("bpy.utils.previews.remove(_PREVIEWS)", source)
+        tree = ast.parse(source)
+        load = next(node for node in tree.body if isinstance(node, ast.FunctionDef)
+                    and node.name == "clear_preview_cache")
+        load_source = ast.unparse(load)
+        self.assertIn("_dispose_preview_collection()", load_source)
+        self.assertIn("_ensure_preview_collection()", load_source)
+        unregister = next(node for node in tree.body if isinstance(node, ast.FunctionDef)
+                          and node.name == "unregister_load_handler")
+        self.assertIn("_dispose_preview_collection()", ast.unparse(unregister))
+
+    def test_cleanup_recognizes_only_scoped_legacy_image_ownership(self):
+        source = (ROOT / "japanese_house_modeler" /
+                  "finish_preview_images.py").read_text()
+        self.assertIn('LEGACY_IMAGE_PREFIX = "JHM_DERIVED_PROFILE_PREVIEW"', source)
+        self.assertIn("image.name.startswith(LEGACY_IMAGE_PREFIX)", source)
+        self.assertIn('image.get("jhm_derived_profile_preview", False)', source)
+        self.assertIn("_cleanup_legacy_images()", source)
         self.assertIn("prune_preview_cache(_VALID_KEYS)", source)
 
     def test_referenced_profile_deletion_guard_is_unchanged(self):

@@ -1,13 +1,16 @@
-"""Blender image/icon cache for derived Profile browser thumbnails."""
+"""Transient custom ImagePreview cache for derived Profile thumbnails."""
 
 import bpy
+import bpy.utils.previews
 from bpy.app.handlers import persistent
 
 from .finish_profile_previews import PREVIEW_SIZE, preview_cache_key, rasterize_preview
 
 
-IMAGE_PREFIX = "JHM_DERIVED_PROFILE_PREVIEW"
+# Kept only to clean Candidate r1/r2 files.  New previews never create Images.
+LEGACY_IMAGE_PREFIX = "JHM_DERIVED_PROFILE_PREVIEW"
 PREVIEW_CONTEXTS = ("LIBRARY", "BASEBOARD", "CROWN")
+_PREVIEWS = None
 _CACHE = {}
 _REQUESTED = {}
 _VALID_KEYS = set()
@@ -15,72 +18,91 @@ _FAILED_KEYS = set()
 _BUILD_PENDING = False
 
 
-def _image_is_valid(image):
-    """RNA references can become invalid without becoming Python ``None``."""
-    try:
-        return image is not None and image.name in bpy.data.images
-    except (ReferenceError, RuntimeError):
-        return False
+def _preview_name(key):
+    """ImagePreviewCollection requires a string key; content key stays source."""
+    return repr(key)
+
+
+def _ensure_preview_collection():
+    global _PREVIEWS
+    if _PREVIEWS is None:
+        _PREVIEWS = bpy.utils.previews.new()
+    return _PREVIEWS
+
+
+def _dispose_preview_collection():
+    global _PREVIEWS
+    if _PREVIEWS is not None:
+        bpy.utils.previews.remove(_PREVIEWS)
+        _PREVIEWS = None
+    _CACHE.clear()
 
 
 def cached_preview_icon(item, finish_type="LIBRARY"):
-    """Read an existing icon without changing cache or Blender datablocks."""
+    """Read an existing ImagePreview icon without modifying collection state."""
     key = preview_cache_key(item, finish_type)
-    image = _CACHE.get(key)
-    if _image_is_valid(image):
-        try:
-            return image.preview.icon_id
-        except (ReferenceError, RuntimeError):
-            return 0
-    return 0
+    name = _CACHE.get(key)
+    if _PREVIEWS is None or name is None:
+        return 0
+    try:
+        return _PREVIEWS[name].icon_id if name in _PREVIEWS else 0
+    except (KeyError, ReferenceError, RuntimeError):
+        return 0
 
 
-def _remove_image(image):
-    if _image_is_valid(image):
+def _remove_preview(key):
+    name = _CACHE.pop(key, None)
+    if _PREVIEWS is not None and name is not None:
         try:
-            if image.users == 0:
-                bpy.data.images.remove(image)
-        except (ReferenceError, RuntimeError):
+            if name in _PREVIEWS:
+                del _PREVIEWS[name]
+        except (KeyError, ReferenceError, RuntimeError):
             pass
 
 
-def _build_preview_image(item, finish_type):
-    """Build one derived Image transactionally, outside Panel.draw()."""
+def _build_custom_preview(item, finish_type):
+    """Populate an ImagePreview directly with CPU raster data outside draw."""
     key = preview_cache_key(item, finish_type)
+    name = _preview_name(key)
     pixels = rasterize_preview(item, finish_type)
-    image = None
+    previews = _ensure_preview_collection()
+    preview = None
     try:
-        image = bpy.data.images.new(IMAGE_PREFIX, PREVIEW_SIZE,
-                                    PREVIEW_SIZE, alpha=True)
-        image.use_fake_user = False
-        image["jhm_derived_profile_preview"] = True
-        image.pixels.foreach_set(pixels)
-        image.update()
-        image.preview_ensure()
-        _CACHE[key] = image
-        return image.preview.icon_id
+        if name in previews:
+            del previews[name]
+        preview = previews.new(name)
+        # Assigning size then pixels is Blender 5.2's supported custom-preview
+        # path; is_icon_custom/is_image_custom become true automatically.
+        preview.icon_size = (PREVIEW_SIZE, PREVIEW_SIZE)
+        preview.icon_pixels_float = pixels
+        preview.image_size = (PREVIEW_SIZE, PREVIEW_SIZE)
+        preview.image_pixels_float = pixels
+        _CACHE[key] = name
+        return preview.icon_id
     except Exception:
-        _remove_image(image)
+        _CACHE.pop(key, None)
+        try:
+            if name in previews:
+                del previews[name]
+        except (KeyError, ReferenceError, RuntimeError):
+            pass
         raise
 
 
 def prune_preview_cache(valid_keys):
     valid = set(valid_keys)
-    for key, image in tuple(_CACHE.items()):
+    for key in tuple(_CACHE):
         if key not in valid:
-            _CACHE.pop(key, None)
-            _remove_image(image)
+            _remove_preview(key)
 
 
-def _cleanup_owned_orphans():
-    """Remove uncached zero-user previews, including Candidate r1 leaks."""
-    cached = {image.as_pointer() for image in _CACHE.values()
-              if _image_is_valid(image)}
+def _cleanup_legacy_images():
+    """Remove only zero-user generated Images left by Candidates r1/r2."""
     for image in tuple(bpy.data.images):
         try:
-            owned = (image.name.startswith(IMAGE_PREFIX)
+            owned = (image.name.startswith(LEGACY_IMAGE_PREFIX)
                      or bool(image.get("jhm_derived_profile_preview", False)))
-            if owned and image.users == 0 and image.as_pointer() not in cached:
+            if owned and image.users == 0:
                 bpy.data.images.remove(image)
         except (ReferenceError, RuntimeError):
             continue
@@ -97,22 +119,21 @@ def _redraw_view3d():
 
 
 def _deferred_preview_build():
-    """Timer callback: maintain and build all requested preview variants."""
+    """Timer callback: maintain and build all requested context variants."""
     global _BUILD_PENDING
     requested = tuple(_REQUESTED.items())
     _REQUESTED.clear()
     try:
         prune_preview_cache(_VALID_KEYS)
         _FAILED_KEYS.intersection_update(_VALID_KEYS)
-        _cleanup_owned_orphans()
+        _cleanup_legacy_images()
         for key, (item, finish_type) in requested:
             if key in _FAILED_KEYS or cached_preview_icon(item, finish_type):
                 continue
             try:
-                _build_preview_image(item, finish_type)
+                _build_custom_preview(item, finish_type)
             except Exception:
                 _FAILED_KEYS.add(key)
-        _cleanup_owned_orphans()
     finally:
         _BUILD_PENDING = False
         _redraw_view3d()
@@ -129,28 +150,35 @@ def request_preview_build(items):
     }
     _VALID_KEYS = set(requests)
     for key, value in requests.items():
-        if not _image_is_valid(_CACHE.get(key)) and key not in _FAILED_KEYS:
+        if not cached_preview_icon(*value) and key not in _FAILED_KEYS:
             _REQUESTED[key] = value
     if _REQUESTED and not _BUILD_PENDING:
         _BUILD_PENDING = True
         bpy.app.timers.register(_deferred_preview_build, first_interval=0.0)
 
 
-@persistent
-def clear_preview_cache(_unused=None):
-    """Drop derived image references after file load or add-on unregister."""
+def _cancel_timer_and_requests():
     global _BUILD_PENDING
     if bpy.app.timers.is_registered(_deferred_preview_build):
         bpy.app.timers.unregister(_deferred_preview_build)
-    prune_preview_cache(())
     _REQUESTED.clear()
     _VALID_KEYS.clear()
     _FAILED_KEYS.clear()
     _BUILD_PENDING = False
-    _cleanup_owned_orphans()
+
+
+@persistent
+def clear_preview_cache(_unused=None):
+    """Recreate transient previews after file load; rebuild remains lazy."""
+    _cancel_timer_and_requests()
+    _dispose_preview_collection()
+    _ensure_preview_collection()
+    _cleanup_legacy_images()
 
 
 def register_load_handler():
+    _ensure_preview_collection()
+    _cleanup_legacy_images()
     if clear_preview_cache not in bpy.app.handlers.load_post:
         bpy.app.handlers.load_post.append(clear_preview_cache)
 
@@ -158,5 +186,6 @@ def register_load_handler():
 def unregister_load_handler():
     if clear_preview_cache in bpy.app.handlers.load_post:
         bpy.app.handlers.load_post.remove(clear_preview_cache)
-    if bpy.app.timers.is_registered(_deferred_preview_build):
-        bpy.app.timers.unregister(_deferred_preview_build)
+    _cancel_timer_and_requests()
+    _dispose_preview_collection()
+    _cleanup_legacy_images()

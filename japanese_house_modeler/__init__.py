@@ -76,9 +76,8 @@ def unregister():
     """Remove every property and class owned by this add-on."""
     import bpy
 
-    from .finish_preview_images import clear_preview_cache, unregister_load_handler
+    from .finish_preview_images import unregister_load_handler
     unregister_load_handler()
-    clear_preview_cache()
 
     del bpy.types.Object.jhm_finish
     del bpy.types.Object.jhm_wall
