@@ -3,12 +3,13 @@
 ## Acceptance status
 
 - **Build 06-C Stage 1: ACCEPTED**
+- **Build 06-C Stage 2: ACCEPTED**
+- **Build 06-C Stage 3: PENDING**
 - **Build 06-C overall: NOT YET ACCEPTED**
-- **Build 06-C Stage 2 and later stages: PENDING**
 
-This record accepts only Build 06-C Stage 1, **Crown Foundation and SIMPLE**.
+This record accepts Build 06-C Stage 1, **Crown Foundation and SIMPLE**, and Build 06-C Stage 2, **Standard and Custom Crown Profiles**.
 
-It does **not** accept Build 06-C overall. BEVEL, ROUNDED, Custom POLY/BEZIER Crown Profiles, Custom Crown shading, Profile Thumbnail UI, and all later Build 06-C stages remain outside this acceptance.
+It does **not** accept Build 06-C overall. Profile Thumbnail UI and all later Build 06-C stages remain outside this acceptance.
 
 ## Tested revision and runtime artifact
 
@@ -111,9 +112,9 @@ The Blender 5.2 LTS evidence above satisfies the Build 06-C Stage 1 acceptance r
 
 ---
 
-## Explicit non-acceptance / deferred scope
+## Stage 1 explicit non-acceptance / deferred scope
 
-This Stage 1 acceptance does **not** accept or authorize the following as completed Build 06-C work:
+At the time of Stage 1 acceptance, that acceptance did **not** accept or authorize the following as completed Build 06-C work:
 
 - Crown BEVEL
 - Crown ROUNDED
@@ -124,7 +125,7 @@ This Stage 1 acceptance does **not** accept or authorize the following as comple
 - later Build 06-C stages
 - Build 06-C overall
 
-Those items remain subject to the governing `BUILD_06_C_SPECIFICATION.md` and their later implementation / review / Blender runtime acceptance.
+Those items remained subject to the governing `BUILD_06_C_SPECIFICATION.md` and later implementation, review, and Blender runtime acceptance. The Stage 2 addendum below now accepts the Stage 2 Profile items after their separate evidence was completed; Profile Thumbnail UI and later stages remain pending.
 
 ---
 
@@ -139,3 +140,99 @@ The accepted production behavior is the repository state at:
 `70cc8d32633a223dd2554a5d3ae385b6237b86e5`
 
 Any later acceptance-record-only commit must not be treated as a new production-runtime revision unless production code changes are introduced.
+
+---
+
+# Build 06-C Stage 2 Acceptance Addendum
+
+## Stage 2 tested revision and runtime artifact
+
+- Blender 5.2 LTS runtime-tested production revision:
+  `ce89f36ec5332da5078655458b1d4f87b1c043e7`
+- Runtime artifact:
+  `Japanese_House_Modeler_Build_06_C_Stage2_Candidate_r2.zip`
+- Add-on version:
+  `(0, 6, 3)`
+- Accepted Stage 2 candidate identification:
+  `Build 06-C Stage 2: Standard and Custom Crown Profiles`
+- Acceptance-record-only revision:
+  this later documentation commit changes only acceptance documentation and does not change the runtime-tested production behavior.
+
+The Blender runtime evidence below was supplied from Blender 5.2 LTS execution against the Stage 2 runtime-tested production revision and artifact above. Pure Python automation and repository static checks are recorded separately and are not represented as Blender runtime evidence.
+
+## Stage 2 automated and static verification
+
+| Check | Result |
+|---|---:|
+| `python -B -m unittest tests.test_build_06_c_stage2` | **14 passed** |
+| `python -B -m unittest tests.test_build_06_c_stage1` | **22 passed** |
+| `python -B -m unittest tests.test_build_06_b_stage3` | **40 passed** |
+| `python -B -m unittest tests.test_build_06_b_stage2b` | **20 passed** |
+| `python -B -m unittest tests.test_build_06_b_stage2a` | **51 passed** |
+| `python -B -m unittest tests.test_build_06_b_stage1` | **20 passed** |
+| `python -B -m unittest tests.test_build_06_a` | **60 passed** |
+| `python -B -m unittest tests.test_build_05_b` | **16 passed** |
+| `python -B -m unittest discover -s tests` | **333 passed** |
+| `python -m compileall -q japanese_house_modeler tests` | **PASS** |
+| `git diff --check` | **PASS** |
+
+## Resolved Candidate r1 pre-acceptance defect
+
+Candidate r1, revision `b6112463cd8c2dbb4c2fe84b9b225c295e7951cc`, exposed a runtime defect during Custom BEZIER Crown editable-Mesh conversion. Conversion raised `name 'finish_vertical_sign' is not defined`.
+
+The correction imported the existing authoritative `finish_vertical_sign` function in `finish_operators.py`; it did not duplicate or redefine the orientation rule. The corrected GitHub production revision is `ce89f36ec5332da5078655458b1d4f87b1c043e7`. Candidate r2 passed the affected editable-Mesh conversion runtime gate. The Candidate r1 failure is recorded as a resolved pre-acceptance defect and is not accepted behavior.
+
+## Stage 2 Blender 5.2 LTS runtime acceptance
+
+| Gate | Test | Result | Runtime evidence |
+|---:|---|---|---|
+| 0 | Build identification | **PASS** | Version `(0, 6, 3)`; description `Build 06-C Stage 2: Standard and Custom Crown Profiles`. |
+| 1 | BEVEL Crown basic placement | **PASS** | `CROWN / CEILING`; BEVEL `80×40 mm`, bevel `10 mm`; LEFT / FORWARD; identity Object scale; real Z bounds approximately `2.42–2.50 m`; lower room-facing chamfer orientation correct; `diagnose_finish() -> ()`. |
+| 2 | ROUNDED Crown basic placement | **PASS** | ROUNDED `80×40 mm`, radius `10 mm`; real Z bounds approximately `2.42–2.50 m`; lower room-facing rounded corner correct; 80 evaluated vertices; managed state normal. |
+| 3 | Custom POLY Crown | **PASS** | Registered asymmetric convex Custom POLY; revision 1 / schema 1; uniform scale 1.0; source Curve deleted successfully; actual stored bounds preserved; expected Crown world-Z bounds approximately `2.426–2.497 m`, matched by actual bounds; `diagnose_finish() -> ()`. |
+| 4A | Custom BEZIER Crown | **PASS** | Asymmetric BEZIER snapshot; revision 1 / schema 1; 64 persisted sampled contour points; 16 smooth edges; source Curve deleted; expected and actual world-Z bounds matched; `diagnose_finish() -> ()`. |
+| 4B | Custom BEZIER editable Mesh and shading | **PASS** | Candidate r1 exposed the missing `finish_vertical_sign` import and the defect was corrected before Candidate r2. Candidate r2 conversion succeeded: TYPE MESH; `managed=False`; scale `(1,1,1)`; SMOOTH 16; FLAT 172; FACES 188; positive signed volume `0.006284231662448897`; BOUNDARY 0; NONMANIFOLD 0. Curved region visually smooth; planar regions and caps remained flat. |
+| 5 | Profile switching and Material preservation | **PASS** | `SIMPLE -> ROUNDED`, `ROUNDED -> Custom BEZIER`, and `Custom BEZIER -> BEVEL`; `Crown_Stage2_Mat` survived all switches; `diagnose_finish() -> ()`. |
+| 6 | Custom uniform scale, Run-local independence, Undo / Redo | **PASS** | Crown A changed `1.0 -> 1.5`; Crown B remained 1.0; Undo restored A to 1.0; Redo restored A to 1.5. Final scene: `JHM Finish = 1.5`, `JHM Finish.001 = 1.0`; diagnostics returned `()` for both; UI geometry dimensions reflected scaled height/projection. |
+| 7 | Custom BEZIER Manual Exclusion and Material | **PASS** | Custom BEZIER scale 1.5; one Manual Exclusion `1200–1800 mm`; two visible ranges; `Crown_Stage2_Mat` retained; `diagnose_finish() -> ()`. |
+| 8 | Custom BEZIER Exclusion editable Mesh | **PASS** | `managed=False`; scale `(1,1,1)`; material retained; SMOOTH 32; FLAT 344; FACES 376; positive signed volume `0.012001805197530217`; BOUNDARY 0; NONMANIFOLD 0; both Exclusion-created ends visibly closed as flat BUTT caps. |
+| 9 | ROUNDED Crown Manual Exclusion and editable Mesh | **PASS** | SMOOTH 32; FLAT 80; FACES 112; positive signed volume `0.010706745832923636`; BOUNDARY 0; NONMANIFOLD 0; rounded region remained smooth; Exclusion BUTT caps remained flat and closed. |
+| 10 | ROUNDED Crown Partial Run and 90-degree Miter | **PASS** | Two Spans; RIGHT / REVERSE traversal; 500 mm partial boundaries; identity scale; `diagnose_finish() -> ()`; central Miter had no visible gap, overlap, or abnormal spike; ROUNDED shape remained valid. |
+| 11 | Save / reopen integration | **PASS** | Before save: ROUNDED Crown with `Crown_SaveReopen_Mat`; Custom BEZIER Crown with one Manual Exclusion and the same Material; Custom source Curve absent. After close/reopen: both managed Crowns remained; ROUNDED and Custom Profile identities persisted; one Custom Exclusion and the project-local snapshot persisted; source remained absent; Material persisted; diagnostics returned `()` for both; explicit regeneration succeeded; Material and visible Custom Exclusion ranges remained. |
+| 12 | BEVEL Crown editable Mesh | **PASS** | TYPE MESH; `managed=False`; scale `(1,1,1)`; SMOOTH 0; FLAT 11; FACES 11; positive signed volume `0.012504539868834152`; BOUNDARY 0; NONMANIFOLD 0. |
+| 13A | Baseboard ROUNDED regression | **PASS** | TYPE MESH; scale `(1,1,1)`; SMOOTH 16; FLAT 40; FACES 56; positive signed volume `0.012617348537607764`; BOUNDARY 0; NONMANIFOLD 0; accepted upward Baseboard appearance preserved. |
+| 13B | Baseboard Custom BEZIER regression | **PASS** | TYPE MESH; scale `(1,1,1)`; SMOOTH 16; FLAT 172; FACES 188; positive signed volume `0.006285942941392453`; BOUNDARY 0; NONMANIFOLD 0; accepted Baseboard Custom smooth/flat behavior preserved. |
+| 14 | Transactional Profile-switch rollback | **PASS** | Before: ROUNDED, height 80, projection 40, radius 10, `Crown_SaveReopen_Mat`, two Spans. Unsafe BEVEL projection `10000 mm` was rejected with `Finish区間がProfileの留め加工には短すぎます。` After rejection: all Profile values, Material, and two Spans were retained; old valid geometry remained visible; `diagnose_finish() -> ()`. |
+| 15 | BEVEL Crown 90-degree Miter | **PASS** | BEVEL; two Spans; `Crown_SaveReopen_Mat` retained; `diagnose_finish() -> ()`; no visible gap, overlap, spike, or Profile corruption at Miter. |
+| 16 | Custom POLY editable Mesh | **PASS** | Custom POLY source Curve deleted; CROWN; Custom Profile revision remained valid; scale 1.0; `diagnose_finish() -> ()`; TYPE MESH; `managed=False`; scale `(1,1,1)`; SMOOTH 0; FLAT 8; FACES 8; NORMAL_BAD 0; MIN_DOT `0.004501332761719823`; positive signed volume `0.0023976032021917337`; BOUNDARY 0; NONMANIFOLD 0. |
+
+## Stage 2 completion gate
+
+The automated/static evidence and Blender 5.2 LTS runtime evidence above satisfy the Build 06-C Stage 2 acceptance requirements:
+
+- BEVEL and ROUNDED Crown placement, Miter behavior, shading, and closed editable-Mesh conversion pass.
+- Custom POLY and asymmetric Custom BEZIER Crown retain project-local Profile identity and remain source-independent.
+- Custom smooth-edge intent follows the fully oriented contour through Crown vertical reflection.
+- Custom uniform scale is Run-local and works with Undo / Redo.
+- Actual Custom bounds control Crown placement.
+- Profile switching preserves Crown state and Material, and unsafe switches roll back transactionally.
+- Manual Exclusion and Partial Run behavior remain valid; Exclusion-created ends are closed flat BUTT caps.
+- Save / reopen preserves Custom snapshots, Profile identity, Exclusions, Material, shading, and regeneration.
+- Baseboard ROUNDED and Custom BEZIER behavior remain compatible.
+- Managed and converted objects retain identity scale; converted Meshes are closed, manifold, and positive-volume.
+
+## Stage 2 acceptance conclusion
+
+**Build 06-C Stage 1 — Crown Foundation and SIMPLE: ACCEPTED**
+
+**Build 06-C Stage 2 — Standard and Custom Crown Profiles: ACCEPTED**
+
+**Build 06-C Stage 3 — Profile Thumbnail UI: PENDING**
+
+**Build 06-C overall: NOT YET ACCEPTED**
+
+The accepted Stage 2 production behavior is the repository state at:
+
+`ce89f36ec5332da5078655458b1d4f87b1c043e7`
+
+This acceptance-record-only update is not a new production-runtime revision. Stage 3 and Build 06-C overall remain unaccepted.
