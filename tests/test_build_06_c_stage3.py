@@ -264,6 +264,32 @@ class ProductionRoutingStaticTests(unittest.TestCase):
                           and node.name == "unregister_load_handler")
         self.assertIn("_dispose_preview_collection()", ast.unparse(unregister))
 
+    def test_register_lifecycle_does_not_access_legacy_images(self):
+        source = (ROOT / "japanese_house_modeler" /
+                  "finish_preview_images.py").read_text()
+        tree = ast.parse(source)
+        for name in ("register_load_handler", "unregister_load_handler"):
+            lifecycle = next(node for node in tree.body
+                             if isinstance(node, ast.FunctionDef)
+                             and node.name == name)
+            lifecycle_source = ast.unparse(lifecycle)
+            self.assertNotIn("_cleanup_legacy_images", lifecycle_source)
+            self.assertNotIn("bpy.data.images", lifecycle_source)
+
+    def test_legacy_cleanup_runs_only_in_runtime_callbacks(self):
+        source = (ROOT / "japanese_house_modeler" /
+                  "finish_preview_images.py").read_text()
+        tree = ast.parse(source)
+        callers = []
+        for function in (node for node in tree.body
+                         if isinstance(node, ast.FunctionDef)):
+            if function.name == "_cleanup_legacy_images":
+                continue
+            if "_cleanup_legacy_images()" in ast.unparse(function):
+                callers.append(function.name)
+        self.assertEqual(set(callers),
+                         {"_deferred_preview_build", "clear_preview_cache"})
+
     def test_cleanup_recognizes_only_scoped_legacy_image_ownership(self):
         source = (ROOT / "japanese_house_modeler" /
                   "finish_preview_images.py").read_text()

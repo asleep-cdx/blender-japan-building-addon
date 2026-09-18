@@ -178,7 +178,6 @@ def clear_preview_cache(_unused=None):
 
 def register_load_handler():
     _ensure_preview_collection()
-    _cleanup_legacy_images()
     if clear_preview_cache not in bpy.app.handlers.load_post:
         bpy.app.handlers.load_post.append(clear_preview_cache)
 
@@ -188,4 +187,3 @@ def unregister_load_handler():
         bpy.app.handlers.load_post.remove(clear_preview_cache)
     _cancel_timer_and_requests()
     _dispose_preview_collection()
-    _cleanup_legacy_images()
