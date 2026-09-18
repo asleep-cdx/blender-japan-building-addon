@@ -19,6 +19,7 @@ from .finish_profiles import (
 )
 from .finish_hardening import managed_finish_objects
 from .finish_mesh import apply_profile_shading, weld_and_validate_finish_mesh
+from .finish_orientation import finish_vertical_sign
 from .dependency_transaction import DependencyTransaction, OperationRecovery, recover_operation
 from .finish_identity import (
     duplicate_ids, ensure_persistent_id, id_index, new_persistent_id,
@@ -484,12 +485,8 @@ class JHM_OT_regenerate_finish(bpy.types.Operator):
 
 def _profile_items(_owner, context):
     items = [("SIMPLE", "SIMPLE", "標準の矩形Profile"),
-             ("BEVEL", "BEVEL", "上部室内側を45度面取り"),
-             ("ROUNDED", "ROUNDED", "上部室内側を丸める")]
-    active_finish = getattr(getattr(context, "active_object", None),
-                            "jhm_finish", None) if context else None
-    if active_finish is not None and active_finish.finish_type == "CROWN":
-        return items[:1]
+             ("BEVEL", "BEVEL", "45度面取りProfile"),
+             ("ROUNDED", "ROUNDED", "丸み付きProfile")]
     if context and context.scene:
         items.extend((item.profile_id, item.display_name,
                       f"Custom Profile revision {item.profile_revision}")
@@ -646,16 +643,11 @@ class JHM_OT_edit_finish_profile(bpy.types.Operator):
         self.bevel_mm = resolved.bevel_mm
         self.radius_mm = resolved.radius_mm
         self.uniform_scale = resolved.uniform_scale
-        if context.active_object.jhm_finish.finish_type == "CROWN":
-            self.profile = SIMPLE_PROFILE_ID
         return context.window_manager.invoke_props_dialog(self)
 
     def execute(self, context):
         obj = context.active_object
         finish = obj.jhm_finish
-        if finish.finish_type == "CROWN" and self.profile != SIMPLE_PROFILE_ID:
-            self.report({"ERROR"}, "Build 06-C Stage 1の廻り縁はSIMPLE Profileのみ対応します。")
-            return {"CANCELLED"}
         custom = self.profile not in (SIMPLE_PROFILE_ID, BEVEL_PROFILE_ID,
                                       ROUNDED_PROFILE_ID)
         if custom:
@@ -820,7 +812,8 @@ class JHM_OT_convert_finish_mesh(bpy.types.Operator):
                     obj.jhm_finish, context.scene.jhm_custom_profiles),
                 profile_horizontal_sign(first_span.side,
                                         first_span.traversal_direction),
-                prepared.ranges)
+                prepared.ranges,
+                finish_vertical_sign(obj.jhm_finish.finish_type))
         except Exception as error:
             recovery = OperationRecovery()
             recovery.add(remove_temporary)

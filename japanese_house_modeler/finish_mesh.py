@@ -3,6 +3,7 @@
 import math
 
 from .finish_custom_profiles import oriented_edge_indices
+from .finish_orientation import oriented_profile_contour
 from .finish_profiles import STANDARD_PROFILE_IDS
 
 
@@ -65,7 +66,7 @@ def _signatures_match(first, second, epsilon=1.0e-6):
 
 def custom_polygon_should_be_smooth(profile, coordinates, horizontal_sign,
                                     mesh_minimum_z, path_ranges,
-                                    epsilon=1.0e-6):
+                                    epsilon=1.0e-6, vertical_sign=1.0):
     """Match a swept quad to an explicitly smooth oriented contour edge.
 
     A Curve side facet has two opposite cross-section edges with the same
@@ -81,9 +82,9 @@ def custom_polygon_should_be_smooth(profile, coordinates, horizontal_sign,
         return False
     indices = oriented_edge_indices(
         len(profile.contour), profile.shading.smooth_contour_edges,
-        horizontal_sign)
-    oriented = (profile.contour if float(horizontal_sign) >= 0.0 else
-                tuple((-x, y) for x, y in reversed(profile.contour)))
+        horizontal_sign, vertical_sign)
+    oriented = oriented_profile_contour(
+        profile.contour, horizontal_sign, vertical_sign)
     profile_minimum_y = min(point[1] for point in oriented)
     polygon_signatures = tuple(
         _edge_signature(coordinates[index], coordinates[(index + 1) % 4],
@@ -102,7 +103,8 @@ def custom_polygon_should_be_smooth(profile, coordinates, horizontal_sign,
     return False
 
 
-def apply_profile_shading(mesh, profile, horizontal_sign=1.0, path_ranges=()):
+def apply_profile_shading(mesh, profile, horizontal_sign=1.0, path_ranges=(),
+                          vertical_sign=1.0):
     """Apply deterministic Profile intent without changing materials."""
     custom = profile.profile_id not in STANDARD_PROFILE_IDS
     minimum_z = min((vertex.co.z for vertex in mesh.vertices), default=0.0)
@@ -111,7 +113,8 @@ def apply_profile_shading(mesh, profile, horizontal_sign=1.0, path_ranges=()):
             coordinates = tuple(mesh.vertices[index].co
                                 for index in polygon.vertices)
             polygon.use_smooth = custom_polygon_should_be_smooth(
-                profile, coordinates, horizontal_sign, minimum_z, path_ranges)
+                profile, coordinates, horizontal_sign, minimum_z, path_ranges,
+                vertical_sign=vertical_sign)
         else:
             # Keep the accepted Stage 2-B standard Profile behavior unchanged.
             polygon.use_smooth = polygon_should_be_smooth(

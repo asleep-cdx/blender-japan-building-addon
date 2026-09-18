@@ -208,11 +208,21 @@ def mirrored_edge_indices(point_count, edge_indices):
                         for index in edge_indices))
 
 
-def oriented_edge_indices(point_count, edge_indices, horizontal_sign):
-    if not math.isfinite(float(horizontal_sign)):
+def oriented_edge_indices(point_count, edge_indices, horizontal_sign,
+                          vertical_sign=1.0):
+    """Map canonical edge indices through the authoritative 2-axis reflection.
+
+    A single reflection reverses the contour to retain its winding, whereas a
+    double reflection preserves its index order.  Coordinate reflection alone
+    never changes which physical edge carries the authored smooth intent.
+    """
+    horizontal, vertical = float(horizontal_sign), float(vertical_sign)
+    if (not all(math.isfinite(value) for value in (horizontal, vertical))
+            or horizontal not in {-1.0, 1.0}
+            or vertical not in {-1.0, 1.0}):
         raise ValueError("Profile orientationが不正です。")
     canonical = tuple(sorted(int(index) for index in edge_indices))
-    return (canonical if float(horizontal_sign) >= 0.0
+    return (canonical if horizontal * vertical > 0.0
             else mirrored_edge_indices(point_count, canonical))
 
 

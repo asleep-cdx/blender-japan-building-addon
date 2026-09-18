@@ -94,8 +94,6 @@ def _resolved_canonical_path(finish, scene, resolved_profile=None):
     """Validate canonical truth and return unsafed span geometry metadata."""
     resolved_profile = resolved_profile or resolve_finish_profile(finish, scene.jhm_custom_profiles)
     finish_vertical_sign(finish.finish_type)
-    if finish.finish_type == "CROWN" and resolved_profile.profile_id != "SIMPLE":
-        raise ValueError("Build 06-C Stage 1のCROWNはSIMPLE Profileのみ対応します。")
     walls = managed_walls()
     from .finish_dependencies import validate_finish_references
     # This also validates every persisted exclusion before dependency work.
@@ -408,9 +406,6 @@ def diagnose_finish(obj, scene=None):
         profile = resolve_finish_profile(
             obj.jhm_finish, scene.jhm_custom_profiles if scene else None)
         finish_vertical_sign(obj.jhm_finish.finish_type)
-        if (obj.jhm_finish.finish_type == "CROWN"
-                and profile.profile_id != "SIMPLE"):
-            raise ValueError
     except (TypeError, ValueError):
         extras.append("PROFILE")
     if not finish_id_is_valid(obj.jhm_finish.finish_id,
@@ -435,7 +430,8 @@ def _production_profile(resolved, horizontal_sign, vertical_base_m,
     orientation = "NEGATIVE" if sign < 0 else "POSITIVE"
     vertical_orientation = "DOWN" if vertical_sign < 0 else "UP"
     oriented_smooth_edges = oriented_edge_indices(
-        len(resolved.contour), resolved.shading.smooth_contour_edges, sign)
+        len(resolved.contour), resolved.shading.smooth_contour_edges, sign,
+        vertical_sign)
     smooth_edge_metadata = ",".join(str(index) for index in oriented_smooth_edges)
     for candidate in bpy.data.objects:
         data_type = ("CURVE" if isinstance(getattr(candidate, "data", None),
@@ -538,9 +534,6 @@ def prepare_finish_regeneration(obj, scene):
         raise ValueError("Finish IDが空、空白、または重複しています。")
     resolved_profile = resolve_finish_profile(obj.jhm_finish, scene.jhm_custom_profiles if scene else None)
     vertical_sign = finish_vertical_sign(obj.jhm_finish.finish_type)
-    if (obj.jhm_finish.finish_type == "CROWN"
-            and resolved_profile.profile_id != "SIMPLE"):
-        raise ValueError("Build 06-C Stage 1のCROWNはSIMPLE Profileのみ対応します。")
     ranges, enabled_count = resolved_finish_ranges(
         obj.jhm_finish, scene, resolved_profile)
     points = tuple(point for visible in ranges for point in visible)
