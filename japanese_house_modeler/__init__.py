@@ -50,6 +50,7 @@ _CLASSES = (
 def register():
     """Register add-on classes and the separate scene/object data containers."""
     import bpy
+    from .finish_preview_images import register_load_handler
 
     for cls in _CLASSES:
         bpy.utils.register_class(cls)
@@ -68,13 +69,15 @@ def register():
     bpy.types.Object.jhm_finish = bpy.props.PointerProperty(
         type=properties.JHM_FinishProperties
     )
+    register_load_handler()
 
 
 def unregister():
     """Remove every property and class owned by this add-on."""
     import bpy
 
-    from .finish_preview_images import clear_preview_cache
+    from .finish_preview_images import clear_preview_cache, unregister_load_handler
+    unregister_load_handler()
     clear_preview_cache()
 
     del bpy.types.Object.jhm_finish

@@ -11,6 +11,7 @@ from .finish_identity import duplicate_ids
 from .finish_geometry import canonical_visible_range_state, diagnose_finish
 from .finish_state import status_label
 from .finish_profile_previews import browser_items, preview_cache_key, stable_profile_identity
+from .finish_preview_images import preview_icon, prune_preview_cache
 
 
 def _draw_profile_browser(layout, context, finish=None):
@@ -20,29 +21,30 @@ def _draw_profile_browser(layout, context, finish=None):
         item for item in items if item.source_type != "STANDARD")
     finish_type = finish.finish_type if finish is not None else "LIBRARY"
     active = stable_profile_identity(finish) if finish is not None else None
-    try:
-        from .finish_preview_images import preview_icon, prune_preview_cache
-        # Retain all legitimate context variants.  This still removes deleted
-        # identities without making two browser sections evict one another.
-        prune_preview_cache(
-            preview_cache_key(item, orientation)
-            for item in items
-            for orientation in ("LIBRARY", "BASEBOARD", "CROWN"))
-    except Exception:
-        preview_icon = None
+    # Retain all legitimate context variants.  This still removes deleted
+    # identities without making two browser sections evict one another.
+    prune_preview_cache(
+        preview_cache_key(item, orientation)
+        for item in items
+        for orientation in ("LIBRARY", "BASEBOARD", "CROWN"))
     grid = layout.grid_flow(row_major=True, columns=2, even_columns=True)
     for item in shown:
         card = grid.box()
         selected = item.identity == active
         label = ("● " if selected else "") + item.display_name
         try:
-            icon = preview_icon(item, finish_type) if preview_icon else 0
+            icon = preview_icon(item, finish_type)
         except Exception:
             icon = 0
         if finish is not None:
-            button = card.operator("jhm.apply_profile_thumbnail", text=label,
-                                   depress=selected, icon_value=icon)
-            button.profile_id = item.profile_id
+            if icon:
+                card.template_icon(icon_value=icon, scale=3.0)
+            card.label(text=label)
+            button = card.operator("jhm.apply_profile_thumbnail",
+                                   text="選択中" if selected else "このProfileを適用",
+                                   depress=selected)
+            (button.profile_id, button.profile_revision,
+             button.profile_schema_version) = item.identity
         else:
             if icon:
                 card.template_icon(icon_value=icon, scale=3.0)

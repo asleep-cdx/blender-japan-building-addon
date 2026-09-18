@@ -15,6 +15,11 @@ from japanese_house_modeler.finish_custom_profiles import make_snapshot
 from japanese_house_modeler.finish_profile_previews import (
     PREVIEW_PADDING, PREVIEW_SIZE, browser_items, fit_contour, orient_preview,
     preview_cache_key, rasterize_preview, stable_profile_identity,
+    STANDARD_REVISIONS, validated_profile_identity,
+)
+from japanese_house_modeler.finish_profiles import (
+    BEVEL_PROFILE_REVISION, ROUNDED_PROFILE_REVISION,
+    SIMPLE_PROFILE_REVISION,
 )
 
 
@@ -72,6 +77,28 @@ class IdentityAndOrderingTests(unittest.TestCase):
         self.assertNotEqual(preview_cache_key(first, "BASEBOARD"),
                             preview_cache_key(first, "CROWN"))
 
+    def test_standard_revision_mapping_uses_family_constants(self):
+        self.assertEqual(STANDARD_REVISIONS, {
+            "SIMPLE": SIMPLE_PROFILE_REVISION,
+            "BEVEL": BEVEL_PROFILE_REVISION,
+            "ROUNDED": ROUNDED_PROFILE_REVISION,
+        })
+
+    def test_exact_three_part_custom_identity_is_required(self):
+        library = [definition("CUSTOM-id")]
+        self.assertEqual(
+            validated_profile_identity("CUSTOM-id", 1, 1, library),
+            ("CUSTOM-id", 1, 1))
+        for stale in (("CUSTOM-id", 2, 1), ("CUSTOM-id", 1, 2)):
+            with self.assertRaisesRegex(ValueError, "identity"):
+                validated_profile_identity(*stale, library)
+
+    def test_standard_identity_rejects_stale_revision_or_schema(self):
+        with self.assertRaisesRegex(ValueError, "identity"):
+            validated_profile_identity("BEVEL", BEVEL_PROFILE_REVISION + 1, 1, ())
+        with self.assertRaisesRegex(ValueError, "identity"):
+            validated_profile_identity("ROUNDED", ROUNDED_PROFILE_REVISION, 2, ())
+
 
 class OrientationAndSnapshotTests(unittest.TestCase):
     def test_baseboard_rises_up(self):
@@ -123,6 +150,37 @@ class ProductionRoutingStaticTests(unittest.TestCase):
                  if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)}
         self.assertIn("transactional_profile_edit", calls)
         self.assertIn("prepare_finish_regeneration", ast.unparse(execute))
+
+    def test_operator_and_ui_pass_complete_identity(self):
+        operator = next(node for node in ast.walk(self.tree)
+                        if isinstance(node, ast.ClassDef)
+                        and node.name == "JHM_OT_apply_profile_thumbnail")
+        operator_source = ast.unparse(operator)
+        for field in ("profile_id", "profile_revision", "profile_schema_version"):
+            self.assertIn(field, operator_source)
+        ui_source = (ROOT / "japanese_house_modeler" / "ui.py").read_text()
+        self.assertIn("button.profile_revision", ui_source)
+        self.assertIn("button.profile_schema_version", ui_source)
+
+    def test_file_load_cache_handler_is_registered_once_and_removed(self):
+        cache_source = (ROOT / "japanese_house_modeler" /
+                        "finish_preview_images.py").read_text()
+        init_source = (ROOT / "japanese_house_modeler" / "__init__.py").read_text()
+        self.assertIn("@persistent\ndef clear_preview_cache", cache_source)
+        self.assertIn("if clear_preview_cache not in bpy.app.handlers.load_post",
+                      cache_source)
+        self.assertIn("bpy.app.handlers.load_post.append(clear_preview_cache)",
+                      cache_source)
+        self.assertIn("bpy.app.handlers.load_post.remove(clear_preview_cache)",
+                      cache_source)
+        self.assertIn("register_load_handler()", init_source)
+        self.assertIn("unregister_load_handler()", init_source)
+
+    def test_finish_cards_render_large_thumbnail_before_apply_button(self):
+        ui_source = (ROOT / "japanese_house_modeler" / "ui.py").read_text()
+        thumbnail = ui_source.index("card.template_icon(icon_value=icon, scale=3.0)")
+        apply_button = ui_source.index('card.operator("jhm.apply_profile_thumbnail"')
+        self.assertLess(thumbnail, apply_button)
 
     def test_referenced_profile_deletion_guard_is_unchanged(self):
         deletion = next(node for node in ast.walk(self.tree)

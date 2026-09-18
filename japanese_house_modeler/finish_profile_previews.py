@@ -19,6 +19,11 @@ from .finish_profiles import (
 PREVIEW_SIZE = 96
 PREVIEW_PADDING = 12
 STANDARD_IDS = (SIMPLE_PROFILE_ID, BEVEL_PROFILE_ID, ROUNDED_PROFILE_ID)
+STANDARD_REVISIONS = {
+    SIMPLE_PROFILE_ID: SIMPLE_PROFILE_REVISION,
+    BEVEL_PROFILE_ID: BEVEL_PROFILE_REVISION,
+    ROUNDED_PROFILE_ID: ROUNDED_PROFILE_REVISION,
+}
 
 
 @dataclass(frozen=True)
@@ -43,15 +48,28 @@ def stable_profile_identity(value):
     return (str(value.profile_id), int(value.profile_revision), int(schema))
 
 
+def validated_profile_identity(profile_id, profile_revision, schema_version,
+                               library):
+    """Require an exact currently available canonical browser identity."""
+    requested = (str(profile_id), int(profile_revision), int(schema_version))
+    if requested[0] in STANDARD_REVISIONS:
+        authoritative = (requested[0], STANDARD_REVISIONS[requested[0]],
+                         PROFILE_SCHEMA_VERSION)
+        if requested != authoritative:
+            raise ValueError("Standard Profile identityが現在の定義と一致しません。")
+        return authoritative
+    for definition in library or ():
+        if stable_profile_identity(definition) == requested:
+            return requested
+    raise ValueError("指定されたCustom Profile identityが現在のLibraryにありません。")
+
+
 def _standard_item(profile_id):
-    revisions = {SIMPLE_PROFILE_ID: SIMPLE_PROFILE_REVISION,
-                 BEVEL_PROFILE_ID: BEVEL_PROFILE_REVISION,
-                 ROUNDED_PROFILE_ID: ROUNDED_PROFILE_REVISION}
     profile = resolve_profile(
-        profile_id, revisions[profile_id], PROFILE_SCHEMA_VERSION,
+        profile_id, STANDARD_REVISIONS[profile_id], PROFILE_SCHEMA_VERSION,
         DEFAULT_HEIGHT_MM, DEFAULT_PROJECTION_MM,
         DEFAULT_BEVEL_MM, DEFAULT_RADIUS_MM)
-    return ProfileBrowserItem(profile_id, revisions[profile_id],
+    return ProfileBrowserItem(profile_id, STANDARD_REVISIONS[profile_id],
                               PROFILE_SCHEMA_VERSION, profile_id,
                               "STANDARD", profile.contour)
 

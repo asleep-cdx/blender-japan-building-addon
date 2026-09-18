@@ -38,6 +38,7 @@ from .finish_path import (
     backspace_pending, profile_horizontal_sign, propagate_canonical_side,
     traversal_for_connection,
 )
+from .finish_profile_previews import validated_profile_identity
 
 
 def _wall_id_duplicates():
@@ -494,19 +495,12 @@ def _profile_items(_owner, context):
     return items
 
 
-def thumbnail_profile_values(finish, profile_id, library):
+def thumbnail_profile_values(finish, profile_id, profile_revision,
+                             profile_schema_version, library):
     """Build provisional values from stable identity without mutating Finish."""
-    standard = profile_id in (SIMPLE_PROFILE_ID, BEVEL_PROFILE_ID,
-                              ROUNDED_PROFILE_ID)
-    if standard:
-        revision, schema = SIMPLE_PROFILE_REVISION, PROFILE_SCHEMA_VERSION
-    else:
-        definition = next((item for item in library
-                           if item.profile_id == profile_id), None)
-        if definition is None:
-            raise ValueError("Custom Profile定義が見つかりません。")
-        revision, schema = definition.profile_revision, definition.schema_version
-    return (profile_id, revision, schema,
+    identity = validated_profile_identity(
+        profile_id, profile_revision, profile_schema_version, library)
+    return (*identity,
             finish.profile_height_mm, finish.profile_projection_mm,
             finish.profile_bevel_mm, finish.profile_radius_mm,
             finish.profile_uniform_scale)
@@ -520,6 +514,8 @@ class JHM_OT_apply_profile_thumbnail(bpy.types.Operator):
     bl_options = {"REGISTER", "UNDO"}
 
     profile_id: bpy.props.StringProperty(options={"HIDDEN"})
+    profile_revision: bpy.props.IntProperty(options={"HIDDEN"})
+    profile_schema_version: bpy.props.IntProperty(options={"HIDDEN"})
 
     @classmethod
     def poll(cls, context):
@@ -529,7 +525,8 @@ class JHM_OT_apply_profile_thumbnail(bpy.types.Operator):
         obj = context.active_object
         try:
             values = thumbnail_profile_values(
-                obj.jhm_finish, self.profile_id,
+                obj.jhm_finish, self.profile_id, self.profile_revision,
+                self.profile_schema_version,
                 context.scene.jhm_custom_profiles)
             # Identical production resolver, safety checks, replacement
             # preparation and rollback path used by the textual editor.
