@@ -494,6 +494,55 @@ def _profile_items(_owner, context):
     return items
 
 
+def thumbnail_profile_values(finish, profile_id, library):
+    """Build provisional values from stable identity without mutating Finish."""
+    standard = profile_id in (SIMPLE_PROFILE_ID, BEVEL_PROFILE_ID,
+                              ROUNDED_PROFILE_ID)
+    if standard:
+        revision, schema = SIMPLE_PROFILE_REVISION, PROFILE_SCHEMA_VERSION
+    else:
+        definition = next((item for item in library
+                           if item.profile_id == profile_id), None)
+        if definition is None:
+            raise ValueError("Custom Profile定義が見つかりません。")
+        revision, schema = definition.profile_revision, definition.schema_version
+    return (profile_id, revision, schema,
+            finish.profile_height_mm, finish.profile_projection_mm,
+            finish.profile_bevel_mm, finish.profile_radius_mm,
+            finish.profile_uniform_scale)
+
+
+class JHM_OT_apply_profile_thumbnail(bpy.types.Operator):
+    """Apply a browser identity through the production Profile transaction."""
+
+    bl_idname = "jhm.apply_profile_thumbnail"
+    bl_label = "Profileサムネイルを適用"
+    bl_options = {"REGISTER", "UNDO"}
+
+    profile_id: bpy.props.StringProperty(options={"HIDDEN"})
+
+    @classmethod
+    def poll(cls, context):
+        return _finish_poll(context)
+
+    def execute(self, context):
+        obj = context.active_object
+        try:
+            values = thumbnail_profile_values(
+                obj.jhm_finish, self.profile_id,
+                context.scene.jhm_custom_profiles)
+            # Identical production resolver, safety checks, replacement
+            # preparation and rollback path used by the textual editor.
+            transactional_profile_edit(
+                obj.jhm_finish, values,
+                lambda: prepare_finish_regeneration(obj, context.scene),
+                context.scene.jhm_custom_profiles)
+        except Exception as error:
+            self.report({"ERROR"}, f"Profileを変更できませんでした: {error}")
+            return {"CANCELLED"}
+        return {"FINISHED"}
+
+
 class JHM_OT_register_custom_profile(bpy.types.Operator):
     """Snapshot the selected user Curve into the project library."""
 

@@ -6,7 +6,7 @@ bl_info = {
     "version": (0, 6, 3),
     "blender": (5, 2, 0),
     "location": "View3D > Sidebar > 日本住宅",
-    "description": "Build 06-C Stage 2: Standard and Custom Crown Profiles",
+    "description": "Build 06-C Stage 3: Profile Thumbnail UI and Final Integration",
     "category": "3D View",
 }
 
@@ -32,6 +32,7 @@ _CLASSES = (
     finish_operators.JHM_OT_regenerate_finish,
     finish_operators.JHM_OT_register_custom_profile,
     finish_operators.JHM_OT_delete_custom_profile,
+    finish_operators.JHM_OT_apply_profile_thumbnail,
     finish_operators.JHM_OT_edit_finish_profile,
     finish_operators.JHM_OT_add_finish_exclusion,
     finish_operators.JHM_OT_edit_finish_exclusion,
@@ -72,6 +73,9 @@ def register():
 def unregister():
     """Remove every property and class owned by this add-on."""
     import bpy
+
+    from .finish_preview_images import clear_preview_cache
+    clear_preview_cache()
 
     del bpy.types.Object.jhm_finish
     del bpy.types.Object.jhm_wall
