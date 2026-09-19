@@ -80,6 +80,18 @@ class JHM_PT_house_modeler(bpy.types.Panel):
         if context.scene.jhm_finish_regeneration_required:
             new_wall_box.label(text="仕上げ形状は参照高さに対して未更新です", icon="ERROR")
 
+        stair_defaults = context.scene.jhm_new_stair_defaults
+        new_stair_box = layout.box()
+        new_stair_box.label(text="新規階段")
+        new_stair_box.prop(stair_defaults, "base_z_mm", text="下端基準高さ (mm)")
+        new_stair_box.prop(stair_defaults, "floor_to_floor_mm", text="階高 (mm)")
+        new_stair_box.prop(stair_defaults, "riser_count", text="蹴上数")
+        new_stair_box.prop(stair_defaults, "stair_width_mm", text="階段幅 (mm)")
+        new_stair_box.prop(stair_defaults, "tread_thickness_mm", text="踏板厚 (mm)")
+        new_stair_box.prop(stair_defaults, "riser_thickness_mm", text="蹴込み板厚 (mm)")
+        new_stair_box.prop(stair_defaults, "ascent_direction", text="上り方向")
+        new_stair_box.operator("jhm.create_stair", text="階段を作成", icon="ADD")
+
         profile_box = layout.box()
         profile_box.label(text="Project Custom Profile Library")
         profile_box.label(text="2D / 閉じた1 spline / POLY・BEZIER")
@@ -103,7 +115,24 @@ class JHM_PT_house_modeler(bpy.types.Panel):
         layout.separator()
         selected_box = layout.box()
         active_object = context.active_object
-        if active_object and active_object.jhm_wall.is_wall:
+        if (active_object and
+                getattr(getattr(active_object, "jhm_stair", None), "is_stair", False)):
+            stair = active_object.jhm_stair
+            selected_box.label(text="選択中の階段")
+            selected_box.label(text="種類: STAIR")
+            selected_box.label(text=f"Stair ID: {stair.stair_id}")
+            selected_box.label(text=f"Path点数: {len(stair.path_points)}")
+            for index, point in enumerate(stair.path_points):
+                selected_box.label(
+                    text=f"P{index}: ({point.xy[0]:.4f}, {point.xy[1]:.4f}) m")
+            selected_box.label(text=f"上り方向: {stair.ascent_direction}")
+            selected_box.label(text=f"下端基準高さ: {stair.base_z_mm:.1f} mm")
+            selected_box.label(text=f"階高: {stair.floor_to_floor_mm:.1f} mm")
+            selected_box.label(text=f"蹴上数: {stair.riser_count}")
+            selected_box.label(text=f"階段幅: {stair.stair_width_mm:.1f} mm")
+            selected_box.label(text=f"踏板厚: {stair.tread_thickness_mm:.1f} mm")
+            selected_box.label(text=f"蹴込み板厚: {stair.riser_thickness_mm:.1f} mm")
+        elif active_object and active_object.jhm_wall.is_wall:
             selected_box.label(text="選択中の壁")
             wall = active_object.jhm_wall
             selected_box.label(text=f"壁厚: {wall.wall_thickness:.1f} mm")
