@@ -637,6 +637,53 @@ floor_to_floor
 
 Floor参照は後付け可能なdependencyであり、Stair Coreの必須前提にしない。
 
+### Upper arrival / future Floor connection contract
+
+上階Floorと接続する場合、**上階Floorの仕上げ床面そのものをStairの最後の到達面として扱う**。
+
+例：
+
+```text
+riser_count = 16
+independent_tread_count = 15
+
+15枚目の独立踏板
+↓
+16回目の蹴上
+↓
+上階Floor仕上げ面 = 16段目の到達面
+```
+
+したがって、上階Floorを「17段目」として追加で数えない。
+
+07-Aでは上階Floor自体を生成しないが、Stairは将来接続用の **upper arrival interface** を持てるcanonical contractとする。
+
+少なくとも概念上、
+
+```text
+upper_arrival_z
+upper_arrival_plan_position
+upper_arrival_width
+```
+
+を導出可能にしておく。
+
+将来08のFloor Systemと接続した場合は、
+
+```text
+Stair upper_arrival_z
+==
+Upper Floor finished top surface Z
+```
+
+を基本契約とする。
+
+住宅階段では、上階Floorの階段開口端にも最終段の段鼻に相当する縁・見切りが付く場合がある。
+この **upper-floor edge nosing / trim** は、独立踏板のnosingとは別の接続ディテールとして扱う。
+
+07-AではFloor edge nosing自体は生成しない。
+将来のFloor–Stair connectionで、上階Floor端部へ段鼻相当の納まりを追加できる余地を残す。
+
 ## 12.3 Path contract
 
 Stair pathはcanonical dataとして保持する。
@@ -655,7 +702,26 @@ path_points
 
 > 07-Aを `start + end` 専用の別データモデルとして作らず、最初からPathの2点版として扱う。
 
-START → END方向を基本の上り方向とする。
+PathのSTART / ENDは**クリックした描画順**を表し、高さ方向とは分離する。
+
+```text
+P0 / START = first clicked point
+P1 / END   = second clicked point
+
+ascent_direction = FORWARD  -> P0からP1へ上る
+ascent_direction = REVERSE  -> P1からP0へ上る
+```
+
+07-Aのcreation defaultは `FORWARD` としてよいが、上り方向を反転できるcanonical contractを持つ。
+
+これにより将来のFloor接続はSTART / END名ではなく、
+
+```text
+lower arrival side
+upper arrival side
+```
+
+へ結び付けられる。
 
 線の意味、線長の測定基準、最初の蹴上位置、最終到達位置は07-A Specificationで明文化する。
 
@@ -746,8 +812,8 @@ Managed状態の生成部材を直接編集した結果をcanonical Stairへ逆�
 - Stair canonical dataを確立する。
 - Top Viewの2点指定でStraight Stairを作成する。
 - Wall / FloorなしでStair単体を生成する。
-- START → ENDを上り方向として確定する。
-- floor-to-floor / riser / tread contractを確定する。
+- Pathの描画順と上り方向を分離し、`ascent_direction` contractを確定する。
+- floor-to-floor / riser / tread / upper-arrival contractを確定する。
 - 後続Multi-point Pathへ拡張可能なCoreを作る。
 
 基本対象：
