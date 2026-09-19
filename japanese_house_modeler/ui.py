@@ -12,6 +12,7 @@ from .finish_geometry import canonical_visible_range_state, diagnose_finish
 from .finish_state import status_label
 from .finish_profile_previews import browser_items, stable_profile_identity
 from .finish_preview_images import cached_preview_icon, request_preview_build
+from .stair_geometry import resolve_stair_layout
 
 
 def _draw_profile_browser(layout, context, finish=None):
@@ -132,6 +133,27 @@ class JHM_PT_house_modeler(bpy.types.Panel):
             selected_box.label(text=f"階段幅: {stair.stair_width_mm:.1f} mm")
             selected_box.label(text=f"踏板厚: {stair.tread_thickness_mm:.1f} mm")
             selected_box.label(text=f"蹴込み板厚: {stair.riser_thickness_mm:.1f} mm")
+            try:
+                derived = resolve_stair_layout(
+                    tuple(tuple(point.xy) for point in stair.path_points),
+                    stair.ascent_direction, stair.base_z_mm,
+                    stair.floor_to_floor_mm, stair.riser_count,
+                    stair.stair_width_mm, stair.tread_thickness_mm,
+                    stair.riser_thickness_mm)
+            except (AttributeError, TypeError, ValueError):
+                selected_box.label(text="導出値: 解決不能", icon="ERROR")
+            else:
+                selected_box.separator()
+                selected_box.label(
+                    text=f"上端到達高さ: {derived.upper_arrival_z_mm:.1f} mm")
+                selected_box.label(
+                    text=f"実蹴上: {derived.actual_riser_mm:.1f} mm")
+                selected_box.label(
+                    text=f"独立踏板枚数: {derived.independent_tread_count}")
+                selected_box.label(
+                    text=f"水平長: {derived.run_length_mm:.1f} mm")
+                selected_box.label(
+                    text=f"踏面ピッチ: {derived.going_mm:.1f} mm")
         elif active_object and active_object.jhm_wall.is_wall:
             selected_box.label(text="選択中の壁")
             wall = active_object.jhm_wall

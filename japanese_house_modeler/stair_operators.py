@@ -1,4 +1,4 @@
-"""Build 07-A Stage 1 two-point Stair creation operator."""
+"""Build 07-A two-point Stair creation and Stage 2 mesh commit."""
 
 import math
 
@@ -9,7 +9,9 @@ from bpy_extras import view3d_utils
 from gpu_extras.batch import batch_for_shader
 from mathutils import Vector
 
-from .stair_geometry import canonical_path, generate_stair_id
+from .stair_geometry import (
+    canonical_path, generate_stair_id, prepare_stair_geometry,
+)
 
 
 _PLANE_EPSILON = 1.0e-10
@@ -20,7 +22,7 @@ _STAIR_DEFAULT_NAMES = (
 
 
 class JHM_OT_create_stair(bpy.types.Operator):
-    """Commit one empty managed Mesh only after two valid plan clicks."""
+    """Commit one visible managed Mesh only after two valid plan clicks."""
 
     bl_idname = "jhm.create_stair"
     bl_label = "階段を作成"
@@ -73,10 +75,20 @@ class JHM_OT_create_stair(bpy.types.Operator):
                     return {"RUNNING_MODAL"}
                 try:
                     path = canonical_path((self._start_point, point))
+                    _layout, _fragments, mesh_data = prepare_stair_geometry(
+                        path,
+                        self._stair_defaults["ascent_direction"],
+                        self._stair_defaults["base_z_mm"],
+                        self._stair_defaults["floor_to_floor_mm"],
+                        self._stair_defaults["riser_count"],
+                        self._stair_defaults["stair_width_mm"],
+                        self._stair_defaults["tread_thickness_mm"],
+                        self._stair_defaults["riser_thickness_mm"],
+                    )
                 except ValueError as exc:
                     self.report({"WARNING"}, str(exc))
                     return {"RUNNING_MODAL"}
-                return self._commit(context, path)
+                return self._commit(context, path, mesh_data)
             return {"RUNNING_MODAL"}
         except Exception:
             self._finish({"CANCELLED"})
@@ -101,12 +113,16 @@ class JHM_OT_create_stair(bpy.types.Operator):
             return None, "基準平面との交点が数値的に不安定です。"
         return Vector((point.x, point.y, self._base_z_m)), None
 
-    def _commit(self, context, path):
+    def _commit(self, context, path, mesh_data):
         """The sole Scene-mutating path: create exactly one Mesh Object."""
+        previous_selected = tuple(context.selected_objects)
+        previous_active = context.view_layer.objects.active
         mesh = None
         stair_object = None
         try:
             mesh = bpy.data.meshes.new("JHM Stair")
+            mesh.from_pydata(mesh_data.vertices, (), mesh_data.faces)
+            mesh.update()
             stair_object = bpy.data.objects.new("JHM Stair", mesh)
             context.collection.objects.link(stair_object)
             stair_object.location = (0.0, 0.0, 0.0)
@@ -124,12 +140,38 @@ class JHM_OT_create_stair(bpy.types.Operator):
             stair_object.select_set(True)
             context.view_layer.objects.active = stair_object
         except Exception:
-            if stair_object is not None:
-                bpy.data.objects.remove(stair_object, do_unlink=True)
-            if mesh is not None and mesh.users == 0:
-                bpy.data.meshes.remove(mesh)
+            try:
+                if stair_object is not None:
+                    bpy.data.objects.remove(stair_object, do_unlink=True)
+                if mesh is not None and mesh.users == 0:
+                    bpy.data.meshes.remove(mesh)
+            finally:
+                self._restore_selection(
+                    context, previous_selected, previous_active)
             raise
         return self._finish({"FINISHED"})
+
+    @staticmethod
+    def _restore_selection(context, previous_selected, previous_active):
+        """Best-effort rollback without masking the original commit failure."""
+        try:
+            current_selected = tuple(context.selected_objects)
+        except (AttributeError, ReferenceError, RuntimeError, TypeError):
+            current_selected = ()
+        for selected in current_selected:
+            try:
+                selected.select_set(False)
+            except (AttributeError, ReferenceError, RuntimeError, TypeError):
+                pass
+        for selected in previous_selected:
+            try:
+                selected.select_set(True)
+            except (AttributeError, ReferenceError, RuntimeError, TypeError):
+                pass
+        try:
+            context.view_layer.objects.active = previous_active
+        except (AttributeError, ReferenceError, RuntimeError, TypeError):
+            pass
 
     def _draw_preview(self):
         try:
