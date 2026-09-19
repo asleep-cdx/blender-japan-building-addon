@@ -797,11 +797,18 @@ Part generators
 
 直線住宅階段Meshを一体で直接生成し、そのMesh形状を後続Buildで解析・再利用する設計にしない。
 
-## 12.7 Managed Stair != one Mesh
+## 12.7 Managed Stairの管理単位とMesh構成は分離する
 
-ユーザーから見た管理単位は1 Stairとするが、derived geometryは必要に応じて部材単位または部材カテゴリ単位に分けてよい。
+ユーザーから見た管理単位は1 Stairとする。
 
-Managed状態の生成部材を直接編集した結果をcanonical Stairへ逆推定しない。
+これは「必ず1 Mesh」または「必ず複数Mesh」を意味しない。
+各BuildのSpecificationで、管理上最も安全なMesh構成を選択できる。
+
+Build 07-Aでは、既存JHM architectureとの整合とlifecycle単純化のため、**1 Managed Stair = 1 Managed Mesh Object** を採用する。
+
+ただし、Tread / Riser / Underside / Side Board等のPart Generator責務は分離し、将来必要になった場合にcanonical Stair modelを壊さずMesh構成を拡張できること。
+
+Managed状態の生成geometryを直接編集した結果をcanonical Stairへ逆推定しない。
 
 最終的に通常Blender Meshへ確定する出口を持つ。
 
