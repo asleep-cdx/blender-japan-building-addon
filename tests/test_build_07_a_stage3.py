@@ -144,6 +144,11 @@ class DiagnosisTests(unittest.TestCase):
             with self.subTest(changes=changes):
                 self.assertIn(GEOMETRY_MISSING, diagnose_stair(state(**changes)))
 
+    def test_valid_canonical_non_mesh_state_is_repairable(self):
+        issues = diagnose_stair(state(object_type="CURVE"))
+        self.assertEqual(issues, (GEOMETRY_MISSING,))
+        self.assertTrue(operation_allowed("REPAIR", issues))
+
 
 class PolicyTests(unittest.TestCase):
     def test_normal_only_operations(self):
@@ -187,17 +192,46 @@ class TransactionStructureTests(unittest.TestCase):
 
     def test_rollback_restores_all_snapshots_and_removes_replacement(self):
         source = ast.unparse(self.function("_transactional_update"))
-        for fragment in ("stair_object.data = old_mesh",
+        for fragment in ("setattr(stair_object, 'data', old_data)",
                          "_set_canonical(stair, old_canonical)",
-                         "stair.stair_id = old_id", "old_transform",
-                         "bpy.data.meshes.remove(replacement)"):
+                         "setattr(stair, 'stair_id', old_id)", "old_transform",
+                         "_cleanup_unused_data(replacement)"):
             self.assertIn(fragment, source)
 
     def test_material_slots_are_transferred_before_swap(self):
         source = ast.unparse(self.function("_transactional_update"))
-        self.assertIn("for material in old_mesh.materials", source)
+        self.assertIn("getattr(old_data, 'materials', ())", source)
+        self.assertIn("for material in materials", source)
         self.assertLess(source.index("replacement.materials.append(material)"),
                         source.index("stair_object.data = replacement"))
+
+    def test_non_mesh_old_data_is_not_treated_as_a_mesh(self):
+        transaction = ast.unparse(self.function("_transactional_update"))
+        cleanup = ast.unparse(self.function("_cleanup_unused_data"))
+        self.assertIn("old_data = stair_object.data", transaction)
+        self.assertNotIn("old_mesh", transaction)
+        self.assertIn("isinstance(data, bpy.types.Mesh)", cleanup)
+        self.assertNotIn("bpy.data.meshes.remove(old_data)", self.source)
+
+    def test_post_commit_cleanup_is_best_effort(self):
+        transaction = ast.unparse(self.function("_transactional_update"))
+        helper = ast.unparse(self.function("_cleanup_unused_data"))
+        best_effort = ast.unparse(self.function("_best_effort"))
+        self.assertTrue(transaction.rstrip().endswith("_cleanup_unused_data(old_data)"))
+        self.assertIn("_best_effort(remove_if_unused)", helper)
+        self.assertIn("except Exception", best_effort)
+
+    def test_rollback_cleanup_preserves_original_exception(self):
+        transaction = ast.unparse(self.function("_transactional_update"))
+        cleanup_index = transaction.index("_cleanup_unused_data(replacement)")
+        self.assertEqual(transaction[cleanup_index:].count("raise"), 1)
+        self.assertIn("_best_effort(lambda", transaction)
+
+    def test_operator_converts_rna_failures_to_cancelled_warning(self):
+        runner = ast.unparse(self.function("_run_candidate"))
+        self.assertIn("except Exception as exc", runner)
+        self.assertIn("self.report({'WARNING'}, str(exc))", runner)
+        self.assertIn("{'CANCELLED'}", runner)
 
     def test_all_stage3_operators_share_transaction_core_and_undo(self):
         for class_name in ("JHM_OT_edit_stair_dimensions", "JHM_OT_edit_stair_path",

@@ -82,11 +82,31 @@ def _prepare_candidate(values):
         values["riser_thickness_mm"])[2]
 
 
+def _best_effort(action):
+    """Run rollback/cleanup work without replacing a transaction exception."""
+    try:
+        action()
+    except Exception:
+        pass
+
+
+def _cleanup_unused_data(data):
+    """Best-effort cleanup; never assume an arbitrary Object.data is a Mesh."""
+    if data is None:
+        return
+
+    def remove_if_unused():
+        if data.users == 0 and isinstance(data, bpy.types.Mesh):
+            bpy.data.meshes.remove(data)
+
+    _best_effort(remove_if_unused)
+
+
 def _transactional_update(stair_object, candidate, *, new_stair_id=None,
                           reset_transform=False):
     """Build replacement first, then atomically swap and roll back commit errors."""
     mesh_data = _prepare_candidate(candidate)
-    old_mesh = stair_object.data
+    old_data = stair_object.data
     stair = stair_object.jhm_stair
     old_canonical = _canonical_snapshot(stair)
     old_id = stair.stair_id
@@ -95,14 +115,15 @@ def _transactional_update(stair_object, candidate, *, new_stair_id=None,
     replacement = None
     swapped = False
     try:
-        base_name = old_mesh.name if old_mesh else stair_object.name
+        base_name = old_data.name if old_data else stair_object.name
         replacement = bpy.data.meshes.new(f"{base_name} Update")
         replacement.from_pydata(mesh_data.vertices, (), mesh_data.faces)
         replacement.update()
         if not replacement.vertices or not replacement.polygons:
             raise ValueError("replacement Stair Meshが空です。")
-        if old_mesh is not None:
-            for material in old_mesh.materials:
+        materials = getattr(old_data, "materials", ())
+        if materials is not None:
+            for material in materials:
                 replacement.materials.append(material)
         stair_object.data = replacement
         swapped = True
@@ -115,17 +136,18 @@ def _transactional_update(stair_object, candidate, *, new_stair_id=None,
             stair_object.scale = (1.0, 1.0, 1.0)
     except Exception:
         if swapped:
-            stair_object.data = old_mesh
-            _set_canonical(stair, old_canonical)
-            stair.stair_id = old_id
-            stair_object.location = old_transform[0]
-            stair_object.rotation_euler = old_transform[1]
-            stair_object.scale = old_transform[2]
-        if replacement is not None and replacement.users == 0:
-            bpy.data.meshes.remove(replacement)
+            _best_effort(lambda: setattr(stair_object, "data", old_data))
+            _best_effort(lambda: _set_canonical(stair, old_canonical))
+            _best_effort(lambda: setattr(stair, "stair_id", old_id))
+            _best_effort(lambda: setattr(stair_object, "location", old_transform[0]))
+            _best_effort(
+                lambda: setattr(stair_object, "rotation_euler", old_transform[1]))
+            _best_effort(lambda: setattr(stair_object, "scale", old_transform[2]))
+        _cleanup_unused_data(replacement)
         raise
-    if old_mesh is not None and old_mesh.users == 0:
-        bpy.data.meshes.remove(old_mesh)
+    # The transaction is already committed.  Orphan cleanup must not turn a
+    # successful edit/Repair into a failure without rollback.
+    _cleanup_unused_data(old_data)
 
 
 class _StairOperationMixin:
@@ -149,7 +171,7 @@ class _StairOperationMixin:
             return {"CANCELLED"}
         try:
             _transactional_update(obj, candidate, **kwargs)
-        except (TypeError, ValueError, OverflowError, RuntimeError) as exc:
+        except Exception as exc:
             self.report({"WARNING"}, str(exc))
             return {"CANCELLED"}
         return {"FINISHED"}
