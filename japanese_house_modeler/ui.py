@@ -13,6 +13,8 @@ from .finish_state import status_label
 from .finish_profile_previews import browser_items, stable_profile_identity
 from .finish_preview_images import cached_preview_icon, request_preview_build
 from .stair_geometry import resolve_stair_layout
+from .stair_operators import stair_issues
+from .stair_state import operation_allowed, state_label
 
 
 def _draw_profile_browser(layout, context, finish=None):
@@ -121,6 +123,8 @@ class JHM_PT_house_modeler(bpy.types.Panel):
             stair = active_object.jhm_stair
             selected_box.label(text="選択中の階段")
             selected_box.label(text="種類: STAIR")
+            issues = stair_issues(active_object, context.scene)
+            selected_box.label(text=f"管理状態: {state_label(issues)}")
             selected_box.label(text=f"Stair ID: {stair.stair_id}")
             selected_box.label(text=f"Path点数: {len(stair.path_points)}")
             for index, point in enumerate(stair.path_points):
@@ -154,6 +158,16 @@ class JHM_PT_house_modeler(bpy.types.Panel):
                     text=f"水平長: {derived.run_length_mm:.1f} mm")
                 selected_box.label(
                     text=f"踏面ピッチ: {derived.going_mm:.1f} mm")
+            selected_box.separator()
+            normal_actions = selected_box.column()
+            normal_actions.enabled = operation_allowed("EDIT_DIMENSIONS", issues)
+            normal_actions.operator("jhm.edit_stair_dimensions", text="階段寸法を変更")
+            normal_actions.operator("jhm.edit_stair_path", text="Path座標を変更")
+            normal_actions.operator("jhm.reverse_stair_ascent", text="上り方向を反転")
+            normal_actions.operator("jhm.regenerate_stair", text="階段を再生成")
+            repair = selected_box.row()
+            repair.enabled = operation_allowed("REPAIR", issues)
+            repair.operator("jhm.repair_stair", text="管理状態へ復元")
         elif active_object and active_object.jhm_wall.is_wall:
             selected_box.label(text="選択中の壁")
             wall = active_object.jhm_wall
