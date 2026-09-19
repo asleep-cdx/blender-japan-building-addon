@@ -493,8 +493,34 @@ FORWARD / REVERSEを変更しても距離は変わらない。
 
 run_lengthはPathから導出されるため、07-A UIではread-onlyとする。
 
-run_lengthを変更したい場合の専用Path edit UIは07-A必須範囲に含めない。
-必要ならStairを作り直す。
+ただし07-A Stage 3では、**P0 / P1のXY座標を数値編集できるPath edit operator** を提供する。
+
+```text
+jhm.edit_stair_path
+```
+
+UI入力はmm、canonical保存はworld-space metresとする。
+
+編集項目：
+
+```text
+P0 X
+P0 Y
+P1 X
+P1 Y
+```
+
+これによりManaged状態のまま、
+
+- Stair全体のplan位置変更
+- 水平長変更
+- plan角度変更
+
+を行える。
+
+Path editはtransactionalに行い、zero-length / invalid Pathの場合は既存canonical / Meshを変更しない。
+
+07-AではマウスでP0/P1を掴んで移動する高度なendpoint edit operatorは必須にしない。
 
 ---
 
@@ -559,6 +585,8 @@ REVERSE -> P0
 
 upper arrival lineはそのplan positionを通り、Stair width全体に渡る線として概念化する。
 
+**upper arrival lineは最終Riserの基準線であり、将来の段鼻 / 見切りの突出先端ではない。**
+
 将来Floor Systemと接続した場合、
 
 ```text
@@ -568,6 +596,17 @@ Upper Floor finished top surface Z
 ```
 
 とする。
+
+将来nosing / trimが追加されても、その突出量によって、
+
+- Path length
+- going
+- riser_count
+- upper arrival line
+
+を暗黙変更しない。
+
+したがって、canonical `run_length` とgenerated Meshのplan外寸は一致しない場合がある。
 
 ---
 
@@ -724,32 +763,68 @@ Treadはtop elevationから下向きに `tread_thickness` を持つclosed rectan
 # 29. Basic Riser-board geometry
 
 ```text
-k = 1 .. riser_count
+h = actual_riser
+t = tread_thickness
+N = riser_count
 ```
 
-Riser基準位置:
+Riser基準位置：
 
 ```text
+k = 1 .. N - 1
 X(k) = (k - 1) * going
+
+k = N
+X(N) = run_length
 ```
-
-ただし最終Riser:
-
-```text
-X(riser_count) = run_length
-```
-
-となる。
 
 各Riserはfull Stair widthを持つ。
 
-Riser-board thicknessは上り方向側へ配置することを基本とする。
+Riser-board thicknessはRiser基準線から**上り方向側**へ配置することを基本とする。
 
-07-AではTreadとRiserのvisible exteriorに意図しないgapが生じないこと。
+通常Riser `k = 1 .. N - 1` のvertical interval：
+
+```text
+Z_bottom(k)
+=
+base_z + (k - 1) * h
+
+Z_top(k)
+=
+base_z + k * h - t
+```
+
+これにより、通常Riser上端は次のTread裏面へ接続する。
+
+最終Riser `k = N` のvertical interval：
+
+```text
+Z_bottom(N)
+=
+base_z + (N - 1) * h
+
+Z_top(N)
+=
+base_z + N * h
+=
+upper_arrival_z
+```
+
+07-Aでは各Tread / Riserをclosed solid fragmentとして生成してよい。
+
+**内部で接触する独立solid同士の一致面は許容する。**
+07-Aで階段全体をBoolean unionして1つの連続shellへすることは要求しない。
+
+ただし、
+
+- exteriorに露出する不要なcoplanar duplicate surface
+- 意図しないvisible gap
+- zero-area face
+- non-finite geometry
+
+は許容しない。
 
 内部部材の施工ディテールを厳密再現する必要はない。
-
-同位置への不要なcoplanar duplicate faceは避ける。
 
 ---
 
@@ -765,7 +840,14 @@ upper_arrival_z
 
 へ到達する。
 
-将来Floorが接続された場合、そのFloor edge / trimが最終Riser上部と視覚的に納まる設計へ拡張する。
+最終Riserの基準線は `upper arrival line` と一致する。
+
+Riser-board thicknessを上り方向側へ持たせるため、**最終RiserのMeshはcanonical run_lengthを厚み分だけ越える場合がある。**
+
+これはPath / goingの誤差ではない。
+
+将来Floorが接続された場合、その上り方向側の厚みをFloor edge / trim / framingとの接続詳細で処理する。
+その具体的な重なり・見切り・Floor厚との関係は08側のFloor–Stair connection specificationで決定する。
 
 ---
 
@@ -944,6 +1026,7 @@ operators:
 
 ```text
 階段寸法を変更
+Path座標を変更
 上り方向を反転
 階段を再生成
 管理状態へ復元
@@ -966,9 +1049,32 @@ operators:
 - tread_thickness_mm
 - riser_thickness_mm
 
-07-AではPath Point位置をnumeric dialogから編集する必要はない。
-
 変更はtransactionalに行う。
+
+### Path coordinate edit
+
+`jhm.edit_stair_path` をStage 3で用意する。
+
+編集可能：
+
+- P0 X / Y
+- P1 X / Y
+
+UI単位はmm。
+
+これによりObject Transformを使用せず、Managed状態のままplan位置・水平長・plan角度を変更できる。
+
+Path edit後は、
+
+- run_length
+- going
+- resolved lower / upper
+- upper arrival plan position
+- Tread / Riser geometry
+
+を再導出・再生成する。
+
+invalid Pathの場合はcanonical / Meshともにrollbackする。
 
 ---
 
@@ -1050,7 +1156,7 @@ partial geometryをcommitしない。
 
 ---
 
-# 43. Managed-state diagnosis
+# 43. Managed-state diagnosis and operation policy
 
 pureまたはtestable helperでManaged Stairの問題を診断できること。
 
@@ -1077,6 +1183,31 @@ GEOMETRY_MISSING
 
 正確な内部enum名は実装に任せる。
 
+### Operation policy
+
+`NORMAL` 以外のManaged Stairでは、通常の変更operatorを原則拒否する。
+
+通常操作：
+
+- dimension edit
+- Path edit
+- ascent reversal
+- explicit regeneration
+- Editable Mesh finalization
+
+は `NORMAL` 状態のみ許可する。
+
+例外：
+
+- Repairはrecoverable abnormal stateで許可
+- Deleteはabnormal stateでも許可
+
+`INVALID_CANONICAL` をRepairが推測で補正してはならない。
+
+`GEOMETRY_MISSING` はcanonicalが有効ならRepair対象にできる。
+
+`ID_CONFLICT` / `TRANSFORM_CHANGED` は明示Repair後に通常操作へ戻る。
+
 ---
 
 # 44. Repair
@@ -1090,7 +1221,46 @@ canonical dataが有効なら、
 
 できること。
 
-duplicate IDの場合は、選択中Stairへ新UUIDを明示的に発行するrepair pathを持ってよい。
+### Transform repair semantics
+
+`TRANSFORM_CHANGED` のRepairは、**手動Transform後の見た目位置をcanonical Pathへ取り込まない。**
+
+保存済みcanonical Path / dimensionsを正として再生成し、Object Transformをidentityへ戻す。
+
+したがって手動移動は失われ、Stairは保存済みPath位置へ戻る。
+
+plan位置を変更したい場合は `jhm.edit_stair_path` を使用する。
+
+### ID conflict repair
+
+duplicate IDの場合は、選択中Stairへ新UUIDを明示的に発行できる。
+
+ただしUUID変更とgeometry repairはtransactionalにcommitする。
+
+### Repair transaction
+
+Repairは、
+
+```text
+validate canonical
+↓
+prepare repaired geometry
+↓
+prepare new UUID if required
+↓
+commit transform / ID / Mesh together
+```
+
+とする。
+
+prepare失敗時は、
+
+- Transform
+- stair_id
+- canonical data
+- Mesh
+
+のいずれも途中変更しない。
 
 invalid canonical valueを推測で書き換えない。
 
@@ -1112,14 +1282,18 @@ invalid canonical valueを推測で書き換えない。
 
 07-A Stairは既にMesh Objectであるため、Curve-to-Mesh変換は不要。
 
-`jhm.convert_stair_mesh` は、
+`jhm.convert_stair_mesh` は **NORMAL stateのみ** 実行可能とする。
+
+`ID_CONFLICT`、`TRANSFORM_CHANGED`、`INVALID_CANONICAL`、`GEOMETRY_MISSING` 等のabnormal stateでは、まずRepairまたは原因解消を要求する。
+
+正常状態でのfinalizationは、
 
 - current managed geometryを保持
 - `is_stair = False`
 - JHM managed regeneration対象から除外
-- Object Transformを現状のidentityのまま保持
+- Object Transform = identityを保持
 - visible Material / geometryを保持
--通常Blender Meshとして編集可能
+- 通常Blender Meshとして編集可能
 
 とする。
 
@@ -1127,15 +1301,44 @@ canonical property値がObject data内に残っていても、`is_stair=False` �
 
 UndoでManaged Stairへ戻せること。
 
+07-Aでは、複数のclosed Tread / Riser solid fragmentsが1 Mesh Object内に存在することを許容する。
+階段全体を1つのBoolean-unioned manifold shellへ変換することは要求しない。
+
 ---
 
-# 47. Material contract in 07-A
+# 47. Material / UV / Modifier contract in 07-A
 
 07-AではPart-specific Material UIは必須ではない。
 
-ただし既存ObjectにMaterialが割り当てられている場合、dimension regeneration / ascent reversalで不必要に消失させないことを推奨する。
+### Guaranteed
 
-正式なTread / Riser別Material assignmentは07-Bで定義する。
+Managed Stair Objectに**単一Material**が割り当てられている場合、そのMaterial slotは、
+
+- dimension regeneration
+- Path edit
+- ascent reversal
+- Repair
+- Editable Mesh finalization
+
+後も保持する。
+
+### Not guaranteed in 07-A
+
+以下は07-A managed contractの保証対象外：
+
+- manual per-face material assignment
+- multiple-material face mapping
+- custom UV layers
+- vertex groups
+- shape keys
+- custom normals
+- manually edited mesh attributes
+
+Modifier stackはObject上に残る場合があるが、generated Mesh topology変更後の結果互換性までは保証しない。
+
+部材別Material assignmentは07-Bで正式定義する。
+
+自由なMesh編集・UV・Modifier依存workflowへ移る場合は、Editable Meshとして確定してから行う。
 
 ---
 
@@ -1293,12 +1496,16 @@ Stage 2 goals:
 Stage 3 goals:
 
 - dimension editor
+- Path coordinate editor
 - ascent reversal
 - transactional regeneration
 - invalid-input rejection
 - geometry/canonical rollback
 - managed-state diagnosis
-- repair
+- operation policy for abnormal states
+- transactional repair
+
+Stage 3完了時点で、Stage 1〜3までに実装済みのUndo / failure rollback / state diagnosisを、その時点の範囲で確認する。
 
 ---
 
@@ -1314,6 +1521,8 @@ Stage 4 goals:
 - complete Build 07-A automated regression
 - prior Build regression
 - Blender runtime acceptance
+
+Stage 4ではStage 1〜3で確認したlifecycle / rollback項目も含め、Build 07-A全体を総合再確認する。
 
 ---
 
@@ -1386,13 +1595,21 @@ tests/test_build_07_a_stage4.py
 - edit width
 - edit tread thickness
 - edit riser thickness
+- edit P0 / P1 XY
+- path edit changes run_length / going correctly
+- path translation preserves dimensions
+- path rotation preserves run_length when expected
 - ascent reversal
 - stair_id persistence
 - invalid floor_to_floor rollback
 - invalid riser_count rollback
+- invalid Path rollback
 - invalid thickness rollback
 - prepare failure does not swap Mesh data
 - diagnose non-identity transform
+- NORMAL-only operator gate
+- repair returns transformed Stair to canonical Path
+- repair transaction leaves all state unchanged on prepare failure
 - repair from valid canonical
 
 ---
@@ -1502,7 +1719,7 @@ REVERSE
 
 ---
 
-# 65. Blender runtime acceptance — dimension edit
+# 65. Blender runtime acceptance — dimension / Path edit
 
 最低ケース：
 
@@ -1512,6 +1729,9 @@ REVERSE
 - tread thickness変更
 - riser thickness変更
 - base_z変更
+- P0 / P1 XY変更によるplan位置移動
+- P0 / P1 XY変更による水平長変更
+- P0 / P1 XY変更によるplan角度変更
 
 各変更後：
 
@@ -1521,6 +1741,8 @@ REVERSE
 - no duplicate Stair object
 - stair_id unchanged
 - transform identity
+
+正確なruntime寸法例として、Path edit dialogから3600 mm水平長を再現できることを確認する。
 
 ---
 
@@ -1570,6 +1792,12 @@ Blender完全終了。
 
 Managed Stairを「編集可能Meshとして確定」。
 
+前提：
+
+```text
+managed state = NORMAL
+```
+
 期待：
 
 - same visible geometry
@@ -1577,9 +1805,16 @@ Managed Stairを「編集可能Meshとして確定」。
 - is_stair == False
 - no automatic regeneration
 - standard Edit Mode possible
+- single assigned Material preserved
 - Undo restores managed Stair
 
-Meshはfiniteであり、各generated closed componentに異常なopen boundaryを作らないことを目標とする。
+abnormal stateではfinalizationを拒否すること。
+
+Meshはfiniteであること。
+
+各Tread / Riser fragmentはclosed solidとして成立し、外部に意図しないopen boundary / visible gapを作らないこと。
+
+複数fragment間の内部接触面は07-Aで許容し、階段全体のBoolean unionはAcceptance条件にしない。
 
 ---
 
@@ -1666,12 +1901,16 @@ Build 07-AをACCEPTEDとするには、最低限以下が成立すること。
 - Tread / Riser geometry is deterministic
 - Riser generator independence test passes
 - dimension edit works
+- Path XY edit works for position / run length / plan angle
 - invalid edit rollback works
+- abnormal-state operator policy works
+- Repair is transactional and returns transformed Stair to canonical Path
 - Object Transform remains identity
 - stair_id remains stable
 - Save / reopen works
 - Undo / Redo works
-- Editable Mesh finalization works
+- Editable Mesh finalization works only from NORMAL state
+- single Material preservation works
 - prior accepted test suite still passes
 - compileall passes
 - git diff --check passes
