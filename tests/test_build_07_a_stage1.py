@@ -100,6 +100,40 @@ class StairSourceStructureTests(unittest.TestCase):
                             'default="FORWARD"'):
             self.assertIn(declaration, self.properties_source)
 
+    def test_riser_count_canonical_minimum_is_two(self):
+        tree = ast.parse(self.properties_source)
+        classes = {node.name: node for node in tree.body
+                   if isinstance(node, ast.ClassDef)}
+        for class_name in ("JHM_NewStairDefaults", "JHM_StairProperties"):
+            assignment = next(
+                node for node in classes[class_name].body
+                if isinstance(node, ast.AnnAssign)
+                and node.target.id == "riser_count"
+            )
+            minimum = next(
+                keyword.value for keyword in assignment.annotation.keywords
+                if keyword.arg == "min"
+            )
+            self.assertEqual(ast.literal_eval(minimum), 2)
+
+    def test_modal_snapshots_defaults_and_preview_uses_ascent_direction(self):
+        self.assertIn("self._stair_defaults = {", self.operator_source)
+        self.assertIn('self._stair_defaults["ascent_direction"]',
+                      self.operator_source)
+        self.assertNotIn('blf.draw(0, "END / UP")', self.operator_source)
+        self.assertIn('blf.draw(0, "START")', self.operator_source)
+        self.assertIn('blf.draw(0, "END")', self.operator_source)
+
+    def test_preview_restores_gpu_line_and_point_state(self):
+        preview = next(node for node in ast.walk(self.operator_tree)
+                       if isinstance(node, ast.FunctionDef)
+                       and node.name == "_draw_preview")
+        finalizers = [node.finalbody for node in ast.walk(preview)
+                      if isinstance(node, ast.Try) and node.finalbody]
+        rendered = "\n".join(ast.unparse(node) for body in finalizers for node in body)
+        self.assertIn("gpu.state.line_width_set(1.0)", rendered)
+        self.assertIn("gpu.state.point_size_set(1.0)", rendered)
+
     def test_canonical_stair_property_groups_are_declared(self):
         for name in ("JHM_StairPathPoint", "JHM_NewStairDefaults",
                      "JHM_StairProperties"):
@@ -122,6 +156,20 @@ class StairSourceStructureTests(unittest.TestCase):
                  if isinstance(node, ast.Call)]
         self.assertEqual(calls.count("bpy.data.meshes.new"), 1)
         self.assertEqual(calls.count("bpy.data.objects.new"), 1)
+
+    def test_all_commit_mutations_are_inside_failure_cleanup_guard(self):
+        commit = next(node for node in ast.walk(self.operator_tree)
+                      if isinstance(node, ast.FunctionDef) and node.name == "_commit")
+        guarded = next(node for node in commit.body if isinstance(node, ast.Try))
+        guarded_source = "\n".join(ast.unparse(node) for node in guarded.body)
+        for operation in ("bpy.data.meshes.new", "bpy.data.objects.new",
+                          "context.collection.objects.link", "selected.select_set",
+                          "stair_object.select_set",
+                          "context.view_layer.objects.active"):
+            self.assertIn(operation, guarded_source)
+        cleanup_source = "\n".join(ast.unparse(node) for node in guarded.handlers)
+        self.assertIn("bpy.data.objects.remove", cleanup_source)
+        self.assertIn("bpy.data.meshes.remove", cleanup_source)
 
     def test_commit_sets_identity_transform(self):
         self.assertIn("stair_object.location = (0.0, 0.0, 0.0)", self.operator_source)

@@ -34,7 +34,7 @@ class JHM_NewStairDefaults(bpy.types.PropertyGroup):
     base_z_mm: bpy.props.FloatProperty(name="下端基準高さ", default=0.0, precision=1)
     floor_to_floor_mm: bpy.props.FloatProperty(
         name="階高", default=2800.0, min=0.1, max=100000.0, precision=1)
-    riser_count: bpy.props.IntProperty(name="蹴上数", default=16, min=1, max=10000)
+    riser_count: bpy.props.IntProperty(name="蹴上数", default=16, min=2, max=10000)
     stair_width_mm: bpy.props.FloatProperty(
         name="階段幅", default=900.0, min=0.1, max=100000.0, precision=1)
     tread_thickness_mm: bpy.props.FloatProperty(
@@ -55,7 +55,7 @@ class JHM_StairProperties(bpy.types.PropertyGroup):
         name="上り方向", items=_ASCENT_DIRECTION_ITEMS, default="FORWARD")
     base_z_mm: bpy.props.FloatProperty(name="下端基準高さ", default=0.0)
     floor_to_floor_mm: bpy.props.FloatProperty(name="階高", default=2800.0, min=0.1)
-    riser_count: bpy.props.IntProperty(name="蹴上数", default=16, min=1)
+    riser_count: bpy.props.IntProperty(name="蹴上数", default=16, min=2)
     stair_width_mm: bpy.props.FloatProperty(name="階段幅", default=900.0, min=0.1)
     tread_thickness_mm: bpy.props.FloatProperty(name="踏板厚", default=30.0, min=0.1)
     riser_thickness_mm: bpy.props.FloatProperty(name="蹴込み板厚", default=12.0, min=0.1)

@@ -13,6 +13,10 @@ from .stair_geometry import canonical_path, generate_stair_id
 
 
 _PLANE_EPSILON = 1.0e-10
+_STAIR_DEFAULT_NAMES = (
+    "ascent_direction", "base_z_mm", "floor_to_floor_mm", "riser_count",
+    "stair_width_mm", "tread_thickness_mm", "riser_thickness_mm",
+)
 
 
 class JHM_OT_create_stair(bpy.types.Operator):
@@ -35,7 +39,12 @@ class JHM_OT_create_stair(bpy.types.Operator):
             self.report({"ERROR"}, "3D Viewportの表示領域を取得できません。")
             return {"CANCELLED"}
         defaults = context.scene.jhm_new_stair_defaults
-        self._base_z_m = defaults.base_z_mm / 1000.0
+        # One modal operation is deterministic even if sidebar defaults are
+        # edited before its second click.
+        self._stair_defaults = {
+            name: getattr(defaults, name) for name in _STAIR_DEFAULT_NAMES
+        }
+        self._base_z_m = self._stair_defaults["base_z_mm"] / 1000.0
         self._start_point = None
         self._candidate = None
         self._draw_handle = bpy.types.SpaceView3D.draw_handler_add(
@@ -94,10 +103,11 @@ class JHM_OT_create_stair(bpy.types.Operator):
 
     def _commit(self, context, path):
         """The sole Scene-mutating path: create exactly one Mesh Object."""
-        defaults = context.scene.jhm_new_stair_defaults
-        mesh = bpy.data.meshes.new("JHM Stair")
-        stair_object = bpy.data.objects.new("JHM Stair", mesh)
+        mesh = None
+        stair_object = None
         try:
+            mesh = bpy.data.meshes.new("JHM Stair")
+            stair_object = bpy.data.objects.new("JHM Stair", mesh)
             context.collection.objects.link(stair_object)
             stair_object.location = (0.0, 0.0, 0.0)
             stair_object.rotation_euler = (0.0, 0.0, 0.0)
@@ -107,19 +117,18 @@ class JHM_OT_create_stair(bpy.types.Operator):
             stair.stair_id = generate_stair_id()
             for x, y in path:
                 stair.path_points.add().xy = (x, y)
-            for name in ("ascent_direction", "base_z_mm", "floor_to_floor_mm",
-                         "riser_count", "stair_width_mm", "tread_thickness_mm",
-                         "riser_thickness_mm"):
-                setattr(stair, name, getattr(defaults, name))
+            for name, value in self._stair_defaults.items():
+                setattr(stair, name, value)
+            for selected in context.selected_objects:
+                selected.select_set(False)
+            stair_object.select_set(True)
+            context.view_layer.objects.active = stair_object
         except Exception:
-            bpy.data.objects.remove(stair_object, do_unlink=True)
-            if mesh.users == 0:
+            if stair_object is not None:
+                bpy.data.objects.remove(stair_object, do_unlink=True)
+            if mesh is not None and mesh.users == 0:
                 bpy.data.meshes.remove(mesh)
             raise
-        for selected in context.selected_objects:
-            selected.select_set(False)
-        stair_object.select_set(True)
-        context.view_layer.objects.active = stair_object
         return self._finish({"FINISHED"})
 
     def _draw_preview(self):
@@ -134,12 +143,17 @@ class JHM_OT_create_stair(bpy.types.Operator):
                 return
             shader = gpu.shader.from_builtin("UNIFORM_COLOR")
             shader.bind()
-            vector = end - start
+            uphill_start, uphill_end = (
+                (start, end)
+                if self._stair_defaults["ascent_direction"] == "FORWARD"
+                else (end, start)
+            )
+            vector = uphill_end - uphill_start
             arrow = []
             if vector.length > 12.0:
                 direction = vector.normalized()
                 left = Vector((-direction.y, direction.x))
-                tip = start + vector * 0.65
+                tip = uphill_start + vector * 0.65
                 arrow = [tip, tip - direction * 12 + left * 6,
                          tip, tip - direction * 12 - left * 6]
             gpu.state.line_width_set(2.0)
@@ -151,9 +165,12 @@ class JHM_OT_create_stair(bpy.types.Operator):
             blf.position(0, start.x + 6, start.y + 6, 0)
             blf.draw(0, "START")
             blf.position(0, end.x + 6, end.y + 6, 0)
-            blf.draw(0, "END / UP")
+            blf.draw(0, "END")
         except Exception:
             self._remove_draw_handler()
+        finally:
+            gpu.state.line_width_set(1.0)
+            gpu.state.point_size_set(1.0)
 
     def _finish(self, result):
         self._remove_draw_handler()
