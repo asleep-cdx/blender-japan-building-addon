@@ -115,6 +115,8 @@ class JHM_OT_create_stair(bpy.types.Operator):
 
     def _commit(self, context, path, mesh_data):
         """The sole Scene-mutating path: create exactly one Mesh Object."""
+        previous_selected = tuple(context.selected_objects)
+        previous_active = context.view_layer.objects.active
         mesh = None
         stair_object = None
         try:
@@ -138,12 +140,38 @@ class JHM_OT_create_stair(bpy.types.Operator):
             stair_object.select_set(True)
             context.view_layer.objects.active = stair_object
         except Exception:
-            if stair_object is not None:
-                bpy.data.objects.remove(stair_object, do_unlink=True)
-            if mesh is not None and mesh.users == 0:
-                bpy.data.meshes.remove(mesh)
+            try:
+                if stair_object is not None:
+                    bpy.data.objects.remove(stair_object, do_unlink=True)
+                if mesh is not None and mesh.users == 0:
+                    bpy.data.meshes.remove(mesh)
+            finally:
+                self._restore_selection(
+                    context, previous_selected, previous_active)
             raise
         return self._finish({"FINISHED"})
+
+    @staticmethod
+    def _restore_selection(context, previous_selected, previous_active):
+        """Best-effort rollback without masking the original commit failure."""
+        try:
+            current_selected = tuple(context.selected_objects)
+        except (AttributeError, ReferenceError, RuntimeError, TypeError):
+            current_selected = ()
+        for selected in current_selected:
+            try:
+                selected.select_set(False)
+            except (AttributeError, ReferenceError, RuntimeError, TypeError):
+                pass
+        for selected in previous_selected:
+            try:
+                selected.select_set(True)
+            except (AttributeError, ReferenceError, RuntimeError, TypeError):
+                pass
+        try:
+            context.view_layer.objects.active = previous_active
+        except (AttributeError, ReferenceError, RuntimeError, TypeError):
+            pass
 
     def _draw_preview(self):
         try:

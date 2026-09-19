@@ -152,9 +152,16 @@ def resolve_stair_layout(points, ascent_direction, base_z_mm,
     base_z_mm = float(base_z_mm)
     if not math.isfinite(base_z_mm):
         raise ValueError("下端基準高さは有限値である必要があります。")
-    if isinstance(riser_count, bool) or int(riser_count) != riser_count:
+    if isinstance(riser_count, bool):
         raise ValueError("蹴上数は整数である必要があります。")
-    riser_count = int(riser_count)
+    try:
+        numeric_riser_count = float(riser_count)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("蹴上数は有限の整数である必要があります。") from exc
+    if (not math.isfinite(numeric_riser_count)
+            or not numeric_riser_count.is_integer()):
+        raise ValueError("蹴上数は有限の整数である必要があります。")
+    riser_count = int(numeric_riser_count)
     if riser_count < 2:
         raise ValueError("蹴上数は2以上である必要があります。")
 
@@ -259,12 +266,21 @@ def validate_mesh_fragments(fragments):
         if not all(math.isfinite(value) for vertex in fragment.vertices
                    for value in vertex):
             raise ValueError("Stair geometryに非有限座標があります。")
+        edge_use = {}
         for face in fragment.faces:
             if len(face) < 3 or any(index < 0 or index >= len(fragment.vertices)
                                     for index in face):
                 raise ValueError("Stair geometryのface indexが不正です。")
+            if len(set(face)) != len(face):
+                raise ValueError("Stair geometryのface内に重複vertex indexがあります。")
             if _face_area(fragment.vertices, face) <= 1.0e-15:
                 raise ValueError("Stair geometryにzero-area faceがあります。")
+            for index, start in enumerate(face):
+                end = face[(index + 1) % len(face)]
+                edge = tuple(sorted((start, end)))
+                edge_use[edge] = edge_use.get(edge, 0) + 1
+        if not edge_use or any(count != 2 for count in edge_use.values()):
+            raise ValueError("Stair fragmentはclosed manifold solidである必要があります。")
     return True
 
 

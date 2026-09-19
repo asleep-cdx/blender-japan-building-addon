@@ -14,7 +14,7 @@ sys.modules.setdefault("japanese_house_modeler", package)
 
 from japanese_house_modeler.stair_geometry import (
     assemble_stair_mesh, build_riser_fragments, build_tread_fragments,
-    identity_transform_contract, prepare_stair_geometry,
+    identity_transform_contract, MeshFragment, prepare_stair_geometry,
     resolve_stair_layout, validate_mesh_fragments,
 )
 
@@ -91,6 +91,14 @@ class StairLayoutTests(unittest.TestCase):
             with self.subTest(changes=changes), self.assertRaises(ValueError):
                 resolved(**changes)
 
+    def test_riser_count_rejects_non_finite_non_integer_and_bool(self):
+        for value in (True, False, math.nan, math.inf, -math.inf, 16.5, 1):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                resolved(riser_count=value)
+        for value in (2, 16, 16.0):
+            with self.subTest(value=value):
+                self.assertEqual(resolved(riser_count=value).riser_count, int(value))
+
     def test_invalid_paths_are_rejected(self):
         for points in (((0, 0), (0, 0)), ((0, 0), (math.nan, 1)), ((0, 0),)):
             with self.subTest(points=points), self.assertRaises(ValueError):
@@ -119,6 +127,8 @@ class StairGeometryTests(unittest.TestCase):
             self.assertAlmostEqual(max(point[2] for point in local),
                                    layout.base_z + ordinal * layout.actual_riser)
         self.assertAlmostEqual(max(v[2] for v in treads[-1].vertices), 2.625)
+        self.assertAlmostEqual(min(v[2] for v in treads[0].vertices), 0.145)
+        self.assertAlmostEqual(max(v[2] for v in treads[0].vertices), 0.175)
 
     def test_riser_count_and_final_riser_contract(self):
         layout = resolved()
@@ -131,6 +141,26 @@ class StairGeometryTests(unittest.TestCase):
                                layout.run_length + layout.riser_thickness)
         self.assertAlmostEqual(max(point[2] for point in final_local),
                                layout.upper_arrival_z)
+        self.assertAlmostEqual(min(v[2] for v in risers[0].vertices), 0.0)
+        self.assertAlmostEqual(max(v[2] for v in risers[0].vertices), 0.145)
+        self.assertAlmostEqual(min(v[2] for v in risers[1].vertices), 0.175)
+        self.assertAlmostEqual(max(v[2] for v in risers[1].vertices), 0.320)
+        self.assertAlmostEqual(min(v[2] for v in risers[-1].vertices), 2.625)
+        self.assertAlmostEqual(max(v[2] for v in risers[-1].vertices), 2.800)
+
+    def test_closed_solid_validation_rejects_broken_topology(self):
+        valid = build_tread_fragments(resolved())[0]
+        missing_face = MeshFragment(
+            valid.part_type, valid.ordinal, valid.vertices, valid.faces[:-1])
+        duplicate_face = MeshFragment(
+            valid.part_type, valid.ordinal, valid.vertices,
+            valid.faces[:-1] + (valid.faces[0],))
+        repeated_index = MeshFragment(
+            valid.part_type, valid.ordinal, valid.vertices,
+            ((0, 0, 2, 3),) + valid.faces[1:])
+        for malformed in (missing_face, duplicate_face, repeated_index):
+            with self.subTest(faces=malformed.faces), self.assertRaises(ValueError):
+                validate_mesh_fragments((malformed,))
 
     def test_all_orientation_geometry_is_finite_symmetric_and_valid(self):
         paths = (((0, 0), (3.6, 0)), ((0, 0), (0, 3.6)),
@@ -197,6 +227,9 @@ class StairStage2StructureTests(unittest.TestCase):
                             "stair_object.location = (0.0, 0.0, 0.0)",
                             "stair_object.rotation_euler = (0.0, 0.0, 0.0)",
                             "stair_object.scale = (1.0, 1.0, 1.0)"):
+            self.assertIn(declaration, self.operator_source)
+        for declaration in ("previous_selected", "previous_active",
+                            "_restore_selection"):
             self.assertIn(declaration, self.operator_source)
         self.assertEqual(identity_transform_contract(),
                          ((0, 0, 0), (0, 0, 0), (1, 1, 1)))
