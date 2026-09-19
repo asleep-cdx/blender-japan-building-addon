@@ -1,6 +1,6 @@
 # Japanese House Modeler — Development Roadmap
 
-最終更新: 2026-09-17
+最終更新: 2026-09-19
 
 この文書は、Blender 5.2 LTS 向け **Japanese House Modeler / 日本住宅モデラー** の今後の開発順序と、各Buildをまたいで維持する設計方針をまとめたロードマップである。
 
@@ -51,13 +51,19 @@
 - **Build 05-C — BACKLOG**
 - **Build 06-A — ACCEPTED**
 - **Build 06-B — ACCEPTED**
-- **Build 06-B overall — ACCEPTED**
+- **Build 06-C — ACCEPTED**
+- **Build 06-C overall — ACCEPTED**
 - Add-on version: **0.6.3**
-- Build 06-B final identification: `Build 06-B: Custom Profile Registration and Final Baseboard`
+- Build 06-C final identification: `Build 06-C Stage 3: Profile Thumbnail UI and Final Integration`
 
-現時点で、Wall SystemとBaseboard系Foundationは実用可能な基盤として成立している。
+現時点で、Wall System、Finish Attachment Foundation、Baseboard、Crown Mouldingまでの基盤が成立している。
 
-次のBuild候補は **06-C Crown Moulding** だが、実装開始前にこのRoadmapを基準文書として確定する。
+次の主要開発は **Build 07 — Stair System** とする。
+
+Build 07では、07-A〜07-Fを階段システムの主要本線として段階的に開発する。
+ただし開発順は固定ではなく、**07-Cおよび07-E完了時点で実用性・残作業・他機能との優先順位を再評価し、必要に応じて08/09との順序を見直せる**。
+
+07-Gは任意のディテール拡張であり、Build 07本体の必須完了条件には含めない。
 
 ---
 
@@ -69,31 +75,33 @@
 | **05-C** | Wall再統合 | **BACKLOG** |
 | **06-A** | Finish Attachment Foundation | **DONE / ACCEPTED** |
 | **06-B** | Baseboard / 巾木 | **DONE / ACCEPTED** |
-| **06-C** | Crown Moulding / 廻り縁 + Profile thumbnail UI | **NEXT / NOT STARTED** |
-| **07-A** | Stair Core + 直線箱型階段 | Planned |
-| **07-A2** | 蹴込み板なし直階段によるStair Core汎用性検証 | Planned |
+| **06-C** | Crown Moulding / 廻り縁 + Profile Thumbnail UI | **DONE / ACCEPTED** |
+| **07-A** | Stair Core + Top-view 2-point Straight Stair | **NEXT / PLANNED** |
+| **07-B** | Standard Residential Straight Stair + Stepped Closed Underside + Side Boards | Planned |
+| **07-C** | Sloped Closed Underside + Straight Stair Finish Variants | Planned |
+| **07-D** | Multi-point Path + L/U + Landing | Planned |
+| **07-E** | Winder / 廻り段 | Planned |
+| **07-F** | Open / Support Variants | Planned |
+| **07-G** | Optional Stair Detail Expansion | Optional / Backlog |
 | **08-A** | Minimal Room / Boundary + Floor | Planned |
 | **08-B** | Ceiling + 吹抜け / 穴の基本 | Planned |
 | **09-A** | Window / Door Asset Root + Wall Anchor | Planned |
 | **09-B** | Live Boolean Cutter | Planned |
 | **09-C** | Finish Exclusion連携 | Planned |
 | **Integration 1** | 一室を最初から最後まで制作する実務統合試験 | Planned |
-| **07-B** | L / U Stair + Landing | Planned |
-| **07-C** | Winder / 廻り段 | Planned |
-| **07-D** | Skeleton Stair / Support System拡充 | Planned |
 | **10** | Production Hardening / UX / Compatibility / Full Regression | Planned |
 
 ---
 
 # 5. Why this order
 
-## 5.1 Finishを先に完成させる理由
+## 5.1 Finishを先に完成させた理由
 
 Build 06では単なるCurve生成ではなく、
 
 > **Wallのどの面・どの区間に、何を、どの基準高さで配置するか**
 
-を永続化する共通Attachment Foundationを作る。
+を永続化する共通Attachment Foundationを作った。
 
 これにより、
 
@@ -105,25 +113,58 @@ Build 06では単なるCurve生成ではなく、
 
 を同じ考え方で扱える。
 
-## 5.2 Stair 07-Aを08/09より先にする理由
+Build 06-A / 06-B / 06-CはAcceptance済みであり、このFoundationを今後のWall付属部材へ再利用する。
 
-FloorはPlaneから比較的簡単に手作業できる。Ceilingも手作業代替が比較的簡単。Door / Windowも現状では AssetをAppend → 配置 → Boolean Cutter という手動ワークフローがある。
+## 5.2 Build 07を08/09より先に進める理由
 
-一方、階段は多数の踏板、蹴込み板、蹴上、踏面、段鼻、階高、方向転換、支持構造を手作業する負担が大きい。
+Floor / CeilingはBlender標準機能で比較的容易に手作業代替できる。Door / WindowもAsset配置とBooleanによる手動ワークフローが存在する。
 
-したがって、**アドオン化による時間短縮効果が大きい直線階段を先に実装する**。
+一方、住宅階段は、
 
-ただし階段全種類を完成させてから他機能へ進むのではない。
+- 踏板
+- 蹴込み板
+- 蹴上 / 踏面
+- 階高
+- 側板
+- 下面
+- 方向転換
+- 踊り場
+- 廻り段
+- 支持方式
 
-## 5.3 07-Aの後に08/09最小版へ進む理由
+を相互に整合させる必要があり、手作業負担が大きい。
 
-07-A直線階段まで完成したら、08/09の最小版へ進み、
+また、本プロジェクトのStairは **Wall / Floor / Roomを必須参照としないstandalone Managed Object** とする。
+そのため、Floor / Room実装を待たずに階段システムを進められる。
 
-> **一室を最初から最後まで作るIntegration 1**
+## 5.3 Build 07を当面優先する理由
 
-を行う。
+現時点では、ユーザーの制作負担と階段機能への優先度を踏まえ、07-A〜07-Fを優先する。
 
-これにより、07-B/C/Dへ進む前にArchitecture上の問題を検出できる。
+これは「チャット記憶を維持するため」に順序を固定するという意味ではない。
+設計意図の保持は `ROADMAP.md`、各 `BUILD_07_*_SPECIFICATION.md`、Acceptance Recordが担う。
+
+旧Roadmapの `07-A2` は独立Buildとしては廃止する。
+その目的だった「Stair CoreがRiserあり直階段へ固定されていないこと」の確認は、07-Aの内部Architecture testへ統合する。
+
+Build 07の進行中も、以下のチェックポイントで順序を再評価できる。
+
+```text
+07-C 完了
+↓
+直線住宅階段としての実用性確認
+↓
+必要なら 08 / 09 との優先順位を再評価
+
+07-E 完了
+↓
+一般住宅の折れ曲がり階段としての実用性確認
+↓
+必要なら 08 / 09 との優先順位を再評価
+```
+
+07-Cおよび07-Eでは、正式なIntegration 1を待たず、**手作業で用意したWall / Floor相当の簡易シーンへStairを配置して、小規模な住宅パース実用確認**を行う。
+これは新しいBuild番号を増やさず、各BuildのAcceptance runtime testの一部として扱う。
 
 ---
 
@@ -361,46 +402,73 @@ Build 06-BはBaseboard production baseline。
 
 ## 8.4 Build 06-C — Crown Moulding
 
-**Status: NEXT / NOT STARTED**
+**Status: ACCEPTED**
 
-06-B Foundationを再利用し、Crown Mouldingを追加する。
+06-B Foundationを再利用し、Crown MouldingおよびProfile Thumbnail UIを実装した。
 
-主要テーマ：
+Acceptance済み主要範囲：
 
-- finish_type = CROWN の実働
+- finish_type = CROWN
 - Ceiling基準配置
 - Crown用vertical reference
 - LEFT / RIGHT
 - FORWARD / REVERSE
-- inside / outside corner
-- Miter / BUTT
+- 90° / oblique Miter
 - Partial placement
-- Exclusion
-- Standard Crown Profile 約3種
-- Custom Profile
+- Manual Exclusion
+- Standard SIMPLE / BEVEL / ROUNDED
+- Custom POLY / BEZIER
+- Custom Profile snapshot persistence
+- Profile Thumbnail browser
 - Material persistence
 - Editable Mesh conversion
 - Save / reopen
 - Undo / Redo
-- Baseboard regression
+- Baseboard + Crown mixed regression
+- bulk regeneration atomicity
 
-### Specification note — Crown Profile orientation
+Build 06-C overallはAcceptance済み。
 
-既存のCeiling referenceは再利用するが、Crown Profileは**天井面から下方向へ展開するProfile**として定義する。Baseboardで成立したProfile座標制約をそのまま無条件に流用せず、Wall接触方向・室内側方向・垂直方向の意味を06-C仕様書で明示する。
+## 8.5 Known Issue — Finish endpoint mismatch on closed Wall layout
 
-### 06-Cまでに完成させるUI
+**Status: OPEN / correction deferred**
 
-Profile Libraryは最終的にサムネイル方式へ拡張する。
+Build 06-C acceptance後、**閉じたWall配置に沿って作成したBaseboard / Crown**で、端部付近の突出・不足が報告されている。
 
-目標：
+観察されている症状：
+
+- BaseboardとCrownの両方で発生する。
+- 閉じたWall配置で再現している。
+- Finish端部の一方がcornerを越えて突き出す場合がある。
+- 反対側では長さが不足し、cornerまで届かない場合がある。
+
+現時点では以下を未調査とする。
 
 ```text
-┌────────┐ ┌────────┐ ┌────────┐
-│Profile A│ │Profile B│ │Profile C│
-└────────┘ └────────┘ └────────┘
+FinishRun自体がclosed pathなのか
+複数Runなのか
+Span境界がどこにあるのか
+FORWARD / REVERSEとの関係
+closed Wall topologyとの関係
+原因がendpoint処理かcorner処理か
 ```
 
-ただしProfile identity / snapshot / geometry correctnessを優先し、UI装飾がcanonical設計を複雑化させないこと。
+画像だけから原因を断定しない。
+
+**このRoadmap更新では修正しない。**
+
+Build 06-C Acceptance Recordは受入時点の履歴として保持し、後日Correction Build / maintenance workとして原因調査・修正・regression testを行う。
+
+調査時には可能な限り以下を保存する。
+
+- 再現用 `.blend`
+- 使用Build / Candidate / commit
+- Baseboard / Crown
+- Finish Profile
+- 作成手順
+- Wall topology
+- FinishRun / Span / traversal状態
+- 発生箇所のスクリーンショット
 
 ---
 
@@ -507,37 +575,126 @@ Editable Mesh確定後：
 
 ---
 
-# 12. Build 07 — Stair architecture
+# 12. Build 07 — Stair System
 
-## 12.1 Internal model must not depend on presets
+## 12.1 Final goal — fixed project target
 
-UIでは「箱型階段」「スケルトン階段」のような分かりやすいプリセットを使用してよい。
+Build 07の最終目標は、**日本の戸建て住宅で一般的に使われる直線・折れ曲がり階段を、トップビューでPathを指定して生成できるManaged Stair System** を構築することである。
 
-ただし内部データはプリセット名に依存しない。
+最終操作イメージ：
 
-推奨軸：
+```text
+Top View
 
-| Axis | Values |
+START
+  ●
+  │
+  │
+  ●────────●
+           │
+           │
+           ●
+             END
+```
+
+ユーザーは、始点、必要な折れ点、終点を順番にクリックする。
+
+そのPathから、Straight flight、Landing、Winder / 廻り段を組み合わせ、**全体を1つのManaged Stairとして生成・編集できること**を最終目標とする。
+
+L字 / U字presetの数値入力だけを最終操作にしない。
+Wall作成に近いPath指定を主操作とする。
+
+ただし、Pathだけでは曲がり部分の広さ・Landing / Winderの選択・Winder段数等を一意に決められない。
+
+したがって将来のMulti-point Stairでは、
+
+```text
+Path geometry
++
+turn mode / turn parameters
++
+stair dimensions
+```
+
+の組み合わせで確定する。
+
+Addonは曖昧なPathから無理な形状を自動決定しない。
+
+## 12.2 Standalone Stair contract
+
+StairはWall / Room / Floor / Ceilingを必須依存としない。
+
+完全な空SceneでもStair単体を生成できること。
+
+Stair自身が少なくとも以下の高さ情報を持つ。
+
+```text
+base_z
+floor_to_floor
+```
+
+将来Floor System完成後には、manual numeric height または optional Floor reference を選択できる方向へ拡張可能とする。
+
+Floor参照は後付け可能なdependencyであり、Stair Coreの必須前提にしない。
+
+## 12.3 Path contract
+
+Stair pathはcanonical dataとして保持する。
+
+07-Aでは2点のみをproduction対応する。
+
+```text
+path_points
+├ Point 0 = START
+└ Point 1 = END
+```
+
+将来07-D以降では複数点へ拡張する。
+
+重要：
+
+> 07-Aを `start + end` 専用の別データモデルとして作らず、最初からPathの2点版として扱う。
+
+START → END方向を基本の上り方向とする。
+
+線の意味、線長の測定基準、最初の蹴上位置、最終到達位置は07-A Specificationで明文化する。
+
+## 12.4 Internal model must not depend on preset names
+
+UIでは分かりやすい住宅階段名を使用してよいが、内部canonical modelを「箱型」「スケルトン」などの曖昧なpreset名に依存させない。
+
+| Axis | Initial / Future Values |
 |---|---|
-| Path | Straight / L / U |
-| Direction Change | None / Landing / Winder |
+| Path | Straight / Multi-point |
+| Turn | None / Landing / Winder |
 | Riser | On / Off |
-| Underside | Closed / Open |
-| Support | None / Side Beam / Sawtooth / Center Beam |
-| Add-on Parts | Handrail / Newel / etc. |
+| Underside | Stepped Closed / Sloped Closed / None (future) |
+| Side Board | Left On/Off / Right On/Off |
+| Support | None / Side / Sawtooth / Center / future variants |
+| Tread | Solid board / future nosing detail |
+| Add-on Parts | future handrail / newel / etc. |
 
-## 12.2 Riser / Tread terminology
+`Underside = None` は将来のopen系を可能にする内部拡張点であり、07-Bの標準住宅階段を露出下面にするという意味ではない。
+
+### Combination support rule
+
+内部データを独立したAxisとして持つことは、**全てのAxisの全組み合わせを生成可能にすることを意味しない**。
+
+各Build Specificationで対応組み合わせを明示する。
+未対応の組み合わせはUIで無効化または明示的に拒否し、暗黙に不正Geometryを生成しない。
+
+## 12.5 Riser / Tread terminology
 
 「段数」だけで管理しない。
 
-内部値：
+少なくとも以下を意味上分離する。
 
 ```text
 riser_count
-tread_count
+independent_tread_count
+actual_riser
+going
 ```
-
-を分離する。
 
 例：
 
@@ -545,59 +702,299 @@ tread_count
 floor_to_floor = 2800 mm
 riser_count = 16
 actual_riser = 175 mm
-```
-
-上階Floor自体が最後の到達面なら、
-
-```text
-riser_count = 16
 independent_tread_count = 15
 ```
 
-となり得る。
+どれを入力値とし、どれを導出するかは07-A Specificationで決定する。
+矛盾する固定入力を許可しない。
 
-### Floor-to-floor definition
+## 12.6 Part-generation architecture
 
-階高は、**下階仕上げ床面 → 上階仕上げ床面** と定義する。Wall Heightとは別。
+段配置計算と各部材のgeometry生成を分離する。
 
----
+```text
+Canonical Stair
+    ↓
+Resolved Path
+    ↓
+Resolved riser / tread placement
+    ↓
+Part generators
+    ├ Tread
+    ├ Riser board
+    ├ Stepped underside
+    ├ Sloped underside
+    ├ Left side board
+    ├ Right side board
+    └ Future support / detail parts
+```
 
-# 13. Build 07-A — Stair Core + Straight Closed Stair
+直線住宅階段Meshを一体で直接生成し、そのMesh形状を後続Buildで解析・再利用する設計にしない。
+
+## 12.7 Managed Stair != one Mesh
+
+ユーザーから見た管理単位は1 Stairとするが、derived geometryは必要に応じて部材単位または部材カテゴリ単位に分けてよい。
+
+Managed状態の生成部材を直接編集した結果をcanonical Stairへ逆推定しない。
+
+最終的に通常Blender Meshへ確定する出口を持つ。
+
+## 12.8 Build 07-A — Stair Core + Top-view 2-point Straight Stair
 
 目的：
 
-- Stair Coreを確立
-- Straight Stair生成
-- 箱型階段を最初のproduction presetとして実装
-- riser / tread / floor-to-floor contractを確定
-- 後続L/U/Winder/Skeletonへ拡張可能な内部構造を作る
+- Stair canonical dataを確立する。
+- Top Viewの2点指定でStraight Stairを作成する。
+- Wall / FloorなしでStair単体を生成する。
+- START → ENDを上り方向として確定する。
+- floor-to-floor / riser / tread contractを確定する。
+- 後続Multi-point Pathへ拡張可能なCoreを作る。
+
+基本対象：
+
+- tread
+- riser board
+- width
+- tread thickness
+- riser thickness
+- base_z
+- floor_to_floor
+- riser_count
+- derived actual_riser
+- derived independent_tread_count / going
+- dimension edit
+- regeneration
+- Undo / Redo
+- Save / reopen
+- Editable Mesh conversion
+
+### Early Core extensibility check
+
+07-Aの段階で、**Riser board generatorを使用しなくても、段配置計算とTread生成が成立することを内部試験で確認する。**
+
+これはユーザー向け `Riser OFF` 機能の先行実装ではない。
+
+目的は、
+
+```text
+step placement
+!=
+riser-board existence
+```
+
+を早期に保証することである。
+
+### Recommended internal stages
+
+```text
+Stage 1
+Canonical Stair + Top-view 2-point creation
+
+Stage 2
+Riser / tread calculation + basic tread/riser geometry
+
+Stage 3
+Dimension edit + regeneration + invalid-input handling
+
+Stage 4
+Undo/Redo + Save/Reopen + Editable Mesh + regression
+```
+
+07-Aでは stepped/sloped underside final form、side boards、user-facing Riser OFF、L/U、landing、winder、anti-slip groove、separate nosing、advanced support variants を必須にしない。
+
+## 12.9 Build 07-B — Standard Residential Straight Stair
+
+07-AのStair Core上に、最初の実用的な住宅直階段を完成させる。
+
+主要機能：
+
+- thick solid-board treads
+- riser boards
+- **stepped closed underside**
+- left side board ON / OFF
+- right side board ON / OFF
+- side-board thickness / basic visible dimensions
+- part-specific Material assignment
+- predictable regeneration
+- Editable Mesh conversion
+- Save / reopen
+- Undo / Redo
+
+### Stepped closed underside — target appearance
+
+07-Bの段々閉じ下面は、参考画像で確認した住宅階段の外観をproduction targetとする。
+
+これは「部材裏面の露出」ではない。
+
+下から見た場合、
+
+- 各段下面の**水平面**
+- 段差をつなぐ**縦面**
+
+が連続し、段形状に追従する**閉じた段々の外観**を形成する。
 
 重要：
 
-> 直線箱型階段だけ作れても、内部Coreが箱型専用になってはいけない。
+> 同じ位置へTread裏面と追加Underside板を二重生成することを要求しているのではない。
 
-### Specification note — riser_count / tread_count
+どの生成部材が水平面・縦面・端部を担うかは、07-B Specificationで断面図を用いて確定する。
 
-`riser_count` と `tread_count` は意味を分離するが、**両方をユーザーが独立した固定入力として自由に設定できる、という意味ではない**。どちらを入力値とし、どちらを他の階段条件から導出するかは07-A仕様書で決定し、矛盾する組合せを作らない。
+07-B Specificationでは、少なくとも以下を図で定義する。
 
----
+```text
+Case A: left side board ON / right side board ON
+Case B: left only
+Case C: right only
+Case D: both OFF
+```
 
-# 14. Build 07-A2 — Core validation with open-riser straight stair
+各Caseについて、underside closure、lateral closure、stair start closure、stair end closure、Tread / Riser / Side Boardとの役割分担を明示する。
 
-07-A完了直後に小規模試験を行う。
+逆さヒナ段系の化粧側板は、階段本体側面全体を自動的に閉じる部材とはみなさない。
+側面閉鎖範囲は07-B Specificationで別途決定する。
 
-最低条件：
+## 12.10 Build 07-C — Sloped Closed Underside + Straight Stair Finish Variants
 
-- 07-Aと同じStair Coreを使用する
+主要機能：
+
+- `STEPPED_CLOSED`
+- `SLOPED_CLOSED`
+- underside thickness / placement
+- start / end termination
+- side-boardとの境界整合
+- tread front overhang
+- basic front-edge Bevel / Round
+- Material preservation
+- Mesh conversion regression
+
+### Sloped closed underside
+
+階段下収納・トイレ等で使う住宅階段を想定し、階段下面を連続した斜め面材で閉じる。
+
+床まで完全に埋めるsolid massは対象外。
+
+### Practical checkpoint after 07-C
+
+07-C Acceptanceでは、手作業で用意した簡易Wall / Floor相当シーンへ配置し、住宅パース用途としてplacement、visible proportion、side-board appearance、stepped / sloped underside usability、Material、Mesh conversionを確認する。
+
+この結果を見て、07-Dへ進むか、08 / 09の優先度を上げるかを再評価できる。
+
+## 12.11 Build 07-D — Multi-point Path + L / U + Landing
+
+主要機能：
+
+- start + intermediate turn points + end
+- L-shaped path
+- U-shaped path
+- multiple straight flights
+- landing segments
+- whole Stair = one Managed Stair
+- consistent total floor-to-floor
+- riser distribution across flights
+- path edit / regeneration
+
+複数点Pathを単なる複数の独立直階段として実装しない。
+
+07-Dではturnを自動的にWinderへしない。
+折れ点の位置だけでLanding dimensionsを一意に決められない場合は、必要なturn parameterをSpecificationで定義する。
+
+## 12.12 Build 07-E — Winder / 廻り段
+
+主要機能：
+
+- 90° Winder
+- 180° Winder
+- inner / outer tread geometry
+- minimum geometry safeguards
+- riser distribution including turns
+- L / U path combination
+- side-board continuation at Winder
+
+Pathの折れ点だけでWinder形状・turn area・winder step countを勝手に決めない。
+必要なturn parameterをcanonical dataとして持つ。
+
+07-E Specificationで対応する組み合わせを明示する。
+
+最終的に、
+
+```text
+straight flight
+→ winder
+→ straight flight
+→ winder
+→ straight flight
+```
+
+を1つのManaged Stairとして扱えること。
+
+**07-E完了時点を、一般的な直線＋折れ曲がり住宅階段の主要ゴールとする。**
+
+### Practical checkpoint after 07-E
+
+07-E Acceptanceでは、実際の住宅に近い簡易シーンへ straight stair / L-U stair / Winder stair を配置し、平面配置・視覚寸法・使い勝手を確認する。
+
+ここで08 / 09との優先順位を再評価できる。
+
+## 12.13 Build 07-F — Open / Support Variants
+
+対象候補：
+
 - Riser Off
-- Open underside
-- Straight Stairのまま箱型以外の生成経路を確認する
+- Underside None
+- open variants
+- side support
+- sawtooth / ささら系
+- center support
+- support presets
+- structure variants
 
-これにより、**Stair CoreがClosed Box presetへ固定されていないこと**を検証する。
+「スケルトン階段」という単一presetへ内部モデルを固定しない。
 
-Side Beam / Sawtooth / Center Beamなど支持桁の種類拡充は **07-D** の担当とし、07-A2では必須にしない。07-A2で完成したスケルトン階段を提供する必要はなく、Coreの汎用性確認を目的とする。
+対応するPath / Turn / Support / Undersideの組み合わせは07-F Specificationで明示する。
 
-これは大規模機能追加ではなくArchitecture検証。
+**07-F完了をBuild 07 Stair System本体の完了目標とする。**
+
+## 12.14 Build 07-G — Optional Detail Expansion
+
+07-GはBuild 07本体の必須完了条件ではない。
+
+候補：
+
+- separate nosing part
+- anti-slip groove
+- groove count / width / depth
+- tread-front offset
+- groove left/right end margin
+- rounded groove ends
+- additional side-board detail
+- decorative trim
+- other production-use details
+
+07-Gは必要性に応じて08/09以降へ延期できる。
+
+## 12.15 Build 07 quality / scope guards
+
+Build 07全体で以下を維持する。
+
+- Canonical data → derived geometry
+- Managed Object Transformは原則identity
+- manual Mesh editをcanonicalへ逆推定しない
+- failure時にpartial commitしない
+- Undo / Redo
+- Save / reopen
+- deterministic regeneration
+- Material contract
+- Editable Mesh exit
+- prior accepted Wall / Finish regression
+
+さらに、
+
+> **Independent data axes do not imply universal combination support.**
+
+各BuildのSpecificationで対応組み合わせを定義し、未対応組み合わせを明示する。
+
+各Buildで「次Buildのための汎用性」を理由に未使用機能を大量先行実装しない。
+必要な拡張点だけをcanonical contractとして確保し、production featureは各Buildで段階的に追加する。
 
 ---
 
@@ -707,7 +1104,7 @@ OpeningとFinishの連携ではWall上の水平区間だけでなく、**Opening
 
 # 17. Integration 1 — One-room production test
 
-07-A + 08 minimal + 09 minimalまで完成後、必ず実施する。
+Build 07 Stair System mainline + 08 minimal + 09 minimalが揃った後、必ず実施する。
 
 対象例：
 
@@ -720,7 +1117,7 @@ LDKの一角
 ├ Ceiling
 ├ Door
 ├ Window
-└ Straight Stair（必要なら）
+└ Stair
 ```
 
 試験項目：
@@ -733,6 +1130,8 @@ LDKの一角
 - Boolean更新
 - Finish exclusion更新
 - Floor / Ceiling維持
+- Stair placement
+- Stair / Floor / Void連携
 - Material維持
 - Save
 - Blender終了
@@ -741,42 +1140,24 @@ LDKの一角
 - Editable Mesh conversion
 - 一部を通常Blender編集へ移行
 
-ここでArchitecture上の問題が出た場合、**07-B以降へ進む前にFoundationを修正する**。
+Build 07はstandalone Stairとして成立させるが、Integration 1では住宅全体の他Foundationと接続した場合のArchitectureを確認する。
 
 ---
 
-# 18. Build 07-B / 07-C / 07-D
+# 18. Build 07 ordering checkpoints
 
-Integration 1を通過後、階段機能を拡張する。
+旧Roadmapの「07-A / 07-A2 → 08/09 → Integration 1 → 07-B/C/D」という分断順序は廃止する。
 
-## 18.1 Build 07-B — L / U + Landing
+現時点では07-A〜07-Fを優先するが、順序を永久固定しない。
 
-- L-shaped stair
-- U-shaped stair
-- Landing
-- multiple flights
-- consistent floor-to-floor calculation
-- path-based Stair Core reuse
+再評価ポイント：
 
-## 18.2 Build 07-C — Winder
+- **07-C完了時**：直線住宅階段の実用性、斜め下面、側板、Mesh workflowを確認
+- **07-E完了時**：L/U、Landing、Winderを含む一般住宅階段としての実用性を確認
 
-- winder steps
-- turning geometry
-- inner / outer tread control
-- minimum geometry safeguards
-- L/U combination
+各checkpointの結果により、必要なら08 / 09を先に進めることができる。
 
-## 18.3 Build 07-D — Skeleton / Support expansion
-
-- open riser
-- open underside
-- side beam
-- sawtooth
-- center beam
-- support presets
-- structure variants
-
-UI presetは用意してよいが、内部モデルはAxis-based designを維持する。
+07-GはOptional Backlogであり、07-F完了後ただちに実装する必要はない。
 
 ---
 
@@ -872,23 +1253,34 @@ Roadmap変更は許可するが、Accepted historyは消さない。
 05-B  ACCEPTED
 06-A  ACCEPTED
 06-B  ACCEPTED
+06-C  ACCEPTED
 ```
 
-次候補：
+次：
 
 ```text
-06-C Crown Moulding
+07-A Stair Core + Top-view 2-point Straight Stair
 ```
 
-ただし、06-Cの実装を開始する前に、
+進行手順：
 
-- このRoadmapをGitHubへ保存
-- 06-Cの目的とscopeを再確認
-- `BUILD_06_C_SPECIFICATION.md` を作成
-- 仕様レビュー
-- 実装
-
-の順で進める。
+```text
+ROADMAP Build 07 revision
+↓
+review
+↓
+GitHub mainへ反映
+↓
+BUILD_07_A_SPECIFICATION.md 作成
+↓
+仕様レビュー
+↓
+Codex implementation
+↓
+Candidate / Blender runtime test
+↓
+Acceptance
+```
 
 ---
 
@@ -905,29 +1297,37 @@ Baseboard
     ↓
 Crown
     ↓
-Straight Stair Core
+07-A Stair Core / 2-point Straight
     ↓
-Minimal Room / Floor / Ceiling
+07-B Standard Residential Straight Stair
     ↓
-Window / Door Anchor + Boolean
+07-C Sloped Underside / Straight Finish Variants
     ↓
-Finish Exclusion Integration
+[practical checkpoint / order review]
+    ↓
+07-D Multi-point L/U + Landing
+    ↓
+07-E Winder
+    ↓
+[practical checkpoint / order review]
+    ↓
+07-F Open / Support Variants
+    ↓
+08 Minimal Room / Floor / Ceiling
+    ↓
+09 Window / Door Anchor + Boolean + Finish Exclusion
     ↓
 One-room Production Integration Test
-    ↓
-Advanced Stair
     ↓
 Production Hardening
 ```
 
-この順序は、
+07-G Detail ExpansionはOptional Backlogとして、本線の適切な位置へ挿入できる。
 
-- Wall / FinishのFoundationを先に固める
-- 手作業負担の大きいStraight Stairを極端に後回しにしない
-- Floor / Ceiling / Openingの最小版を作る
-- 一度一室を実際に完成させる
-- そこでArchitectureを検証してから高度なStairへ進む
+Build 07の中心目標は、
 
-という方針に基づく。
+> **Wall / Floor / Roomに必須依存せず、トップビューでPathを描き、日本住宅の直線・折れ曲がり階段を1つのManaged Stairとして生成・編集できること**
 
-**このRoadmapを今後の開発計画の親文書とする。**
+である。
+
+このRoadmapを今後の開発計画の親文書とする。
