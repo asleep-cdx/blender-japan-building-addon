@@ -3,17 +3,20 @@
 bl_info = {
     "name": "日本住宅モデラー",
     "author": "Japanese House Modeler Contributors",
-    "version": (0, 6, 3),
+    "version": (0, 7, 0),
     "blender": (5, 2, 0),
     "location": "View3D > Sidebar > 日本住宅",
-    "description": "Build 06-C Stage 3: Profile Thumbnail UI and Final Integration",
+    "description": "Build 07-A: Stair Core + Top-view 2-point Straight Stair",
     "category": "3D View",
 }
 
-from . import finish_operators, operators, properties, ui
+from . import finish_operators, operators, properties, stair_operators, ui
 
 
 _CLASSES = (
+    properties.JHM_StairPathPoint,
+    properties.JHM_NewStairDefaults,
+    properties.JHM_StairProperties,
     properties.JHM_NewWallDefaults,
     properties.JHM_WallConnection,
     properties.JHM_WallProperties,
@@ -28,6 +31,7 @@ _CLASSES = (
     operators.JHM_OT_rebuild_wall_joints,
     operators.JHM_OT_repair_wall,
     operators.JHM_OT_delete_wall,
+    stair_operators.JHM_OT_create_stair,
     finish_operators.JHM_OT_start_finish_path,
     finish_operators.JHM_OT_regenerate_finish,
     finish_operators.JHM_OT_register_custom_profile,
@@ -58,6 +62,9 @@ def register():
     bpy.types.Scene.jhm_new_wall_defaults = bpy.props.PointerProperty(
         type=properties.JHM_NewWallDefaults
     )
+    bpy.types.Scene.jhm_new_stair_defaults = bpy.props.PointerProperty(
+        type=properties.JHM_NewStairDefaults
+    )
     bpy.types.Scene.jhm_custom_profiles = bpy.props.CollectionProperty(
         type=properties.JHM_CustomProfileDefinition)
     bpy.types.Scene.jhm_custom_profile_index = bpy.props.IntProperty(default=0, min=0)
@@ -69,6 +76,9 @@ def register():
     bpy.types.Object.jhm_finish = bpy.props.PointerProperty(
         type=properties.JHM_FinishProperties
     )
+    bpy.types.Object.jhm_stair = bpy.props.PointerProperty(
+        type=properties.JHM_StairProperties
+    )
     register_load_handler()
 
 
@@ -79,9 +89,11 @@ def unregister():
     from .finish_preview_images import unregister_load_handler
     unregister_load_handler()
 
+    del bpy.types.Object.jhm_stair
     del bpy.types.Object.jhm_finish
     del bpy.types.Object.jhm_wall
     del bpy.types.Scene.jhm_new_wall_defaults
+    del bpy.types.Scene.jhm_new_stair_defaults
     del bpy.types.Scene.jhm_custom_profile_index
     del bpy.types.Scene.jhm_custom_profiles
     del bpy.types.Scene.jhm_finish_regeneration_required

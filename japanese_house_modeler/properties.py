@@ -15,6 +15,51 @@ _MAX_THICKNESS_MM = 10_000.0
 _MIN_HEIGHT_MM = 0.1
 _MAX_HEIGHT_MM = 100_000.0
 
+_ASCENT_DIRECTION_ITEMS = (
+    ("FORWARD", "順方向", "P0からP1へ上る"),
+    ("REVERSE", "逆方向", "P1からP0へ上る"),
+)
+
+
+class JHM_StairPathPoint(bpy.types.PropertyGroup):
+    """One ordered canonical world-XY plan point (metres)."""
+
+    xy: bpy.props.FloatVectorProperty(
+        name="Path座標", size=2, options={"HIDDEN"})
+
+
+class JHM_NewStairDefaults(bpy.types.PropertyGroup):
+    """Values copied into a newly committed managed Stair."""
+
+    base_z_mm: bpy.props.FloatProperty(name="下端基準高さ", default=0.0, precision=1)
+    floor_to_floor_mm: bpy.props.FloatProperty(
+        name="階高", default=2800.0, min=0.1, max=100000.0, precision=1)
+    riser_count: bpy.props.IntProperty(name="蹴上数", default=16, min=1, max=10000)
+    stair_width_mm: bpy.props.FloatProperty(
+        name="階段幅", default=900.0, min=0.1, max=100000.0, precision=1)
+    tread_thickness_mm: bpy.props.FloatProperty(
+        name="踏板厚", default=30.0, min=0.1, max=10000.0, precision=1)
+    riser_thickness_mm: bpy.props.FloatProperty(
+        name="蹴込み板厚", default=12.0, min=0.1, max=10000.0, precision=1)
+    ascent_direction: bpy.props.EnumProperty(
+        name="上り方向", items=_ASCENT_DIRECTION_ITEMS, default="FORWARD")
+
+
+class JHM_StairProperties(bpy.types.PropertyGroup):
+    """Canonical data owned by one managed Stair Mesh Object."""
+
+    is_stair: bpy.props.BoolProperty(default=False, options={"HIDDEN"})
+    stair_id: bpy.props.StringProperty(default="", options={"HIDDEN"})
+    path_points: bpy.props.CollectionProperty(type=JHM_StairPathPoint)
+    ascent_direction: bpy.props.EnumProperty(
+        name="上り方向", items=_ASCENT_DIRECTION_ITEMS, default="FORWARD")
+    base_z_mm: bpy.props.FloatProperty(name="下端基準高さ", default=0.0)
+    floor_to_floor_mm: bpy.props.FloatProperty(name="階高", default=2800.0, min=0.1)
+    riser_count: bpy.props.IntProperty(name="蹴上数", default=16, min=1)
+    stair_width_mm: bpy.props.FloatProperty(name="階段幅", default=900.0, min=0.1)
+    tread_thickness_mm: bpy.props.FloatProperty(name="踏板厚", default=30.0, min=0.1)
+    riser_thickness_mm: bpy.props.FloatProperty(name="蹴込み板厚", default=12.0, min=0.1)
+
 
 class JHM_NewWallDefaults(bpy.types.PropertyGroup):
     """Defaults copied to a wall when wall creation is added in a later build."""
