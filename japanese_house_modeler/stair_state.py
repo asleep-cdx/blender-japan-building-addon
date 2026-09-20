@@ -11,6 +11,7 @@ ID_CONFLICT = "ID_CONFLICT"
 TRANSFORM_CHANGED = "TRANSFORM_CHANGED"
 INVALID_CANONICAL = "INVALID_CANONICAL"
 GEOMETRY_MISSING = "GEOMETRY_MISSING"
+OBJECT_TYPE_CHANGED = "OBJECT_TYPE_CHANGED"
 
 NORMAL_ONLY_OPERATIONS = frozenset({
     "EDIT_DIMENSIONS", "EDIT_PATH", "REVERSE", "REGENERATE", "FINALIZE",
@@ -81,8 +82,10 @@ def diagnose_stair(state, duplicate_ids=()):
             and _near(state.rotation, (0.0, 0.0, 0.0))
             and _near(state.scale, (1.0, 1.0, 1.0))):
         issues.append(TRANSFORM_CHANGED)
-    if (state.object_type != "MESH" or not state.has_mesh
-            or state.vertex_count <= 0 or state.face_count <= 0):
+    if state.object_type != "MESH":
+        issues.append(OBJECT_TYPE_CHANGED)
+    elif (not state.has_mesh or state.vertex_count <= 0
+          or state.face_count <= 0):
         issues.append(GEOMETRY_MISSING)
     return tuple(issues)
 
@@ -102,4 +105,3 @@ def operation_allowed(operation, issues):
 
 def state_label(issues):
     return "正常" if not issues else " / ".join(issues)
-

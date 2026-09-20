@@ -15,8 +15,8 @@ sys.modules.setdefault("japanese_house_modeler", package)
 from japanese_house_modeler.stair_geometry import prepare_stair_geometry
 from japanese_house_modeler.stair_state import (
     GEOMETRY_MISSING, ID_CONFLICT, ID_MISSING, INVALID_CANONICAL, NORMAL,
-    TRANSFORM_CHANGED, StairState, diagnose_stair, duplicate_stair_ids,
-    operation_allowed, state_label,
+    OBJECT_TYPE_CHANGED, TRANSFORM_CHANGED, StairState, diagnose_stair,
+    duplicate_stair_ids, operation_allowed, state_label,
 )
 
 
@@ -137,15 +137,24 @@ class DiagnosisTests(unittest.TestCase):
         self.assertIn(INVALID_CANONICAL, issues)
         self.assertIn(GEOMETRY_MISSING, issues)
 
-    def test_geometry_type_data_vertices_and_faces(self):
-        cases = ({"object_type": "CURVE"}, {"has_mesh": False},
-                 {"vertex_count": 0}, {"face_count": 0})
+    def test_mesh_data_vertices_and_faces_are_geometry_missing(self):
+        cases = ({"has_mesh": False}, {"vertex_count": 0}, {"face_count": 0})
         for changes in cases:
             with self.subTest(changes=changes):
                 self.assertIn(GEOMETRY_MISSING, diagnose_stair(state(**changes)))
 
-    def test_valid_canonical_non_mesh_state_is_repairable(self):
+    def test_non_mesh_is_type_changed_not_geometry_missing_or_repairable(self):
         issues = diagnose_stair(state(object_type="CURVE"))
+        self.assertEqual(issues, (OBJECT_TYPE_CHANGED,))
+        self.assertNotIn(GEOMETRY_MISSING, issues)
+        self.assertFalse(operation_allowed("REPAIR", issues))
+        for operation in ("EDIT_DIMENSIONS", "EDIT_PATH", "REVERSE",
+                          "REGENERATE", "FINALIZE"):
+            self.assertFalse(operation_allowed(operation, issues))
+        self.assertTrue(operation_allowed("DELETE", issues))
+
+    def test_valid_canonical_empty_mesh_remains_repairable(self):
+        issues = diagnose_stair(state(vertex_count=0, face_count=0))
         self.assertEqual(issues, (GEOMETRY_MISSING,))
         self.assertTrue(operation_allowed("REPAIR", issues))
 
@@ -164,6 +173,8 @@ class PolicyTests(unittest.TestCase):
         self.assertFalse(operation_allowed("REPAIR", (INVALID_CANONICAL,)))
         self.assertFalse(operation_allowed(
             "REPAIR", (INVALID_CANONICAL, GEOMETRY_MISSING)))
+        self.assertFalse(operation_allowed(
+            "REPAIR", (OBJECT_TYPE_CHANGED, ID_CONFLICT)))
 
     def test_future_delete_is_abnormal_allowed(self):
         self.assertTrue(operation_allowed("DELETE", (INVALID_CANONICAL,)))
@@ -186,13 +197,13 @@ class TransactionStructureTests(unittest.TestCase):
         self.assertLess(source.index("_prepare_candidate(candidate)"),
                         source.index("bpy.data.meshes.new"))
         self.assertLess(source.index("replacement.from_pydata"),
-                        source.index("_assign_object_data(stair_object, replacement)"))
-        self.assertLess(source.index("_assign_object_data(stair_object, replacement)"),
+                        source.index("stair_object.data = replacement"))
+        self.assertLess(source.index("stair_object.data = replacement"),
                         source.index("_set_canonical(stair, candidate)"))
 
     def test_rollback_restores_all_snapshots_and_removes_replacement(self):
         source = ast.unparse(self.function("_transactional_update"))
-        for fragment in ("_assign_object_data(stair_object, old_data)",
+        for fragment in ("setattr(stair_object, 'data', old_data)",
                          "_set_canonical(stair, old_canonical)",
                          "setattr(stair, 'stair_id', old_id)", "old_transform",
                          "_cleanup_unused_data(replacement)"):
@@ -203,25 +214,15 @@ class TransactionStructureTests(unittest.TestCase):
         self.assertIn("getattr(old_data, 'materials', ())", source)
         self.assertIn("for material in materials", source)
         self.assertLess(source.index("replacement.materials.append(material)"),
-                        source.index("_assign_object_data(stair_object, replacement)"))
+                        source.index("stair_object.data = replacement"))
 
-    def test_cross_type_assignment_detaches_without_replacing_object(self):
-        helper = ast.unparse(self.function("_assign_object_data"))
+    def test_cross_type_conversion_paths_are_absent(self):
         transaction = ast.unparse(self.function("_transactional_update"))
-        self.assertIn("current_data = obj.data", helper)
-        self.assertIn("type(current_data) is not type(new_data)", helper)
-        self.assertLess(helper.index("obj.data = None"),
-                        helper.index("obj.data = new_data"))
+        self.assertNotIn("def _assign_object_data", self.source)
+        self.assertNotIn("bpy.ops.object.convert", self.source)
+        self.assertNotIn("stair_object.data = None", transaction)
         self.assertNotIn("bpy.data.objects.new", transaction)
         self.assertNotIn("bpy.data.objects.remove", transaction)
-
-    def test_cross_type_assignment_failure_rolls_back_old_data(self):
-        transaction = ast.unparse(self.function("_transactional_update"))
-        self.assertLess(transaction.index("assignment_started = True"),
-                        transaction.index(
-                            "_assign_object_data(stair_object, replacement)"))
-        self.assertIn("if assignment_started:", transaction)
-        self.assertIn("_assign_object_data(stair_object, old_data)", transaction)
 
     def test_non_mesh_old_data_is_not_treated_as_a_mesh(self):
         transaction = ast.unparse(self.function("_transactional_update"))

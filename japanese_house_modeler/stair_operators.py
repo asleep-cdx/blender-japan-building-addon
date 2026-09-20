@@ -102,22 +102,6 @@ def _cleanup_unused_data(data):
     _best_effort(remove_if_unused)
 
 
-def _assign_object_data(obj, new_data):
-    """Assign Object.data, detaching first when Blender RNA types differ.
-
-    Blender rejects a direct Curve-to-Mesh (and inverse) assignment.  Passing
-    through ``None`` makes the existing Object temporarily EMPTY while keeping
-    its identity, selection, collections, visibility, and custom properties.
-    """
-    current_data = obj.data
-    if current_data is new_data:
-        return
-    if (current_data is not None and new_data is not None
-            and type(current_data) is not type(new_data)):
-        obj.data = None
-    obj.data = new_data
-
-
 def _transactional_update(stair_object, candidate, *, new_stair_id=None,
                           reset_transform=False):
     """Build replacement first, then atomically swap and roll back commit errors."""
@@ -129,7 +113,7 @@ def _transactional_update(stair_object, candidate, *, new_stair_id=None,
     old_transform = (tuple(stair_object.location),
                      tuple(stair_object.rotation_euler), tuple(stair_object.scale))
     replacement = None
-    assignment_started = False
+    swapped = False
     try:
         base_name = old_data.name if old_data else stair_object.name
         replacement = bpy.data.meshes.new(f"{base_name} Update")
@@ -141,8 +125,8 @@ def _transactional_update(stair_object, candidate, *, new_stair_id=None,
         if materials is not None:
             for material in materials:
                 replacement.materials.append(material)
-        assignment_started = True
-        _assign_object_data(stair_object, replacement)
+        stair_object.data = replacement
+        swapped = True
         _set_canonical(stair, candidate)
         if new_stair_id is not None:
             stair.stair_id = new_stair_id
@@ -151,8 +135,8 @@ def _transactional_update(stair_object, candidate, *, new_stair_id=None,
             stair_object.rotation_euler = (0.0, 0.0, 0.0)
             stair_object.scale = (1.0, 1.0, 1.0)
     except Exception:
-        if assignment_started:
-            _best_effort(lambda: _assign_object_data(stair_object, old_data))
+        if swapped:
+            _best_effort(lambda: setattr(stair_object, "data", old_data))
             _best_effort(lambda: _set_canonical(stair, old_canonical))
             _best_effort(lambda: setattr(stair, "stair_id", old_id))
             _best_effort(lambda: setattr(stair_object, "location", old_transform[0]))
