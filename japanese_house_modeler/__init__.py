@@ -37,6 +37,8 @@ _CLASSES = (
     stair_operators.JHM_OT_reverse_stair_ascent,
     stair_operators.JHM_OT_regenerate_stair,
     stair_operators.JHM_OT_repair_stair,
+    stair_operators.JHM_OT_convert_stair_mesh,
+    stair_operators.JHM_OT_delete_stair,
     finish_operators.JHM_OT_start_finish_path,
     finish_operators.JHM_OT_regenerate_finish,
     finish_operators.JHM_OT_register_custom_profile,

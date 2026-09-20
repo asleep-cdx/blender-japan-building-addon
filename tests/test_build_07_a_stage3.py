@@ -283,12 +283,13 @@ class TransactionStructureTests(unittest.TestCase):
         self.assertNotIn("clear_geometry", self.source)
         self.assertNotIn("foreach_get", self.source)
 
-    def test_stage4_operators_and_ui_are_deferred(self):
+    def test_stage4_finalization_name_remains_distinct_from_stage3(self):
         init = (ROOT / "japanese_house_modeler" / "__init__.py").read_text()
         ui = (ROOT / "japanese_house_modeler" / "ui.py").read_text()
-        for name in ("finalize_stair", "delete_stair"):
-            self.assertNotIn(name, init)
-            self.assertNotIn(name, ui)
+        # The specified Stage 4 id is convert_stair_mesh, not the formerly
+        # deferred/ambiguous finalize_stair spelling.
+        self.assertNotIn("finalize_stair", init)
+        self.assertNotIn("finalize_stair", ui)
 
 
 if __name__ == "__main__":
