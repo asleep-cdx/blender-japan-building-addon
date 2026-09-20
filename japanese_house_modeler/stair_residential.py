@@ -80,7 +80,7 @@ def residential_candidate(record):
     """Return an immutable candidate; never mutate or commit Scene state."""
     candidate = StairTransitionSnapshot.capture(record)
     candidate = replace(candidate, assembly_mode=STANDARD_RESIDENTIAL,
-                        stair_schema_version=2)
+                        stair_schema_version=max(candidate.stair_schema_version, 2))
     validate_mode_data(candidate.assembly_mode, candidate.stair_schema_version,
                        candidate.residential)
     return candidate

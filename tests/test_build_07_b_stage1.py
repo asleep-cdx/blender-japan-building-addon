@@ -83,18 +83,29 @@ class CompatibilityAndDataTests(unittest.TestCase):
                 validate_mode_data(STANDARD_RESIDENTIAL, 2,
                                    ResidentialFields(**change))
 
-    def test_candidate_and_snapshot_leave_source_unchanged(self):
-        source = record(location=(1, 2, 3), rotation=(.1, .2, .3))
+    def assert_candidate_schema(self, source_schema, expected_schema):
+        source = record(assembly_mode=BASIC_TREAD_RISER,
+                        stair_schema_version=source_schema,
+                        location=(1, 2, 3), rotation=(.1, .2, .3))
+        before = vars(source).copy()
         snapshot = StairTransitionSnapshot.capture(source)
         candidate = residential_candidate(source)
         self.assertEqual(candidate.assembly_mode, STANDARD_RESIDENTIAL)
-        self.assertEqual(candidate.stair_schema_version, 2)
-        self.assertEqual(snapshot.restore_values()["assembly_mode"],
-                         BASIC_TREAD_RISER)
-        self.assertFalse(hasattr(source, "assembly_mode"))
-        for name in ("path_points", "ascent_direction", "stair_id", "transform",
-                     "base_material", "side_board_material"):
+        self.assertEqual(candidate.stair_schema_version, expected_schema)
+        self.assertEqual(snapshot.stair_schema_version, source_schema)
+        self.assertEqual(vars(source), before)
+        for name in ("path_points", "ascent_direction", "stair_id",
+                     "transform", "base_material", "side_board_material"):
             self.assertIn(name, snapshot.restore_values())
+
+    def test_schema_1_basic_candidate_uses_residential_schema_2(self):
+        self.assert_candidate_schema(1, 2)
+
+    def test_schema_2_basic_candidate_remains_schema_2(self):
+        self.assert_candidate_schema(2, 2)
+
+    def test_schema_3_basic_candidate_is_not_downgraded(self):
+        self.assert_candidate_schema(3, 3)
 
 
 class MaterialTests(unittest.TestCase):
@@ -146,6 +157,35 @@ class PolygonTests(unittest.TestCase):
                    for triangle in triangles)
         self.assertAlmostEqual(area, polygon_signed_area(polygon))
         self.assertEqual(len(triangles), len(polygon) - 2)
+
+        def inside_or_boundary(point):
+            # Even/odd ray casting with an explicit boundary check.
+            inside = False
+            for index, start in enumerate(polygon):
+                end = polygon[(index + 1) % len(polygon)]
+                cross = ((end[0] - start[0]) * (point[1] - start[1])
+                         - (end[1] - start[1]) * (point[0] - start[0]))
+                if (abs(cross) <= 1.0e-12
+                        and min(start[0], end[0]) <= point[0] <= max(start[0], end[0])
+                        and min(start[1], end[1]) <= point[1] <= max(start[1], end[1])):
+                    return True
+                if ((start[1] > point[1]) != (end[1] > point[1])):
+                    crossing_x = (start[0] + (point[1] - start[1])
+                                  * (end[0] - start[0]) / (end[1] - start[1]))
+                    if point[0] < crossing_x:
+                        inside = not inside
+            return inside
+
+        for triangle in triangles:
+            vertices = tuple(polygon[index] for index in triangle)
+            samples = ((
+                (sum(point[0] for point in vertices) / 3.0,
+                 sum(point[1] for point in vertices) / 3.0),
+            ) + tuple(
+                ((vertices[index][0] + vertices[(index + 1) % 3][0]) / 2.0,
+                 (vertices[index][1] + vertices[(index + 1) % 3][1]) / 2.0)
+                for index in range(3)))
+            self.assertTrue(all(inside_or_boundary(point) for point in samples))
 
 
 class ExtrusionTests(unittest.TestCase):
