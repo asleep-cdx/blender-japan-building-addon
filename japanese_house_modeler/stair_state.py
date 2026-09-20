@@ -3,6 +3,9 @@
 from dataclasses import dataclass
 
 from .stair_geometry import resolve_stair_layout
+from .stair_residential import (
+    BASIC_TREAD_RISER, ResidentialFields, validate_mode_data,
+)
 
 
 NORMAL = "NORMAL"
@@ -42,6 +45,9 @@ class StairState:
     has_mesh: bool = True
     vertex_count: int = 1
     face_count: int = 1
+    assembly_mode: str = BASIC_TREAD_RISER
+    stair_schema_version: int = 1
+    residential: ResidentialFields = ResidentialFields()
 
 
 def duplicate_stair_ids(records):
@@ -78,6 +84,12 @@ def diagnose_stair(state, duplicate_ids=()):
             state.tread_thickness_mm, state.riser_thickness_mm)
     except (TypeError, ValueError, OverflowError):
         issues.append(INVALID_CANONICAL)
+    try:
+        validate_mode_data(state.assembly_mode, state.stair_schema_version,
+                           state.residential)
+    except (TypeError, ValueError, OverflowError):
+        if INVALID_CANONICAL not in issues:
+            issues.append(INVALID_CANONICAL)
     if not (_near(state.location, (0.0, 0.0, 0.0))
             and _near(state.rotation, (0.0, 0.0, 0.0))
             and _near(state.scale, (1.0, 1.0, 1.0))):

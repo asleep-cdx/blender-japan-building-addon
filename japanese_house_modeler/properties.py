@@ -19,6 +19,10 @@ _ASCENT_DIRECTION_ITEMS = (
     ("FORWARD", "順方向", "P0からP1へ上る"),
     ("REVERSE", "逆方向", "P1からP0へ上る"),
 )
+_STAIR_ASSEMBLY_ITEMS = (
+    ("BASIC_TREAD_RISER", "Basic", "07-A互換の踏板・蹴込み板構成"),
+    ("STANDARD_RESIDENTIAL", "Residential", "住宅階段構成"),
+)
 
 
 class JHM_StairPathPoint(bpy.types.PropertyGroup):
@@ -50,6 +54,9 @@ class JHM_StairProperties(bpy.types.PropertyGroup):
 
     is_stair: bpy.props.BoolProperty(default=False, options={"HIDDEN"})
     stair_id: bpy.props.StringProperty(default="", options={"HIDDEN"})
+    assembly_mode: bpy.props.EnumProperty(
+        items=_STAIR_ASSEMBLY_ITEMS, default="BASIC_TREAD_RISER", options={"HIDDEN"})
+    stair_schema_version: bpy.props.IntProperty(default=1, options={"HIDDEN"})
     path_points: bpy.props.CollectionProperty(type=JHM_StairPathPoint)
     ascent_direction: bpy.props.EnumProperty(
         name="上り方向", items=_ASCENT_DIRECTION_ITEMS, default="FORWARD")
@@ -59,6 +66,19 @@ class JHM_StairProperties(bpy.types.PropertyGroup):
     stair_width_mm: bpy.props.FloatProperty(name="階段幅", default=900.0, min=0.1)
     tread_thickness_mm: bpy.props.FloatProperty(name="踏板厚", default=30.0, min=0.1)
     riser_thickness_mm: bpy.props.FloatProperty(name="蹴込み板厚", default=12.0, min=0.1)
+    underside_mode: bpy.props.EnumProperty(
+        items=(("STEPPED_CLOSED", "Stepped Closed", "段々閉じ下面"),),
+        default="STEPPED_CLOSED", options={"HIDDEN"})
+    underside_thickness_mm: bpy.props.FloatProperty(default=9.5, options={"HIDDEN"})
+    left_side_board_enabled: bpy.props.BoolProperty(default=True, options={"HIDDEN"})
+    right_side_board_enabled: bpy.props.BoolProperty(default=True, options={"HIDDEN"})
+    side_board_thickness_mm: bpy.props.FloatProperty(default=18.0, options={"HIDDEN"})
+    side_board_band_width_mm: bpy.props.FloatProperty(default=150.0, options={"HIDDEN"})
+    base_material: bpy.props.PointerProperty(type=bpy.types.Material, options={"HIDDEN"})
+    tread_material: bpy.props.PointerProperty(type=bpy.types.Material, options={"HIDDEN"})
+    riser_material: bpy.props.PointerProperty(type=bpy.types.Material, options={"HIDDEN"})
+    underside_material: bpy.props.PointerProperty(type=bpy.types.Material, options={"HIDDEN"})
+    side_board_material: bpy.props.PointerProperty(type=bpy.types.Material, options={"HIDDEN"})
 
 
 class JHM_NewWallDefaults(bpy.types.PropertyGroup):
