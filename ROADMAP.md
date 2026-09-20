@@ -53,12 +53,15 @@
 - **Build 06-B — ACCEPTED**
 - **Build 06-C — ACCEPTED**
 - **Build 06-C overall — ACCEPTED**
-- Add-on version: **0.6.3**
-- Build 06-C final identification: `Build 06-C Stage 3: Profile Thumbnail UI and Final Integration`
+- **Build 07-A — ACCEPTED**
+- **Build 07-A overall — ACCEPTED**
+- **Build 07-B — NEXT**
+- Add-on version: **0.7.0**
+- Build 07-A final identification: `Build 07-A: Stair Core + Top-view 2-point Straight Stair`
 
-現時点で、Wall System、Finish Attachment Foundation、Baseboard、Crown Mouldingまでの基盤が成立している。
+現時点で、Wall System、Finish Attachment Foundation、Baseboard、Crown Moulding、およびstandalone Managed Stair Coreまでの基盤が成立している。
 
-次の主要開発は **Build 07 — Stair System** とする。
+次の主要開発は **Build 07-B — Standard Residential Straight Stair + Stepped Closed Underside + Side Boards** とする。
 
 Build 07では、07-A〜07-Fを階段システムの主要本線として段階的に開発する。
 ただし開発順は固定ではなく、**07-Cおよび07-E完了時点で実用性・残作業・他機能との優先順位を再評価し、必要に応じて08/09との順序を見直せる**。
@@ -76,8 +79,8 @@ Build 07では、07-A〜07-Fを階段システムの主要本線として段階�
 | **06-A** | Finish Attachment Foundation | **DONE / ACCEPTED** |
 | **06-B** | Baseboard / 巾木 | **DONE / ACCEPTED** |
 | **06-C** | Crown Moulding / 廻り縁 + Profile Thumbnail UI | **DONE / ACCEPTED** |
-| **07-A** | Stair Core + Top-view 2-point Straight Stair | **NEXT / PLANNED** |
-| **07-B** | Standard Residential Straight Stair + Stepped Closed Underside + Side Boards | Planned |
+| **07-A** | Stair Core + Top-view 2-point Straight Stair | **DONE / ACCEPTED** |
+| **07-B** | Standard Residential Straight Stair + Stepped Closed Underside + Side Boards | **NEXT / PLANNED** |
 | **07-C** | Sloped Closed Underside + Straight Stair Finish Variants | Planned |
 | **07-D** | Multi-point Path + L/U + Landing | Planned |
 | **07-E** | Winder / 廻り段 | Planned |
@@ -814,6 +817,10 @@ Managed状態の生成geometryを直接編集した結果をcanonical Stairへ�
 
 ## 12.8 Build 07-A — Stair Core + Top-view 2-point Straight Stair
 
+**Status: ACCEPTED**
+
+07-AのStage 1〜4およびBuild全体はBlender 5.2 LTS runtime acceptanceを完了した。詳細なproduction revision、automated evidence、runtime evidenceは `BUILD_07_A_ACCEPTANCE_RECORD.md` を正とする。
+
 目的：
 
 - Stair canonical dataを確立する。
@@ -1327,32 +1334,21 @@ Roadmap変更は許可するが、Accepted historyは消さない。
 06-A  ACCEPTED
 06-B  ACCEPTED
 06-C  ACCEPTED
+07-A  ACCEPTED
 ```
 
 次：
 
 ```text
-07-A Stair Core + Top-view 2-point Straight Stair
+07-B Standard Residential Straight Stair
+     + Stepped Closed Underside
+     + Side Boards
 ```
 
-進行手順：
+状態遷移：
 
 ```text
-ROADMAP Build 07 revision
-↓
-review
-↓
-GitHub mainへ反映
-↓
-BUILD_07_A_SPECIFICATION.md 作成
-↓
-仕様レビュー
-↓
-Codex implementation
-↓
-Candidate / Blender runtime test
-↓
-Acceptance
+07-A ACCEPTED → 07-B NEXT
 ```
 
 ---
