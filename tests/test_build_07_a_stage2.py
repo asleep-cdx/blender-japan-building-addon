@@ -234,12 +234,14 @@ class StairStage2StructureTests(unittest.TestCase):
         self.assertEqual(identity_transform_contract(),
                          ((0, 0, 0), (0, 0, 0), (1, 1, 1)))
 
-    def test_derived_ui_is_read_only_and_stage3_operators_are_absent(self):
+    def test_derived_ui_remains_read_only_and_stage3_is_registered(self):
         for label in ("上端到達高さ", "実蹴上", "独立踏板枚数", "水平長", "踏面ピッチ"):
             self.assertIn(label, self.ui_source)
         for operator in ("edit_stair_dimensions", "edit_stair_path",
-                         "reverse_stair", "regenerate_stair", "repair_stair"):
-            self.assertNotIn(operator, self.init_source)
+                         "reverse_stair_ascent", "regenerate_stair", "repair_stair"):
+            self.assertIn(operator, self.init_source)
+        for stage4_operator in ("finalize_stair", "delete_stair"):
+            self.assertNotIn(stage4_operator, self.init_source)
         self.assertNotIn("show_risers", self.ui_source)
 
 
