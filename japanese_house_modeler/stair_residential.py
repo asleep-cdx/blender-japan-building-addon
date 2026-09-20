@@ -56,7 +56,8 @@ def validate_mode_data(assembly_mode, schema_version, fields=None):
         raise ValueError("Stair schema versionは正の整数である必要があります。")
     if assembly_mode == BASIC_TREAD_RISER:
         return True
-    values = fields if isinstance(fields, ResidentialFields) else residential_fields(fields)
+    values = (fields if isinstance(fields, ResidentialFields)
+              else residential_fields(fields))
     if values.underside_mode != STEPPED_CLOSED:
         raise ValueError("未対応の下面modeです。")
     if not isinstance(values.left_side_board_enabled, bool) \
@@ -74,6 +75,24 @@ def validate_mode_data(assembly_mode, schema_version, fields=None):
         if not math.isfinite(value) or value <= 0.0:
             raise ValueError(f"{name}は正の有限値である必要があります。")
     return True
+
+
+def validate_stepped_underbody_thickness(fields, actual_riser,
+                                          tread_thickness, riser_thickness):
+    """Validate the Stage 2 supported range using metre-based dimensions."""
+    values = (fields if isinstance(fields, ResidentialFields)
+              else residential_fields(fields))
+    try:
+        thickness = float(values.underside_thickness_mm) / 1000.0
+        limit = min(float(actual_riser) - float(tread_thickness),
+                    float(riser_thickness))
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("下面厚は対応範囲内の有限値である必要があります。") from exc
+    if (not math.isfinite(thickness) or not math.isfinite(limit)
+            or thickness <= 0.0 or thickness >= limit):
+        raise ValueError(
+            "下面厚は0より大きく、実蹴上－踏板厚と蹴込み板厚の小さい方未満にしてください。")
+    return thickness
 
 
 def residential_candidate(record):

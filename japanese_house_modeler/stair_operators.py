@@ -17,7 +17,11 @@ from .stair_state import (
     ID_CONFLICT, ID_MISSING, StairState, diagnose_stair,
     duplicate_stair_ids, operation_allowed,
 )
-from .stair_residential import residential_fields, semantic_assembly_mode, semantic_schema_version
+from .stair_residential import (
+    STANDARD_RESIDENTIAL, residential_fields, semantic_assembly_mode,
+    semantic_schema_version,
+)
+from .stair_residential_geometry import prepare_stage2_residential_geometry
 
 
 _PLANE_EPSILON = 1.0e-10
@@ -29,10 +33,14 @@ _CANONICAL_NAMES = _STAIR_DEFAULT_NAMES
 
 
 def _canonical_snapshot(stair):
-    return {
+    values = {
         "path_points": tuple(tuple(point.xy) for point in stair.path_points),
         **{name: getattr(stair, name) for name in _CANONICAL_NAMES},
     }
+    values.update(assembly_mode=semantic_assembly_mode(stair),
+                  stair_schema_version=semantic_schema_version(stair),
+                  residential=residential_fields(stair))
+    return values
 
 
 def _managed_records(scene):
@@ -84,11 +92,28 @@ def _set_canonical(stair, values):
 
 
 def _prepare_candidate(values):
+    if values.get("assembly_mode") == STANDARD_RESIDENTIAL:
+        return prepare_stage2_residential_geometry(
+            values["path_points"], values["ascent_direction"],
+            values["base_z_mm"], values["floor_to_floor_mm"],
+            values["riser_count"], values["stair_width_mm"],
+            values["tread_thickness_mm"], values["riser_thickness_mm"],
+            assembly_mode=values["assembly_mode"],
+            stair_schema_version=values["stair_schema_version"],
+            fields=values["residential"])[2]
     return prepare_stair_geometry(
         values["path_points"], values["ascent_direction"], values["base_z_mm"],
         values["floor_to_floor_mm"], values["riser_count"],
         values["stair_width_mm"], values["tread_thickness_mm"],
         values["riser_thickness_mm"])[2]
+
+
+def regenerate_stage2_residential_for_runtime(stair_object):
+    """Non-operator runtime hook for a controlled Side-Boards-OFF object."""
+    stair = stair_object.jhm_stair
+    if semantic_assembly_mode(stair) != STANDARD_RESIDENTIAL:
+        raise ValueError("controlled objectをSTANDARD_RESIDENTIALに設定してください。")
+    _transactional_update(stair_object, _canonical_snapshot(stair))
 
 
 def _best_effort(action):

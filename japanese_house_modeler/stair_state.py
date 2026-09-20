@@ -4,7 +4,8 @@ from dataclasses import dataclass
 
 from .stair_geometry import resolve_stair_layout
 from .stair_residential import (
-    BASIC_TREAD_RISER, ResidentialFields, validate_mode_data,
+    BASIC_TREAD_RISER, STANDARD_RESIDENTIAL, ResidentialFields,
+    validate_mode_data, validate_stepped_underbody_thickness,
 )
 
 
@@ -77,8 +78,9 @@ def diagnose_stair(state, duplicate_ids=()):
         issues.append(ID_MISSING)
     elif state.stair_id in duplicate_ids:
         issues.append(ID_CONFLICT)
+    layout = None
     try:
-        resolve_stair_layout(
+        layout = resolve_stair_layout(
             state.path_points, state.ascent_direction, state.base_z_mm,
             state.floor_to_floor_mm, state.riser_count, state.stair_width_mm,
             state.tread_thickness_mm, state.riser_thickness_mm)
@@ -87,6 +89,10 @@ def diagnose_stair(state, duplicate_ids=()):
     try:
         validate_mode_data(state.assembly_mode, state.stair_schema_version,
                            state.residential)
+        if state.assembly_mode == STANDARD_RESIDENTIAL and layout is not None:
+            validate_stepped_underbody_thickness(
+                state.residential, layout.actual_riser,
+                layout.tread_thickness, layout.riser_thickness)
     except (TypeError, ValueError, OverflowError):
         if INVALID_CANONICAL not in issues:
             issues.append(INVALID_CANONICAL)
