@@ -240,8 +240,9 @@ class StairStage2StructureTests(unittest.TestCase):
         for operator in ("edit_stair_dimensions", "edit_stair_path",
                          "reverse_stair_ascent", "regenerate_stair", "repair_stair"):
             self.assertIn(operator, self.init_source)
-        for stage4_operator in ("finalize_stair", "delete_stair"):
-            self.assertNotIn(stage4_operator, self.init_source)
+        # Stage 4 uses the specified convert_stair_mesh id rather than the
+        # ambiguous finalize_stair spelling guarded by the earlier stage.
+        self.assertNotIn("finalize_stair", self.init_source)
         self.assertNotIn("show_risers", self.ui_source)
 
 

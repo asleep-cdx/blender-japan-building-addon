@@ -168,6 +168,13 @@ class JHM_PT_house_modeler(bpy.types.Panel):
             repair = selected_box.row()
             repair.enabled = operation_allowed("REPAIR", issues)
             repair.operator("jhm.repair_stair", text="管理状態へ復元")
+            finalize = selected_box.row()
+            finalize.enabled = operation_allowed("FINALIZE", issues)
+            finalize.operator(
+                "jhm.convert_stair_mesh", text="編集可能Meshとして確定")
+            delete = selected_box.row()
+            delete.enabled = operation_allowed("DELETE", issues)
+            delete.operator("jhm.delete_stair", text="階段を削除")
         elif active_object and active_object.jhm_wall.is_wall:
             selected_box.label(text="選択中の壁")
             wall = active_object.jhm_wall

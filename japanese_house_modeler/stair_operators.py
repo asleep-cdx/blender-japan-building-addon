@@ -61,9 +61,15 @@ def stair_issues(stair_object, scene):
 
 def _selected_stair(context):
     obj = context.active_object
-    if obj is None or not getattr(getattr(obj, "jhm_stair", None), "is_stair", False):
+    if (obj is None or not obj.select_get()
+            or not getattr(getattr(obj, "jhm_stair", None), "is_stair", False)):
         return None
     return obj
+
+
+def finalize_stair_management(stair):
+    """End JHM management without changing canonical or generated Mesh data."""
+    stair.is_stair = False
 
 
 def _set_canonical(stair, values):
@@ -497,3 +503,41 @@ class JHM_OT_repair_stair(_StairOperationMixin, bpy.types.Operator):
         return self._run_candidate(
             context, _canonical_snapshot(obj.jhm_stair),
             new_stair_id=new_id, reset_transform=True)
+
+
+class JHM_OT_convert_stair_mesh(_StairOperationMixin, bpy.types.Operator):
+    """Finalize the existing managed Mesh in place for unrestricted editing."""
+
+    bl_idname = "jhm.convert_stair_mesh"
+    bl_label = "編集可能Meshとして確定"
+    bl_options = {"REGISTER", "UNDO"}
+    operation = "FINALIZE"
+
+    def execute(self, context):
+        obj = self._require_allowed(context)
+        if obj is None:
+            return {"CANCELLED"}
+        # The Stair already is a Mesh.  Only its management marker changes;
+        # Object identity, data, geometry, materials, transform, and canonical
+        # values (including stair_id and Path) deliberately remain untouched.
+        finalize_stair_management(obj.jhm_stair)
+        return {"FINISHED"}
+
+
+class JHM_OT_delete_stair(_StairOperationMixin, bpy.types.Operator):
+    """Delete only the active selected managed Stair Object."""
+
+    bl_idname = "jhm.delete_stair"
+    bl_label = "階段を削除"
+    bl_options = {"REGISTER", "UNDO"}
+    operation = "DELETE"
+
+    def execute(self, context):
+        obj = self._require_allowed(context)
+        if obj is None:
+            return {"CANCELLED"}
+        # Do not invoke selection-wide bpy.ops.object.delete and do not remove
+        # Object.data or Materials.  Blender's orphan management keeps this
+        # direct Object removal safe for shared data and for Undo/Redo.
+        bpy.data.objects.remove(obj, do_unlink=True)
+        return {"FINISHED"}
