@@ -1,6 +1,6 @@
 # Japanese House Modeler — Development Roadmap
 
-最終更新: 2026-09-19
+最終更新: 2026-09-20
 
 この文書は、Blender 5.2 LTS 向け **Japanese House Modeler / 日本住宅モデラー** の今後の開発順序と、各Buildをまたいで維持する設計方針をまとめたロードマップである。
 
@@ -972,6 +972,26 @@ Case D: both OFF
 - consistent total floor-to-floor
 - riser distribution across flights
 - path edit / regeneration
+
+### Multi-point Path interaction contract
+
+07-Dでは、Wall作成に近いトップビュー操作をStairのMulti-point Pathへ拡張する。
+
+作成時：
+
+- P0 = START、必要なintermediate turn points、Pn = ENDを順番にクリックして1つのcanonical Pathを作る。
+- 次のPath segmentを指定するとき、**Shiftによる角度拘束**を提供する。
+- Shift角度拘束の操作感は既存Wallの角度拘束と整合させる。具体的な拘束角度・スナップ規則は07-D Specificationで固定する。
+- 07-B / 07-Cで2点Stair専用の一時的な角度拘束を別実装せず、Multi-point化する07-Dで共通Path interactionとして実装する。
+
+作成後：
+
+- **START / ENDだけでなく、すべてのintermediate Path pointを個別にマウスで再配置できることを07-Dの必須要件とする。**
+- U字Pathが P0=START, P1/P2=turn, P3=END の場合、P0〜P3をそれぞれ移動して形状を修正できること。
+- point移動はObject Transformではなくcanonical `path_points[]` のXYを更新し、影響するflight / Landing / derived geometryをtransactionalに再計算・再生成する。
+- invalid / too-short segment等を生む移動はpartial commitせず拒否またはrollbackする。
+- 数値によるPath座標編集は精密入力手段として維持し、マウス編集と同じcanonical Pathを更新する。
+- 07-EのWinder / 廻り段もこのPath-point editing foundationを再利用し、曲がり点移動後にturn geometryを再解決できる設計とする。
 
 複数点Pathを単なる複数の独立直階段として実装しない。
 
