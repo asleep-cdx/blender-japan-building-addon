@@ -186,13 +186,13 @@ class TransactionStructureTests(unittest.TestCase):
         self.assertLess(source.index("_prepare_candidate(candidate)"),
                         source.index("bpy.data.meshes.new"))
         self.assertLess(source.index("replacement.from_pydata"),
-                        source.index("stair_object.data = replacement"))
-        self.assertLess(source.index("stair_object.data = replacement"),
+                        source.index("_assign_object_data(stair_object, replacement)"))
+        self.assertLess(source.index("_assign_object_data(stair_object, replacement)"),
                         source.index("_set_canonical(stair, candidate)"))
 
     def test_rollback_restores_all_snapshots_and_removes_replacement(self):
         source = ast.unparse(self.function("_transactional_update"))
-        for fragment in ("setattr(stair_object, 'data', old_data)",
+        for fragment in ("_assign_object_data(stair_object, old_data)",
                          "_set_canonical(stair, old_canonical)",
                          "setattr(stair, 'stair_id', old_id)", "old_transform",
                          "_cleanup_unused_data(replacement)"):
@@ -203,7 +203,25 @@ class TransactionStructureTests(unittest.TestCase):
         self.assertIn("getattr(old_data, 'materials', ())", source)
         self.assertIn("for material in materials", source)
         self.assertLess(source.index("replacement.materials.append(material)"),
-                        source.index("stair_object.data = replacement"))
+                        source.index("_assign_object_data(stair_object, replacement)"))
+
+    def test_cross_type_assignment_detaches_without_replacing_object(self):
+        helper = ast.unparse(self.function("_assign_object_data"))
+        transaction = ast.unparse(self.function("_transactional_update"))
+        self.assertIn("current_data = obj.data", helper)
+        self.assertIn("type(current_data) is not type(new_data)", helper)
+        self.assertLess(helper.index("obj.data = None"),
+                        helper.index("obj.data = new_data"))
+        self.assertNotIn("bpy.data.objects.new", transaction)
+        self.assertNotIn("bpy.data.objects.remove", transaction)
+
+    def test_cross_type_assignment_failure_rolls_back_old_data(self):
+        transaction = ast.unparse(self.function("_transactional_update"))
+        self.assertLess(transaction.index("assignment_started = True"),
+                        transaction.index(
+                            "_assign_object_data(stair_object, replacement)"))
+        self.assertIn("if assignment_started:", transaction)
+        self.assertIn("_assign_object_data(stair_object, old_data)", transaction)
 
     def test_non_mesh_old_data_is_not_treated_as_a_mesh(self):
         transaction = ast.unparse(self.function("_transactional_update"))
