@@ -17,6 +17,7 @@ from .stair_state import (
     ID_CONFLICT, ID_MISSING, StairState, diagnose_stair,
     duplicate_stair_ids, operation_allowed,
 )
+from .stair_residential import residential_fields, semantic_assembly_mode, semantic_schema_version
 
 
 _PLANE_EPSILON = 1.0e-10
@@ -54,6 +55,8 @@ def stair_issues(stair_object, scene):
         stair_object.type, mesh is not None,
         len(mesh.vertices) if mesh is not None and hasattr(mesh, "vertices") else 0,
         len(mesh.polygons) if mesh is not None and hasattr(mesh, "polygons") else 0,
+        semantic_assembly_mode(stair), semantic_schema_version(stair),
+        residential_fields(stair),
     )
     duplicates = duplicate_stair_ids(_managed_records(scene))
     return diagnose_stair(state, duplicates)

@@ -3,10 +3,10 @@
 bl_info = {
     "name": "日本住宅モデラー",
     "author": "Japanese House Modeler Contributors",
-    "version": (0, 7, 0),
+    "version": (0, 7, 1),
     "blender": (5, 2, 0),
     "location": "View3D > Sidebar > 日本住宅",
-    "description": "Build 07-A: Stair Core + Top-view 2-point Straight Stair",
+    "description": "Build 07-B: Standard Residential Straight Stair",
     "category": "3D View",
 }
 

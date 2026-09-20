@@ -1,4 +1,4 @@
-"""Pure canonical, layout, and basic geometry helpers for Build 07-A."""
+"""Pure canonical, layout, and limited solid geometry helpers for Stairs."""
 
 from dataclasses import dataclass
 import math
@@ -246,7 +246,7 @@ def build_riser_fragments(layout):
 
 
 def _face_area(vertices, face):
-    """Return a quad area via two triangle cross products."""
+    """Return a 3D polygon area using a stable triangle fan."""
     def triangle_area(a, b, c):
         ab = tuple(b[i] - a[i] for i in range(3))
         ac = tuple(c[i] - a[i] for i in range(3))
@@ -254,19 +254,37 @@ def _face_area(vertices, face):
                  ab[2] * ac[0] - ab[0] * ac[2],
                  ab[0] * ac[1] - ab[1] * ac[0])
         return math.sqrt(sum(value * value for value in cross)) / 2.0
-    a, b, c, d = (vertices[index] for index in face)
-    return triangle_area(a, b, c) + triangle_area(a, c, d)
+    anchor = vertices[face[0]]
+    return sum(triangle_area(anchor, vertices[face[index]],
+                             vertices[face[index + 1]])
+               for index in range(1, len(face) - 1))
+
+
+def _signed_volume(vertices, faces):
+    """Return oriented volume; positive means outward face winding."""
+    volume = 0.0
+    for face in faces:
+        anchor = vertices[face[0]]
+        for index in range(1, len(face) - 1):
+            b, c = vertices[face[index]], vertices[face[index + 1]]
+            volume += (
+                anchor[0] * (b[1] * c[2] - b[2] * c[1])
+                + anchor[1] * (b[2] * c[0] - b[0] * c[2])
+                + anchor[2] * (b[0] * c[1] - b[1] * c[0])
+            ) / 6.0
+    return volume
 
 
 def validate_mesh_fragments(fragments):
     """Reject non-finite vertices, bad indices, and zero-area faces."""
     for fragment in fragments:
-        if len(fragment.vertices) != 8 or len(fragment.faces) != 6:
-            raise ValueError("Stair fragmentはclosed rectangular solidである必要があります。")
+        if len(fragment.vertices) < 4 or len(fragment.faces) < 4:
+            raise ValueError("Stair fragmentはclosed solidである必要があります。")
         if not all(math.isfinite(value) for vertex in fragment.vertices
                    for value in vertex):
             raise ValueError("Stair geometryに非有限座標があります。")
         edge_use = {}
+        directed_edges = set()
         for face in fragment.faces:
             if len(face) < 3 or any(index < 0 or index >= len(fragment.vertices)
                                     for index in face):
@@ -279,9 +297,136 @@ def validate_mesh_fragments(fragments):
                 end = face[(index + 1) % len(face)]
                 edge = tuple(sorted((start, end)))
                 edge_use[edge] = edge_use.get(edge, 0) + 1
+                if (start, end) in directed_edges:
+                    raise ValueError("Stair geometryのface windingが一貫していません。")
+                directed_edges.add((start, end))
         if not edge_use or any(count != 2 for count in edge_use.values()):
             raise ValueError("Stair fragmentはclosed manifold solidである必要があります。")
+        if any((end, start) not in directed_edges
+               for start, end in directed_edges):
+            raise ValueError("Stair geometryのface windingが一貫していません。")
+        if _signed_volume(fragment.vertices, fragment.faces) <= 1.0e-15:
+            raise ValueError("Stair fragmentのfaceは外向きである必要があります。")
     return True
+
+
+def _cross_2d(a, b, c):
+    return ((b[0] - a[0]) * (c[1] - a[1])
+            - (b[1] - a[1]) * (c[0] - a[0]))
+
+
+def polygon_signed_area(points):
+    """Return the signed area of a 2D polygon (CCW is positive)."""
+    return sum(points[i][0] * points[(i + 1) % len(points)][1]
+               - points[(i + 1) % len(points)][0] * points[i][1]
+               for i in range(len(points))) / 2.0
+
+
+def _segments_intersect(a, b, c, d, epsilon):
+    orientations = (_cross_2d(a, b, c), _cross_2d(a, b, d),
+                    _cross_2d(c, d, a), _cross_2d(c, d, b))
+    if any(abs(value) <= epsilon for value in orientations):
+        # Non-adjacent touching is invalid for the deliberately limited simple
+        # polygon contract, including collinear overlap.
+        def within(p, q, r):
+            return (min(p[0], q[0]) - epsilon <= r[0] <= max(p[0], q[0]) + epsilon
+                    and min(p[1], q[1]) - epsilon <= r[1] <= max(p[1], q[1]) + epsilon)
+        return any(abs(value) <= epsilon and within(p, q, r)
+                   for value, p, q, r in (
+                       (orientations[0], a, b, c), (orientations[1], a, b, d),
+                       (orientations[2], c, d, a), (orientations[3], c, d, b)))
+    return ((orientations[0] > 0) != (orientations[1] > 0)
+            and (orientations[2] > 0) != (orientations[3] > 0))
+
+
+def validate_simple_polygon(points, *, epsilon=1.0e-12):
+    """Validate a finite, hole-free, non-self-touching 2D polygon.
+
+    A repeated closing point and consecutive duplicates are cleaned. Other
+    zero-length edges and non-adjacent repeated/touching points are rejected.
+    The returned polygon is deterministic and normalized counter-clockwise.
+    """
+    if points is None:
+        raise ValueError("2D profileがありません。")
+    raw = []
+    for point in points:
+        if point is None or len(point) != 2:
+            raise ValueError("2D profile pointは2座標である必要があります。")
+        converted = (float(point[0]), float(point[1]))
+        if not all(math.isfinite(value) for value in converted):
+            raise ValueError("2D profile座標は有限値である必要があります。")
+        if not raw or converted != raw[-1]:
+            raw.append(converted)
+    if len(raw) > 1 and raw[0] == raw[-1]:
+        raw.pop()
+    if len(raw) < 3:
+        raise ValueError("2D profileには3点以上が必要です。")
+    for index, point in enumerate(raw):
+        following = raw[(index + 1) % len(raw)]
+        if math.hypot(following[0] - point[0], following[1] - point[1]) <= epsilon:
+            raise ValueError("2D profileにzero-length edgeがあります。")
+    count = len(raw)
+    for first in range(count):
+        for second in range(first + 1, count):
+            if second in (first, first + 1) or (first == 0 and second == count - 1):
+                continue
+            if _segments_intersect(raw[first], raw[(first + 1) % count],
+                                   raw[second], raw[(second + 1) % count], epsilon):
+                raise ValueError("2D profileはsimple polygonである必要があります。")
+    area = polygon_signed_area(raw)
+    if abs(area) <= epsilon:
+        raise ValueError("2D profile areaは0より大きい必要があります。")
+    return tuple(raw if area > 0 else reversed(raw))
+
+
+def triangulate_simple_polygon(points):
+    """Deterministically ear-clip a validated polygon into CCW triangles."""
+    polygon = validate_simple_polygon(points)
+    remaining = list(range(len(polygon)))
+    triangles = []
+
+    def inside_triangle(point, a, b, c):
+        return (_cross_2d(a, b, point) >= -1.0e-12
+                and _cross_2d(b, c, point) >= -1.0e-12
+                and _cross_2d(c, a, point) >= -1.0e-12)
+
+    while len(remaining) > 3:
+        for position, current in enumerate(remaining):
+            previous = remaining[position - 1]
+            following = remaining[(position + 1) % len(remaining)]
+            a, b, c = polygon[previous], polygon[current], polygon[following]
+            if _cross_2d(a, b, c) <= 1.0e-12:
+                continue
+            if any(inside_triangle(polygon[index], a, b, c)
+                   for index in remaining
+                   if index not in (previous, current, following)):
+                continue
+            triangles.append((previous, current, following))
+            del remaining[position]
+            break
+        else:
+            raise ValueError("2D profileをtriangulateできません。")
+    triangles.append(tuple(remaining))
+    return polygon, tuple(triangles)
+
+
+def extrude_xz_profile(points, y_min, y_max, *, part_type="PROFILE", ordinal=1):
+    """Extrude a simple XZ profile along local Y into an outward closed solid."""
+    y_min, y_max = float(y_min), float(y_max)
+    if not math.isfinite(y_min) or not math.isfinite(y_max) or y_max <= y_min:
+        raise ValueError("Extrusion Y rangeは有限かつ正の幅である必要があります。")
+    polygon, triangles = triangulate_simple_polygon(points)
+    count = len(polygon)
+    vertices = tuple((x, y, z) for y in (y_min, y_max) for x, z in polygon)
+    faces = []
+    faces.extend(triangles)  # CCW in XZ points toward -Y.
+    faces.extend(tuple(index + count for index in reversed(triangle))
+                 for triangle in triangles)
+    faces.extend(((index + 1) % count, index, index + count,
+                  (index + 1) % count + count) for index in range(count))
+    fragment = MeshFragment(part_type, ordinal, vertices, tuple(faces))
+    validate_mesh_fragments((fragment,))
+    return fragment
 
 
 def assemble_stair_mesh(fragments):

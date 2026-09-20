@@ -89,7 +89,7 @@ class StairSourceStructureTests(unittest.TestCase):
         cls.operator_tree = ast.parse(cls.operator_source)
 
     def test_addon_identity_and_registration_declarations(self):
-        self.assertIn('"version": (0, 7, 0)', self.init_source)
+        self.assertIn('"version": (0, 7, 1)', self.init_source)
         self.assertIn("JHM_OT_create_stair", self.init_source)
         self.assertIn("jhm_new_stair_defaults", self.init_source)
         self.assertIn("jhm_stair", self.init_source)
