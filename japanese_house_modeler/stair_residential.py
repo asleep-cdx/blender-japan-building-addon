@@ -58,6 +58,8 @@ def validate_mode_data(assembly_mode, schema_version, fields=None):
         return True
     values = (fields if isinstance(fields, ResidentialFields)
               else residential_fields(fields))
+    if isinstance(values.underside_thickness_mm, bool):
+        raise ValueError("下面厚は正の有限値である必要があります。")
     if values.underside_mode != STEPPED_CLOSED:
         raise ValueError("未対応の下面modeです。")
     if not isinstance(values.left_side_board_enabled, bool) \
@@ -79,20 +81,38 @@ def validate_mode_data(assembly_mode, schema_version, fields=None):
 
 def validate_stepped_underbody_thickness(fields, actual_riser,
                                           tread_thickness, riser_thickness):
-    """Validate the Stage 2 supported range using metre-based dimensions."""
+    """Return the positive finite shell thickness in metres.
+
+    The corrected closure silhouette is independent from this value.  The
+    dimensional arguments are retained for source/API compatibility with the
+    superseded Stage 2 helper.
+    """
     values = (fields if isinstance(fields, ResidentialFields)
               else residential_fields(fields))
     try:
         thickness = float(values.underside_thickness_mm) / 1000.0
-        limit = min(float(actual_riser) - float(tread_thickness),
-                    float(riser_thickness))
     except (TypeError, ValueError, OverflowError) as exc:
-        raise ValueError("下面厚は対応範囲内の有限値である必要があります。") from exc
-    if (not math.isfinite(thickness) or not math.isfinite(limit)
-            or thickness <= 0.0 or thickness >= limit):
-        raise ValueError(
-            "下面厚は0より大きく、実蹴上－踏板厚と蹴込み板厚の小さい方未満にしてください。")
+        raise ValueError("下面厚は正の有限値である必要があります。") from exc
+    if not math.isfinite(thickness) or thickness <= 0.0:
+        raise ValueError("下面厚は正の有限値である必要があります。")
     return thickness
+
+
+def validate_stepped_closure_depth(fields, actual_riser, going):
+    """Return the shared closure/Side-Board depth in the supported range."""
+    values = (fields if isinstance(fields, ResidentialFields)
+              else residential_fields(fields))
+    if isinstance(values.side_board_band_width_mm, bool):
+        raise ValueError("閉じ下面深さは対応範囲内の有限値である必要があります。")
+    try:
+        depth = float(values.side_board_band_width_mm) / 1000.0
+        limit = min(float(actual_riser), float(going))
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("閉じ下面深さは対応範囲内の有限値である必要があります。") from exc
+    if (not math.isfinite(depth) or not math.isfinite(limit)
+            or depth <= 0.0 or depth >= limit):
+        raise ValueError("閉じ下面深さは0より大きく、実蹴上と踏面ピッチの小さい方未満にしてください。")
+    return depth
 
 
 def residential_candidate(record):

@@ -5,7 +5,8 @@ from dataclasses import dataclass
 from .stair_geometry import resolve_stair_layout
 from .stair_residential import (
     BASIC_TREAD_RISER, STANDARD_RESIDENTIAL, ResidentialFields,
-    validate_mode_data, validate_stepped_underbody_thickness,
+    validate_mode_data, validate_stepped_closure_depth,
+    validate_stepped_underbody_thickness,
 )
 
 
@@ -93,6 +94,8 @@ def diagnose_stair(state, duplicate_ids=()):
             validate_stepped_underbody_thickness(
                 state.residential, layout.actual_riser,
                 layout.tread_thickness, layout.riser_thickness)
+            validate_stepped_closure_depth(
+                state.residential, layout.actual_riser, layout.going)
     except (TypeError, ValueError, OverflowError):
         if INVALID_CANONICAL not in issues:
             issues.append(INVALID_CANONICAL)

@@ -10,13 +10,14 @@ from .stair_geometry import (
 from .stair_residential import (
     STANDARD_RESIDENTIAL, STEPPED_CLOSED, ResidentialFields,
     residential_fields, validate_mode_data,
+    validate_stepped_closure_depth,
     validate_stepped_underbody_thickness,
 )
 
 
 @dataclass(frozen=True)
 class SteppedUnderbodyProfile:
-    """Validated metre-based analytical paths and their closed XZ polygon."""
+    """Validated component-contact and visible paths plus closed XZ body."""
 
     inner: tuple
     outer: tuple
@@ -69,13 +70,43 @@ def stepped_underbody_outer_profile(inner, thickness, base_z):
     return _without_consecutive_duplicates(outer)
 
 
+def stepped_closure_visible_profile(layout, closure_depth):
+    """Resolve the corrected, thickness-independent visible stepped soffit.
+
+    The first-step bottom is deliberately flattened at ``base_z`` through the
+    first translated corner.  Subsequent segments follow the translated ideal
+    walking-step reference and the final segment is clipped at ``L + r``.
+    """
+    g, h, base = layout.going, layout.actual_riser, layout.base_z
+    upper_x = layout.run_length + layout.riser_thickness
+    points = [(layout.riser_thickness, base),
+              (min(g + closure_depth, upper_x), base)]
+    for level in range(2, layout.riser_count):
+        start_x = (level - 1) * g + closure_depth
+        if start_x >= upper_x:
+            break
+        z = base + level * h - closure_depth
+        points.extend(((start_x, z), (min(level * g + closure_depth,
+                                          upper_x), z)))
+        if points[-1][0] >= upper_x:
+            break
+    if points[-1][0] < upper_x:
+        points.append((upper_x, base + (layout.riser_count - 1) * h
+                       - closure_depth))
+    return _without_consecutive_duplicates(points)
+
+
 def stepped_underbody_profile(layout, fields=ResidentialFields()):
-    """Create and validate the exact Stage 2 closed underbody profile."""
-    thickness = validate_stepped_underbody_thickness(
+    """Create the corrected full-depth closed residential body profile."""
+    # Thickness is an inward physical-shell property and never locates the
+    # exterior soffit.  Validating it here keeps candidate preparation atomic.
+    validate_stepped_underbody_thickness(
         fields, layout.actual_riser, layout.tread_thickness,
         layout.riser_thickness)
+    depth = validate_stepped_closure_depth(
+        fields, layout.actual_riser, layout.going)
     inner = stepped_underbody_inner_profile(layout)
-    outer = stepped_underbody_outer_profile(inner, thickness, layout.base_z)
+    outer = stepped_closure_visible_profile(layout, depth)
     polygon = validate_simple_polygon(inner + tuple(reversed(outer)))
     return SteppedUnderbodyProfile(inner, outer, polygon)
 
