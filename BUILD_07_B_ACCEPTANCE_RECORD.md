@@ -3,14 +3,46 @@
 ## Current acceptance status
 
 - **Build 07-B Stage 1 — Residential Foundation / Compatibility: ACCEPTED**
-- **Build 07-B Stage 2 — STEPPED_CLOSED Underbody: ACCEPTED**
-- Build 07-B Stage 3 — Side Boards + Part Materials: NOT STARTED
+- **Build 07-B Stage 2 — STEPPED_CLOSED Underbody: CORRECTION REQUIRED / PRIOR ACCEPTANCE SUPERSEDED**
+- **Build 07-B Stage 3 — Side Boards + Part Materials: BLOCKED / PR #17 NOT ACCEPTED**
 - Build 07-B Stage 4 — Lifecycle / Full Regression: NOT STARTED
 - **Build 07-B overall: NOT YET ACCEPTED**
 
-Stages 1 and 2 passed their automated gates and Blender 5.2 LTS runtime acceptance.
-Each accepted stage keeps its exact runtime-tested implementation commit/tree as
-the production reference. Acceptance Record commits change documentation only.
+Stage 1 remains accepted.
+
+Stage 2 previously passed its automated gates and Blender 5.2 LTS runtime acceptance,
+but a later Stage 3 visual review exposed a design defect in the `STEPPED_CLOSED`
+closure contract: the generated stair could be manifold while still exposing Tread/
+Riser backs and the internal stair void from below. The previous Stage 2 acceptance is
+therefore retained only as historical evidence and is superseded for the corrected
+`STEPPED_CLOSED` geometry.
+
+See `BUILD_07_B_CORRECTION_ADDENDUM.md`.
+
+## 2026-09-21 correction notice
+
+During Blender 5.2 LTS visual inspection of Stage 3 Candidate r1 / PR #17, the Side
+Boards made the Stage 2 closure defect unambiguous. The Stage 2 Underbody followed
+the lower exterior of Tread/Riser fragments too closely and did not create the intended
+closed box-type residential stair body.
+
+The human-confirmed correction target is:
+
+- no visible Tread backs from below,
+- no visible Riser backs from below,
+- no visible stair interior,
+- a continuous stepped soffit made from horizontal underside faces and vertical
+  connecting faces,
+- body closure independent of Side Board ON/OFF,
+- no unnecessary lower-end holes or local notches,
+- the first-step bottom is one flat horizontal face with no small local mismatch.
+
+Topology health such as `NONMANIFOLD=0` and `BOUNDARY=0` remains necessary but is
+not sufficient for visual closure acceptance.
+
+PR #17 is not accepted and must not be merged as the Stage 3 production revision.
+Reusable Side Board / Material work may be reapplied only after the corrected Stage 2
+body has its own runtime acceptance.
 
 ## Runtime-tested Stage 1 production revision and artifact
 
@@ -151,9 +183,13 @@ Stage 1 does **not** accept or expose:
 | 13 | Public-scope guard | **PASS** | No Residential/apply/material operators were registered and no Residential/Underbody controls appeared in the sidebar. |
 | 14 | Existing managed Regenerate path | **PASS** | Existing “階段を再生成” correctly regenerated the controlled Residential state: schema 2, REVERSE, base_z 425 mm, width 1000 mm, u=6.0 mm, boards OFF, 492 / 548, NORMAL. |
 
-### Accepted Stage 2 scope
+### Historical Stage 2 scope — superseded for corrected STEPPED_CLOSED geometry
 
-Accepted Stage 2 scope includes:
+The following scope was recorded by the previous Stage 2 acceptance. It is preserved
+for traceability, but the Underbody/closure items below are **not current acceptance
+authority** where they conflict with `BUILD_07_B_CORRECTION_ADDENDUM.md`:
+
+Historical Stage 2 scope included:
 
 - analytical `U_inner` derived from resolved canonical Stair layout
 - orthogonal translated-line-intersection `U_outer`
@@ -182,12 +218,22 @@ Stage 2 does **not** accept or expose:
 
 **Build 07-B Stage 1 — Residential Foundation / Compatibility: ACCEPTED**
 
-**Build 07-B Stage 2 — STEPPED_CLOSED Underbody: ACCEPTED**
+**Build 07-B Stage 2 — STEPPED_CLOSED Underbody: CORRECTION REQUIRED / PRIOR ACCEPTANCE SUPERSEDED**
 
-Build 07-B overall is **NOT YET ACCEPTED**.
+**Build 07-B Stage 3 — Side Boards + Part Materials: BLOCKED / PR #17 NOT ACCEPTED**
 
-The Stage 2 runtime-tested production revision is
-`b31ac4523256f4ead1d51fd7bb3c67f81c0535a5`, with production tree
-`d6909e7f311035d82b3403c4cf6b2a8b41d7159d`.
+Build 07-B overall is **NOT ACCEPTED**.
 
-Next: **Build 07-B Stage 3 — Side Boards + Part Materials**.
+Historical Stage 2 runtime-tested revision:
+
+- commit: `b31ac4523256f4ead1d51fd7bb3c67f81c0535a5`
+- tree: `d6909e7f311035d82b3403c4cf6b2a8b41d7159d`
+
+These identifiers remain historical evidence only for the superseded Stage 2 geometry.
+
+Next:
+
+1. implement **Build 07-B Stage 2 Correction** under `BUILD_07_B_CORRECTION_ADDENDUM.md`;
+2. perform new Blender 5.2 LTS visual/runtime acceptance;
+3. record a new corrected Stage 2 production revision;
+4. then rebuild/reapply and retest Stage 3.
