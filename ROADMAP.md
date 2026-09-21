@@ -933,6 +933,20 @@ Case D: both OFF
 逆さヒナ段系の化粧側板は、階段本体側面全体を自動的に閉じる部材とはみなさない。
 側面閉鎖範囲は07-B Specificationで別途決定する。
 
+### 07-B correction guardrail — closed body
+
+2026-09-21 の Blender runtime visual review により、Tread/Riser直下を薄くなぞるだけの Underbody では本節の「閉じた段々の外観」を満たさないことを確認した。
+
+`BUILD_07_B_CORRECTION_ADDENDUM.md` を correction authority とし、07-B `STEPPED_CLOSED` は以下を必須とする。
+
+- 下方から Tread 裏・Riser 裏・階段内部を見せない。
+- Side Board ON/OFF に依存せず階段本体自体を閉鎖する。
+- 水平下面と縦接続面が連続した stepped soffit を形成する。
+- 一段目の底面は一つの平らな水平面とし、局所ノッチを残さない。
+- topology が manifold であることだけを visual closure の代用にしない。
+
+Open / support / ささら・力桁系の露出構成は 07-F の別系統とする。
+
 ## 12.10 Build 07-C — Sloped Closed Underside + Straight Stair Finish Variants
 
 主要機能：
@@ -950,6 +964,8 @@ Case D: both OFF
 ### Sloped closed underside
 
 階段下収納・トイレ等で使う住宅階段を想定し、階段下面を連続した斜め面材で閉じる。
+
+`SLOPED_CLOSED` も `STEPPED_CLOSED` と同じ CLOSED invariant を継承する。違いは下面の形状だけであり、下方から Tread 裏・Riser 裏・階段内部を露出させない。
 
 床まで完全に埋めるsolid massは対象外。
 
