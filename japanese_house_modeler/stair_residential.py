@@ -95,6 +95,56 @@ def validate_stepped_underbody_thickness(fields, actual_riser,
     return thickness
 
 
+def validate_side_board_dimensions(fields, actual_riser, going):
+    """Return metre dimensions and enforce the feature-aware supported range."""
+    values = fields if isinstance(fields, ResidentialFields) else residential_fields(fields)
+    try:
+        thickness = float(values.side_board_thickness_mm) / 1000.0
+        band = float(values.side_board_band_width_mm) / 1000.0
+        limit = min(float(actual_riser), float(going))
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("Side Board寸法は正の有限値である必要があります。") from exc
+    if not math.isfinite(thickness) or thickness <= 0.0:
+        raise ValueError("Side Board厚は正の有限値である必要があります。")
+    if not math.isfinite(band) or band <= 0.0:
+        raise ValueError("Side Board帯幅は正の有限値である必要があります。")
+    if ((values.left_side_board_enabled or values.right_side_board_enabled)
+            and (not math.isfinite(limit) or band >= limit)):
+        raise ValueError("Side Board帯幅は実蹴上と踏面ピッチの小さい方未満にしてください。")
+    return thickness, band
+
+
+@dataclass(frozen=True)
+class MaterialSlotPlan:
+    """Derived slots and role indices; None denotes Blender's empty slot."""
+
+    roles: tuple
+    slots: tuple
+    role_indices: tuple
+
+    def index_for(self, role):
+        return dict(self.role_indices)[role]
+
+
+def derive_material_slot_plan(fields):
+    """Deduplicate effective materials by identity in stable role order."""
+    resolved = resolve_material_roles(fields)
+    if all(resolved[role] is None for role in MATERIAL_ROLES):
+        return MaterialSlotPlan(tuple((r, None) for r in MATERIAL_ROLES), (),
+                                tuple((r, 0) for r in MATERIAL_ROLES))
+    slots = []
+    indices = []
+    for role in MATERIAL_ROLES:
+        material = resolved[role]
+        index = next((i for i, item in enumerate(slots) if item is material), None)
+        if index is None:
+            index = len(slots)
+            slots.append(material)
+        indices.append((role, index))
+    return MaterialSlotPlan(tuple((r, resolved[r]) for r in MATERIAL_ROLES),
+                            tuple(slots), tuple(indices))
+
+
 def residential_candidate(record):
     """Return an immutable candidate; never mutate or commit Scene state."""
     candidate = StairTransitionSnapshot.capture(record)

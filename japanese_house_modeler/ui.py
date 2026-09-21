@@ -15,6 +15,7 @@ from .finish_preview_images import cached_preview_icon, request_preview_build
 from .stair_geometry import resolve_stair_layout
 from .stair_operators import stair_issues
 from .stair_state import operation_allowed, state_label
+from .stair_residential import BASIC_TREAD_RISER, STANDARD_RESIDENTIAL, semantic_assembly_mode
 
 
 def _draw_profile_browser(layout, context, finish=None):
@@ -165,6 +166,16 @@ class JHM_PT_house_modeler(bpy.types.Panel):
             normal_actions.operator("jhm.edit_stair_path", text="Path座標を変更")
             normal_actions.operator("jhm.reverse_stair_ascent", text="上り方向を反転")
             normal_actions.operator("jhm.regenerate_stair", text="階段を再生成")
+            mode = semantic_assembly_mode(stair)
+            if mode == BASIC_TREAD_RISER:
+                normal_actions.operator(
+                    "jhm.apply_residential_stair", text="住宅階段仕様を適用")
+            elif mode == STANDARD_RESIDENTIAL:
+                selected_box.label(text="構成: STANDARD_RESIDENTIAL")
+                normal_actions.operator(
+                    "jhm.edit_residential_stair", text="住宅階段仕様を変更")
+                normal_actions.operator(
+                    "jhm.edit_stair_materials", text="階段部材Materialを変更")
             repair = selected_box.row()
             repair.enabled = operation_allowed("REPAIR", issues)
             repair.operator("jhm.repair_stair", text="管理状態へ復元")

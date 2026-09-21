@@ -164,8 +164,10 @@ class UIAndScopeTests(unittest.TestCase):
             (ROOT / "japanese_house_modeler" / "stair_operators.py").read_text(),
             self.ui,
         )).lower()
-        for forbidden in ("side board", "underside", "nosing", "landing",
-                          "winder", "multi-point", "floor connection"):
+        # Side Board/underside UI is intentionally activated by 07-B Stage 3;
+        # the remaining later-stage features stay deferred.
+        for forbidden in ("nosing", "landing", "winder", "multi-point",
+                          "floor connection"):
             with self.subTest(feature=forbidden):
                 self.assertNotIn(forbidden, stage4_files)
 

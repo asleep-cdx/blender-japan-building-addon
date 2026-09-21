@@ -211,20 +211,19 @@ class ExtrusionTests(unittest.TestCase):
 
 
 class ScopeTests(unittest.TestCase):
-    def test_stage2_production_and_public_operators_are_absent(self):
+    def test_stage3_supersedes_temporary_public_scope_guard(self):
         production = "\n".join(path.read_text()
                                for path in (ROOT / "japanese_house_modeler").glob("*.py"))
-        for forbidden in ("build_stepped_underbody_fragment",
-                          "JHM_OT_apply_residential_stair",
+        for required in ("JHM_OT_apply_residential_stair",
                           "JHM_OT_edit_residential_stair",
                           "JHM_OT_edit_stair_materials"):
-            self.assertNotIn(forbidden, production)
+            self.assertIn(required, production)
 
-    def test_residential_fields_are_not_exposed_in_ui(self):
+    def test_stage3_residential_actions_are_exposed_in_ui(self):
         ui = (ROOT / "japanese_house_modeler" / "ui.py").read_text()
-        for name in ("assembly_mode", "underside_thickness_mm",
-                     "side_board_band_width_mm", "base_material"):
-            self.assertNotIn(name, ui)
+        for name in ("jhm.apply_residential_stair",
+                     "jhm.edit_residential_stair", "jhm.edit_stair_materials"):
+            self.assertIn(name, ui)
 
 
 if __name__ == "__main__":

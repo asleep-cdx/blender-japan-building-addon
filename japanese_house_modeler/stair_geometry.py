@@ -92,6 +92,7 @@ class StairMeshData:
 
     vertices: tuple
     faces: tuple
+    face_roles: tuple = ()
 
 
 def generate_stair_id():
@@ -433,13 +434,14 @@ def assemble_stair_mesh(fragments):
     """Combine closed fragments into arrays for exactly one Mesh Object."""
     fragments = tuple(fragments)
     validate_mesh_fragments(fragments)
-    vertices, faces = [], []
+    vertices, faces, face_roles = [], [], []
     for fragment in fragments:
         offset = len(vertices)
         vertices.extend(fragment.vertices)
         faces.extend(tuple(index + offset for index in face)
                      for face in fragment.faces)
-    return StairMeshData(tuple(vertices), tuple(faces))
+        face_roles.extend((fragment.part_type,) * len(fragment.faces))
+    return StairMeshData(tuple(vertices), tuple(faces), tuple(face_roles))
 
 
 def prepare_stair_geometry(points, ascent_direction, base_z_mm,
