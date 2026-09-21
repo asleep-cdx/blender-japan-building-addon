@@ -3,8 +3,8 @@
 ## Current acceptance status
 
 - **Build 07-B Stage 1 — Residential Foundation / Compatibility: ACCEPTED**
-- **Build 07-B Stage 2 — STEPPED_CLOSED Underbody: CORRECTION REQUIRED / PRIOR ACCEPTANCE SUPERSEDED**
-- **Build 07-B Stage 3 — Side Boards + Part Materials: BLOCKED / PR #17 NOT ACCEPTED**
+- **Build 07-B Stage 2 — STEPPED_CLOSED Underbody Correction: ACCEPTED**
+- **Build 07-B Stage 3 — Side Boards + Part Materials: NOT STARTED / PR #17 SUPERSEDED**
 - Build 07-B Stage 4 — Lifecycle / Full Regression: NOT STARTED
 - **Build 07-B overall: NOT YET ACCEPTED**
 
@@ -214,26 +214,98 @@ Stage 2 does **not** accept or expose:
 - completed Standard Residential user workflow
 - SLOPED_CLOSED, nosing/overhang, bevel/round, Multi-point Path, Landing, Winder
 
+## Runtime-tested Stage 2 Correction production revision and artifact
+
+- GitHub PR: `#18 — Correct Build 07-B stepped closed stair body`
+- Runtime-tested production commit: `0b2d3d4530847fa2c11cc10e50f44dbd9672230a`
+- Runtime-tested production tree: `1f2034079093c1ba76b91a75be51964f46853f77`
+- Runtime Candidate: `Japanese_House_Modeler_Build_07_B_Stage2_Correction_Candidate_r1.zip`
+- Candidate size: `112932 bytes`
+- Candidate SHA256: `7D9D771213A20B48A754D03C5F22868EF25C66EA0F6B6878B1F6973D1C94729C`
+- Runtime environment: Blender 5.2 LTS
+- Add-on version: `(0, 7, 1)`
+- Description: `Build 07-B: Standard Residential Straight Stair`
+
+### Stage 2 Correction automated evidence
+
+The implementation report recorded:
+
+| Check | Result |
+|---|---:|
+| `python -m unittest tests.test_build_07_a_stage1` | **22 PASS** |
+| `python -m unittest tests.test_build_07_a_stage2` | **17 PASS** |
+| `python -m unittest tests.test_build_07_a_stage3` | **31 PASS** |
+| `python -m unittest tests.test_build_07_a_stage4` | **14 PASS** |
+| `python -m unittest tests.test_build_07_b_stage1` | **18 PASS** |
+| `python -m unittest tests.test_build_07_b_stage2` | **13 PASS** |
+| `python -m unittest tests.test_build_07_b_stage2_correction` | **13 PASS** |
+| `python -m unittest discover -s tests` | **491 PASS** |
+| `python -m compileall -q japanese_house_modeler tests` | **PASS** |
+| `git diff --check` | **PASS** |
+| Working tree | **clean** |
+
+### Stage 2 Correction Blender 5.2 LTS runtime acceptance
+
+| Test | Runtime gate | Result | Evidence |
+|---:|---|---|---|
+| 0 | Corrected Residential visual generation | **PASS** | STANDARD_RESIDENTIAL/schema 2 regenerated to 428 vertices / 452 faces with both Side Boards OFF. Side orthographic and MatCap inspection confirmed the first-step bottom is flat and the underside is a substantially closed stepped body rather than the former thin tread-following shell. |
+| 1 | Analytical stepped profile | **PASS** | First-bottom points were both at base Z; all visible soffit segments were orthogonal (`NON_ORTHO=0`); minimum profile Z equaled base Z; maximum X equaled `L+r` exactly. |
+| 2 | Full-width closure + Mesh health | **PASS** | 900 mm width projected to approximately -0.45 / +0.45 m. Mesh had 428 vertices, 816 edges, 452 faces, zero non-manifold edges, zero boundary edges, zero zero-area faces, all coordinates finite. |
+| 3 | Thickness / visible-silhouette independence | **PASS** | `underside_thickness_mm` 9.5→50.0 mm preserved the exact visible stepped profile and 428 / 452 geometry count. |
+| 4 | Nonzero base_z | **PASS** | `base_z=300 mm` moved profile and Mesh minimum Z to 0.3 m and kept first-step bottom at Z=0.3 m. |
+| 5 | REVERSE + oblique Path | **PASS** | REVERSE correctly swapped resolved lower/upper and axes while retaining the same closure contract; min Z stayed 0.3 m and max X stayed exactly `L+r`. |
+| 6 | Save / full exit / reopen | **PASS** | STANDARD_RESIDENTIAL/schema 2, REVERSE, base_z 300 mm, thickness 50 mm, band 150 mm, both boards OFF, 428 / 452 and NORMAL diagnosis persisted. |
+| 7 | Invalid closure depth atomic rejection | **PASS** | Candidate band 1000 mm was rejected before Scene mutation. Existing Mesh object/data and canonical band 150 mm remained unchanged. |
+| 8 | Valid closure-depth edit | **PASS** | Band 150→100 mm changed the first-step visible closure endpoint by exactly 50 mm while preserving base Z, upper `L+r`, 428 / 452 geometry and closure validity. |
+| 9 | Side Board flag independence | **PASS** | Pure-profile comparison showed OFF/OFF, LEFT-only, RIGHT-only and BOTH-on all produced the identical closed body polygon. |
+| 10 | Invalid thickness atomic rejection | **PASS** | Candidate thickness 0 mm was rejected before mutation; Mesh and canonical thickness 50 mm remained unchanged. |
+| 11 | Existing managed Regenerate path | **PASS** | Existing “階段を再生成” regenerated the corrected Residential geometry with REVERSE, base_z 300 mm, thickness 50 mm, band 100 mm, 428 / 452 and NORMAL diagnosis. |
+| 12 | Stage 3 public-scope guard | **PASS** | No Residential/apply/material operators were registered and no Stage 3 Residential controls appeared in the sidebar. |
+| 13 | Final Mesh health | **PASS** | 428 vertices, 816 edges, 452 faces; zero non-manifold edges, zero boundary edges, zero zero-area faces, all coordinates finite. |
+| 14 | BASIC compatibility | **PASS** | New BASIC/schema 1 stair remained at 248 / 186 and ignored unused invalid Residential values `u=-123`, `band=-456` with no managed-state issue. |
+| 15 | GEOMETRY_MISSING Repair | **PASS** | Clearing the corrected Residential Mesh produced GEOMETRY_MISSING; Repair restored STANDARD_RESIDENTIAL 428 / 452, NORMAL diagnosis and the flat first-step/closed stepped body. |
+| 16 | Upper termination visual gate | **PASS** | Side/underside MatCap inspection showed no visible internal void, no exposed Tread/Riser backs, no upper hole, no unintended rear extension, and closure continued through the final-riser end. |
+| 17 | Undo / Redo spot | **PASS** | Width 900→1000 mm, Undo→900, Redo→1000 all succeeded without Console interaction between operator and Undo/Redo. Final corrected Residential state remained NORMAL at 428 / 452. |
+| 18 | Full-width closure after width edit | **PASS** | Width 1000 mm projected to approximately -0.5 / +0.5 m after Undo/Redo, with geometry count unchanged at 428 / 452. |
+
+### Corrected Stage 2 accepted scope
+
+Accepted corrected Stage 2 scope includes:
+
+- analytical, canonical `STEPPED_CLOSED` visible stepped soffit,
+- closed residential body with no visible Tread/Riser backs or interior void from below,
+- one flat, notch-free first-step bottom,
+- closure depth driven by `side_board_band_width_mm`,
+- `underside_thickness_mm` retained as positive finite canonical shell data without moving the visible soffit,
+- full-width body closure independent of Side Board flags,
+- exact lower floor/base termination and exact upper `L+r` termination,
+- FORWARD / REVERSE, oblique Path and nonzero `base_z`,
+- atomic invalid depth/thickness rejection,
+- managed Regenerate, Save/reopen, Repair and Undo/Redo coverage,
+- BASIC compatibility,
+- Stage 3 public-scope guard,
+- explicit Blender visual acceptance in addition to topology checks.
+
+The prior Stage 2 implementation and acceptance remain historical evidence only and are superseded by this corrected production revision.
+
 ## Acceptance conclusion
 
 **Build 07-B Stage 1 — Residential Foundation / Compatibility: ACCEPTED**
 
-**Build 07-B Stage 2 — STEPPED_CLOSED Underbody: CORRECTION REQUIRED / PRIOR ACCEPTANCE SUPERSEDED**
+**Build 07-B Stage 2 — STEPPED_CLOSED Underbody Correction: ACCEPTED**
 
-**Build 07-B Stage 3 — Side Boards + Part Materials: BLOCKED / PR #17 NOT ACCEPTED**
+**Build 07-B Stage 3 — Side Boards + Part Materials: NOT STARTED / PR #17 SUPERSEDED**
 
-Build 07-B overall is **NOT ACCEPTED**.
+Build 07-B overall is **NOT YET ACCEPTED**.
 
-Historical Stage 2 runtime-tested revision:
+Corrected Stage 2 runtime-tested production revision:
+
+- commit: `0b2d3d4530847fa2c11cc10e50f44dbd9672230a`
+- tree: `1f2034079093c1ba76b91a75be51964f46853f77`
+
+Historical superseded Stage 2 revision remains:
 
 - commit: `b31ac4523256f4ead1d51fd7bb3c67f81c0535a5`
 - tree: `d6909e7f311035d82b3403c4cf6b2a8b41d7159d`
 
-These identifiers remain historical evidence only for the superseded Stage 2 geometry.
-
-Next:
-
-1. implement **Build 07-B Stage 2 Correction** under `BUILD_07_B_CORRECTION_ADDENDUM.md`;
-2. perform new Blender 5.2 LTS visual/runtime acceptance;
-3. record a new corrected Stage 2 production revision;
-4. then rebuild/reapply and retest Stage 3.
+Next: rebuild/reapply **Build 07-B Stage 3 — Side Boards + Part Materials** on the corrected Stage 2 foundation and perform new runtime/visual acceptance.

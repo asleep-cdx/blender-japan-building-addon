@@ -78,7 +78,8 @@ class AnalyticalProfileTests(unittest.TestCase):
         self.assertNotAlmostEqual(max(x for x, _ in result.polygon), 3.6215)
         self.assertGreater(polygon_signed_area(result.polygon), 0)
         self.assertEqual(result.inner[0], (.012, .425))
-        self.assertEqual(result.outer[0], (.0215, .425))
+        self.assertEqual(result.outer[0], (.012, .425))
+        self.assertEqual(result.outer[1], (.39, .425))
 
 
 class ThicknessTests(unittest.TestCase):
@@ -90,12 +91,20 @@ class ThicknessTests(unittest.TestCase):
 
     def test_boundaries_nonfinite_and_above_are_rejected(self):
         stair = layout()
-        for value in (0, -1, 12, 145, 146, math.nan, math.inf):
+        for value in (0, -1, math.nan, math.inf):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 validate_stepped_underbody_thickness(
                     replace(OFF, underside_thickness_mm=value),
                     stair.actual_riser, stair.tread_thickness,
                     stair.riser_thickness)
+
+    def test_positive_thickness_is_not_tied_to_old_offset_limits(self):
+        stair = layout()
+        for value in (12, 145, 1000):
+            self.assertEqual(validate_stepped_underbody_thickness(
+                replace(OFF, underside_thickness_mm=value),
+                stair.actual_riser, stair.tread_thickness,
+                stair.riser_thickness), value / 1000.0)
 
     def test_mode_aware_diagnosis_leaves_basic_unused_value_legal(self):
         common = dict(stair_id="id", path_points=((0, 0), (3.6, 0)),
