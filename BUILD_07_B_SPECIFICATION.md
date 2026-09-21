@@ -1,8 +1,10 @@
 # BUILD 07-B SPECIFICATION
 ## 日本住宅モデラー — Standard Residential Straight Stair + Stepped Closed Underside + Side Boards
 
-> **Status: FINAL SPECIFICATION / READY FOR IMPLEMENTATION**  
-> 本文書は Build 07-B の確定仕様である。第三者レビューで要求された限定修正を反映済みであり、実装担当は本仕様を正として Stage 1 から進める。
+> **Status: CORRECTED BY AUTHORITATIVE ADDENDUM**  
+> 本文書は Build 07-B の基礎仕様であるが、2026-09-21 の Blender runtime visual review で `STEPPED_CLOSED` の設計欠陥が判明した。  
+> **`BUILD_07_B_CORRECTION_ADDENDUM.md` を必ず併読し、矛盾する場合は Addendum を正とする。**  
+> 特に §§17–23 と §30 のうち、Tread/Riser裏面または階段内部の視覚的露出を許す解釈は superseded である。
 
 ---
 
