@@ -137,13 +137,13 @@ class CompatibilityAndScopeTests(unittest.TestCase):
         self.assertEqual(sum(f.part_type == "RISER" for f in fragments), 16)
         self.assertTrue(mesh.vertices and mesh.faces)
 
-    def test_stage3_public_functionality_remains_absent(self):
+    def test_stage3_public_functionality_is_now_present(self):
         source = "\n".join(path.read_text() for path in
                            (ROOT / "japanese_house_modeler").glob("*.py"))
         for operator in ("jhm.apply_residential_stair",
                          "jhm.edit_residential_stair",
                          "jhm.edit_stair_materials"):
-            self.assertNotIn(operator, source)
+            self.assertIn(operator, source)
 
 
 if __name__ == "__main__":

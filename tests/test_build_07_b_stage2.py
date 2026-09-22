@@ -160,17 +160,17 @@ class ScopeAndRuntimePathTests(unittest.TestCase):
             ((0, 0), (3.6, 0)), "FORWARD", 0, 2800, 16, 900, 30, 12)
         self.assertEqual({f.part_type for f in fragments}, {"TREAD", "RISER"})
 
-    def test_runtime_hook_is_non_registered_and_public_scope_remains_closed(self):
+    def test_runtime_hook_remains_and_stage3_scope_is_public(self):
         operators = (ROOT / "japanese_house_modeler" / "stair_operators.py").read_text()
         addon = "\n".join(p.read_text() for p in
                            (ROOT / "japanese_house_modeler").glob("*.py"))
         self.assertIn("regenerate_stage2_residential_for_runtime", operators)
-        for forbidden in ("jhm.apply_residential_stair",
+        for operator in ("jhm.apply_residential_stair",
                           "jhm.edit_residential_stair",
                           "jhm.edit_stair_materials"):
-            self.assertNotIn(forbidden, addon)
+            self.assertIn(operator, addon)
         ui = (ROOT / "japanese_house_modeler" / "ui.py").read_text()
-        self.assertNotIn("underside_thickness_mm", ui)
+        self.assertIn("jhm.edit_residential_stair", ui)
 
 
 if __name__ == "__main__":

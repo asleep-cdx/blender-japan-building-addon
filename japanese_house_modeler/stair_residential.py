@@ -13,6 +13,17 @@ UNASSIGNED = None
 
 
 @dataclass(frozen=True)
+class MaterialSlotPlan:
+    """Derived Blender slot layout; ``None`` denotes a real empty slot."""
+
+    slots: tuple
+    role_indices: tuple
+
+    def index_for(self, role):
+        return dict(self.role_indices)[role]
+
+
+@dataclass(frozen=True)
 class ResidentialFields:
     underside_mode: str = STEPPED_CLOSED
     underside_thickness_mm: float = 9.5
@@ -132,6 +143,39 @@ def resolve_material_roles(fields):
                    if getattr(values, f"{role.lower()}_material") is not None
                    else values.base_material)
             for role in MATERIAL_ROLES}
+
+
+def assemble_material_slot_plan(fields):
+    """Resolve roles in stable order and deduplicate datablocks by identity.
+
+    The empty slot is appended only when assigned and unassigned roles are
+    mixed.  With every role unassigned there are no slots, and faces retain
+    Blender's harmless index zero without inventing a Material datablock.
+    """
+    effective = resolve_material_roles(fields)
+    assigned = any(value is not None for value in effective.values())
+    unassigned = any(value is None for value in effective.values())
+    slots = []
+    indices = []
+    for role in MATERIAL_ROLES:
+        material = effective[role]
+        if material is None:
+            index = None
+        else:
+            index = next((i for i, existing in enumerate(slots)
+                          if existing is material), None)
+            if index is None:
+                slots.append(material)
+                index = len(slots) - 1
+        indices.append((role, index))
+    if assigned and unassigned:
+        empty_index = len(slots)
+        slots.append(None)
+        indices = [(role, empty_index if index is None else index)
+                   for role, index in indices]
+    elif not assigned:
+        indices = [(role, 0) for role, _index in indices]
+    return MaterialSlotPlan(tuple(slots), tuple(indices))
 
 
 @dataclass(frozen=True)

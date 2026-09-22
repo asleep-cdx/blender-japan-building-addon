@@ -111,11 +111,15 @@ def diagnose_stair(state, duplicate_ids=()):
     return tuple(issues)
 
 
-def operation_allowed(operation, issues):
+def operation_allowed(operation, issues, assembly_mode=None):
     """Central policy shared by UI and operator execute-time gates."""
     issues = tuple(issues)
     if operation in NORMAL_ONLY_OPERATIONS:
         return not issues
+    if operation == "APPLY_RESIDENTIAL":
+        return not issues and assembly_mode in (None, BASIC_TREAD_RISER)
+    if operation in {"EDIT_RESIDENTIAL", "EDIT_MATERIALS"}:
+        return not issues and assembly_mode in (None, STANDARD_RESIDENTIAL)
     if operation == "REPAIR":
         return bool(issues) and INVALID_CANONICAL not in issues \
             and set(issues).issubset(RECOVERABLE_ISSUES)
