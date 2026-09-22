@@ -473,3 +473,17 @@ Before Stage 3 starts, verify at minimum:
 - Save/reopen, Regenerate and Repair still reproduce the corrected Residential result.
 
 This follow-up must be accepted before Build 07-B Stage 3 is rebuilt on the corrected foundation.
+
+---
+
+## 20. 2026-09-22 Stage 3 Side Board visual clarification
+
+Blender 5.2 LTS human review rejected the Stage 3 Candidate r1 Side Board direction. This clarification supersedes the earlier Side Board interpretation wherever it conflicts; it does not reopen the accepted Stage 2 closed-body geometry.
+
+- The corrected closed Residential body and the decorative Side Board are separate geometry responsibilities. The body remains visually closed with both boards disabled.
+- `side_board_band_width_mm` continues to supply the accepted Stage 2 body closure depth. That use and its validation are unchanged.
+- The 07-B `STEPPED` Side Board follows the analytical upper stair-step contour. Horizontal reference lines translate toward `+Z` by `b`; vertical reference lines translate toward `-X` by `b`; adjacent translated lines meet at their analytical intersections.
+- Consequently the board occupies the exterior/upward and downhill side of the walking-step contour. It does not form, replace, or share the body's lower closure envelope.
+- The rejected Candidate r1 direction (`horizontal -> -Z*b`, `vertical -> +X*b`) and its large clipped upper plate are not production behavior.
+- The lower end closes cleanly on `Z=B` from local `X=-b` to `X=0`; the upper end closes cleanly on `Z=H` from `X=L-b` to `X=L`.
+- A future straight `SLOPED` Side Board variant belongs to Build 07-C. Build 07-B exposes only the corrected `STEPPED` variant.

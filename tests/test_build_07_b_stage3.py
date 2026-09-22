@@ -4,11 +4,13 @@ import pathlib, sys, types, unittest
 ROOT=pathlib.Path(__file__).parents[1]
 pkg=types.ModuleType('japanese_house_modeler'); pkg.__path__=[str(ROOT/'japanese_house_modeler')]
 sys.modules.setdefault('japanese_house_modeler',pkg)
-from japanese_house_modeler.stair_geometry import resolve_stair_layout, validate_mesh_fragments
+from japanese_house_modeler.stair_geometry import (prepare_stair_geometry,
+    resolve_stair_layout, validate_mesh_fragments)
 from japanese_house_modeler.stair_residential import (MATERIAL_ROLES, ResidentialFields,
     assemble_material_slot_plan, resolve_material_roles)
 from japanese_house_modeler.stair_residential_geometry import (build_side_board_fragment,
-    prepare_residential_geometry, side_board_profile, side_board_reference_profile,
+    prepare_residential_geometry, prepare_stage2_residential_geometry,
+    side_board_profile, side_board_reference_profile,
     stepped_underbody_profile)
 from japanese_house_modeler.stair_state import operation_allowed
 
@@ -21,12 +23,21 @@ class SideBoardTests(unittest.TestCase):
   l=layout(); p=side_board_reference_profile(l)
   self.assertEqual(p[:4],((0,l.base_z),(0,l.base_z+l.actual_riser),(l.going,l.base_z+l.actual_riser),(l.going,l.base_z+2*l.actual_riser)))
   self.assertEqual(p[-1],(l.run_length,l.upper_arrival_z))
- def test_translated_band_and_whole_polygon_clips(self):
+ def test_translated_band_uses_correct_exterior_direction(self):
   l=layout(); p=side_board_profile(l)
-  self.assertEqual(p.outer[0],(.15,l.base_z)); self.assertEqual(p.outer[1],(.15,l.base_z+l.actual_riser-.15))
-  self.assertGreaterEqual(min(z for x,z in p.polygon),l.base_z)
-  self.assertAlmostEqual(max(x for x,z in p.polygon),l.run_length+min(.15,l.riser_thickness))
-  self.assertGreaterEqual(len([q for q in p.polygon if abs(q[0]-(l.run_length+l.riser_thickness))<1e-9]),2)
+  self.assertEqual(p.outer[0],(-.15,l.base_z))
+  self.assertEqual(p.outer[1],(-.15,l.base_z+l.actual_riser+.15))
+  self.assertEqual(p.outer[-1],(l.run_length-.15,l.upper_arrival_z))
+  self.assertNotIn((.15,l.base_z),p.outer)
+  for reference,outer in zip(p.reference[1:-1],p.outer[1:-1]):
+   self.assertAlmostEqual(outer[0],reference[0]-.15)
+   self.assertAlmostEqual(outer[1],reference[1]+.15)
+ def test_clean_lower_and_upper_terminations(self):
+  l=layout(); p=side_board_profile(l)
+  self.assertEqual([q for q in p.polygon if q[1]==l.base_z],[(0,l.base_z),(-.15,l.base_z)])
+  self.assertEqual(min(z for x,z in p.polygon),l.base_z)
+  self.assertEqual([q for q in p.polygon if q[1]==l.upper_arrival_z],[(l.run_length,l.upper_arrival_z),(l.run_length-.15,l.upper_arrival_z)])
+  self.assertEqual(max(x for x,z in p.polygon),l.run_length)
  def test_four_combinations_and_body_unchanged(self):
   bodies=[]
   for left,right in ((1,1),(1,0),(0,1),(0,0)):
@@ -34,6 +45,11 @@ class SideBoardTests(unittest.TestCase):
    self.assertEqual(sum(f.part_type=='SIDE_BOARD' for f in fragments),left+right)
    bodies.append(next(f for f in fragments if f.part_type=='UNDERBODY'))
   self.assertTrue(all(body==bodies[0] for body in bodies))
+ def test_boards_off_exactly_matches_accepted_stage2_body(self):
+  fields=ResidentialFields(left_side_board_enabled=False,right_side_board_enabled=False)
+  args=(((0,0),(3.6,0)),'FORWARD',425,2800,16,900,30,12)
+  self.assertEqual(prepare_residential_geometry(*args,fields=fields),
+                   prepare_stage2_residential_geometry(*args,fields=fields))
  def test_width_and_one_side_envelopes(self):
   l=layout(); left=build_side_board_fragment(l,'LEFT'); right=build_side_board_fragment(l,'RIGHT')
   self.assertAlmostEqual(max(local_y(l,v) for v in left.vertices),.468)
@@ -50,6 +66,8 @@ class SideBoardTests(unittest.TestCase):
  def test_corrected_body_regressions(self):
   l=layout(); p=stepped_underbody_profile(l)
   self.assertEqual([q for q in p.outer if q[1]==l.base_z],[(l.riser_thickness,l.base_z),(l.going+.15,l.base_z)])
+  _basic_l,_basic_f,basic=prepare_stair_geometry(((0,0),(3.6,0)),'FORWARD',425,2800,16,900,30,12)
+  self.assertEqual((len(basic.vertices),len(basic.faces)),(248,186))
 
 class MaterialTests(unittest.TestCase):
  def test_base_partial_override_and_identity_dedupe(self):

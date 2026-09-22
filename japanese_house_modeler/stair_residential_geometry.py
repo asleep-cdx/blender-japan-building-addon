@@ -157,39 +157,21 @@ def side_board_reference_profile(layout):
     return _without_consecutive_duplicates(points)
 
 
-def _clip_polygon(points, axis, limit, keep_less):
-    result = []
-    for start, end in zip(points, points[1:] + points[:1]):
-        start_in = start[axis] <= limit if keep_less else start[axis] >= limit
-        end_in = end[axis] <= limit if keep_less else end[axis] >= limit
-        if start_in:
-            result.append(start)
-        if start_in != end_in:
-            delta = end[axis] - start[axis]
-            ratio = (limit - start[axis]) / delta
-            other = 1 - axis
-            point = [0.0, 0.0]
-            point[axis] = limit
-            point[other] = start[other] + ratio * (end[other] - start[other])
-            result.append(tuple(point))
-    return list(_without_consecutive_duplicates(result))
-
-
 def side_board_profile(layout, fields=ResidentialFields()):
-    """Build full translated stepped band, then clip both half-planes."""
+    """Build the stepped finish band on S_ref's exterior/upward side.
+
+    Horizontal reference lines are translated by ``+Z*b`` and vertical
+    reference lines by ``-X*b``.  Their intersections therefore lie at
+    ``(x-b, z+b)``.  The vertical first/last segments terminate directly at
+    ``Z=B`` and ``Z=H``; no body-soffit clipping is involved.
+    """
     depth = validate_stepped_closure_depth(fields, layout.actual_riser,
                                             layout.going)
     reference = side_board_reference_profile(layout)
-    # First/last segments are vertical.  Every internal translated-line
-    # intersection is (+X depth, -Z depth) from its reference corner.
-    outer = [(reference[0][0] + depth, reference[0][1])]
-    outer.extend((x + depth, z - depth) for x, z in reference[1:-1])
-    outer.append((reference[-1][0] + depth, reference[-1][1]))
-    complete = list(reference) + list(reversed(outer))
-    lower_clipped = _clip_polygon(complete, 1, layout.base_z, False)
-    upper_limit = layout.run_length + layout.riser_thickness
-    clipped = _clip_polygon(lower_clipped, 0, upper_limit, True)
-    polygon = validate_simple_polygon(clipped)
+    outer = [(reference[0][0] - depth, reference[0][1])]
+    outer.extend((x - depth, z + depth) for x, z in reference[1:-1])
+    outer.append((reference[-1][0] - depth, reference[-1][1]))
+    polygon = validate_simple_polygon(list(reference) + list(reversed(outer)))
     return SideBoardProfile(reference, _without_consecutive_duplicates(outer),
                             polygon)
 
