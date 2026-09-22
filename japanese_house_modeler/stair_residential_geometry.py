@@ -3,8 +3,8 @@
 from dataclasses import dataclass
 
 from .stair_geometry import (
-    MeshFragment, assemble_stair_mesh, build_riser_fragments,
-    build_tread_fragments, extrude_xz_profile, resolve_stair_layout,
+    MeshFragment, _box_fragment, assemble_stair_mesh, build_riser_fragments,
+    extrude_xz_profile, resolve_stair_layout,
     validate_mesh_fragments, validate_simple_polygon,
 )
 from .stair_residential import (
@@ -40,14 +40,26 @@ def stepped_underbody_inner_profile(layout):
                         layout.base_z)
     points = [(r, base)]
     for step in range(1, layout.riser_count):
-        points.extend((
-            ((step - 1) * g + r, base + (step - 1) * h),
-            ((step - 1) * g + r, base + step * h - t),
-            (step * g, base + step * h - t),
-            (step * g, base + step * h),
-            (step * g + r, base + step * h),
-        ))
+        underside = base + step * h - t
+        # A Residential Tread runs under the whole depth of the next Riser.
+        # Its rear and that Riser's rear contact face are consequently one
+        # clean corner at x=step*g+r, rather than the former g-to-g+r notch.
+        points.extend((((step - 1) * g + r, underside),
+                       (step * g + r, underside)))
     return _without_consecutive_duplicates(points)
+
+
+def build_residential_tread_fragments(layout):
+    """Build Residential Treads extended uphill through the next Riser."""
+    fragments = []
+    for ordinal in range(1, layout.independent_tread_count + 1):
+        top = layout.base_z + ordinal * layout.actual_riser
+        fragments.append(_box_fragment(
+            layout, "TREAD", ordinal,
+            (ordinal - 1) * layout.going,
+            ordinal * layout.going + layout.riser_thickness,
+            top - layout.tread_thickness, top))
+    return tuple(fragments)
 
 
 def stepped_underbody_outer_profile(inner, thickness, base_z):
@@ -146,6 +158,7 @@ def prepare_stage2_residential_geometry(
     layout = resolve_stair_layout(
         points, ascent_direction, base_z_mm, floor_to_floor_mm, riser_count,
         stair_width_mm, tread_thickness_mm, riser_thickness_mm)
-    fragments = (build_tread_fragments(layout) + build_riser_fragments(layout)
+    fragments = (build_residential_tread_fragments(layout)
+                 + build_riser_fragments(layout)
                  + (build_underbody_fragment(layout, values),))
     return layout, fragments, assemble_stair_mesh(fragments)

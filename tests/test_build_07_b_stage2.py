@@ -56,9 +56,9 @@ class AnalyticalProfileTests(unittest.TestCase):
     def test_inner_standard_exact_sequence_and_endpoints(self):
         inner = stepped_underbody_inner_profile(layout())
         self.assertPointsAlmostEqual(
-            inner[:5], ((.012, 0), (.012, .145), (.24, .145),
-                        (.24, .175), (.252, .175)))
-        self.assertPointsAlmostEqual(inner[-1:], ((3.612, 2.625),))
+            inner[:5], ((.012, 0), (.012, .145), (.252, .145),
+                        (.252, .32), (.492, .32)))
+        self.assertPointsAlmostEqual(inner[-1:], ((3.612, 2.595),))
         self.assertTrue(all(a != b for a, b in zip(inner, inner[1:])))
 
     def test_outer_uses_translated_line_intersections_and_exact_terminations(self):
@@ -67,9 +67,9 @@ class AnalyticalProfileTests(unittest.TestCase):
         outer = stepped_underbody_outer_profile(inner, .0095, stair.base_z)
         self.assertPointsAlmostEqual(
             outer[:5], ((.0215, 0), (.0215, .1355),
-                        (.2495, .1355), (.2495, .1655),
-                        (.2615, .1655)))
-        self.assertPointsAlmostEqual(outer[-1:], ((3.612, 2.6155),))
+                        (.2615, .1355), (.2615, .3105),
+                        (.5015, .3105)))
+        self.assertPointsAlmostEqual(outer[-1:], ((3.612, 2.5855),))
 
     def test_closed_profile_bounds_area_and_simplicity(self):
         result = stepped_underbody_profile(layout(base=425), OFF)
