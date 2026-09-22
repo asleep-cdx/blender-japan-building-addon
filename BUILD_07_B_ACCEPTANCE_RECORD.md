@@ -3,7 +3,7 @@
 ## Current acceptance status
 
 - **Build 07-B Stage 1 — Residential Foundation / Compatibility: ACCEPTED**
-- **Build 07-B Stage 2 — STEPPED_CLOSED Underbody Correction: ACCEPTED**
+- **Build 07-B Stage 2 — STEPPED_CLOSED Underbody Correction + Tread/Riser Junction Follow-up: ACCEPTED**
 - **Build 07-B Stage 3 — Side Boards + Part Materials: NOT STARTED / PR #17 SUPERSEDED**
 - Build 07-B Stage 4 — Lifecycle / Full Regression: NOT STARTED
 - **Build 07-B overall: NOT YET ACCEPTED**
@@ -288,6 +288,66 @@ Accepted corrected Stage 2 scope includes:
 
 The prior Stage 2 implementation and acceptance remain historical evidence only and are superseded by this corrected production revision.
 
+## Runtime-tested Stage 2 Follow-up — Residential Tread/Riser Junction
+
+- GitHub PR: `#19 — Build 07-B Stage 2: refine Residential tread-riser junction`
+- Runtime-tested production commit: `beebd18fb55ce2b26dbcd4b4cc45da3eb8d47a92`
+- Runtime-tested production tree: `8780a98e34a5a981fda7511eab3550cfecaf10d1`
+- Runtime Candidate: `Japanese_House_Modeler_Build_07_B_Stage2_Followup_Candidate_r1.zip`
+- Candidate size: `113156 bytes`
+- Candidate SHA256: `55A9BB69C0F292778BD4EA192ABDBC88E2AAED80269C00F09B2748BF7F65A8AD`
+- Runtime environment: Blender 5.2 LTS
+- Add-on version: `(0, 7, 1)`
+
+### Follow-up automated evidence
+
+The implementation report recorded:
+
+| Check | Result |
+|---|---:|
+| `python -m unittest tests.test_build_07_a_stage1` | **22 PASS** |
+| `python -m unittest tests.test_build_07_a_stage2` | **17 PASS** |
+| `python -m unittest tests.test_build_07_a_stage3` | **31 PASS** |
+| `python -m unittest tests.test_build_07_a_stage4` | **14 PASS** |
+| `python -m unittest tests.test_build_07_b_stage1` | **18 PASS** |
+| `python -m unittest tests.test_build_07_b_stage2` | **13 PASS** |
+| `python -m unittest tests.test_build_07_b_stage2_correction` | **13 PASS** |
+| `python -m unittest tests.test_build_07_b_stage2_followup` | **8 PASS** |
+| `python -m unittest discover -s tests` | **499 PASS** |
+| `python -m compileall -q japanese_house_modeler tests` | **PASS** |
+| `git diff --check` | **PASS** |
+| Working tree | **clean** |
+
+### Follow-up Blender 5.2 LTS runtime acceptance
+
+| Test | Runtime gate | Result | Evidence |
+|---:|---|---|---|
+| 1 | Residential Tread/Riser junction | **PASS** | STANDARD_RESIDENTIAL regenerated successfully. First Tread rear, next Riser rear and expected `jg+r` matched exactly; Riser bottom stayed at `B+jh`. Visual close-up confirmed the requested clean right-angle junction. |
+| 2 | All independent Tread/Riser junctions | **PASS** | All 15 independent Treads matched their following Riser rear plane at `jg+r`, and all Riser bottoms remained at `B+jh`. |
+| 3 | Underbody inner/contact micro-notch removal | **PASS** | All 14 interior junction checks passed. Tread underside reaches `jg+r`, vertical contact stays on the same X plane, and the old `x=jg` micro-notch point is absent. |
+| 4 | Corrected closure regression | **PASS** | First-step bottom remained flat at base Z; minimum Z equaled base Z; maximum visible X equaled `L+r`; corrected closure contract remained intact. |
+| 5 | Mesh health | **PASS** | 368 vertices, 666 edges, 362 faces; zero non-manifold edges, zero boundary edges, zero zero-area faces, all coordinates finite. |
+| 6 | Save / full exit / reopen | **PASS** | STANDARD_RESIDENTIAL/schema 2, REVERSE, base_z 300 mm, width 1000 mm, 368 / 362 geometry and NORMAL diagnosis persisted. |
+| 7 | Managed Regenerate | **PASS** | Existing “階段を再生成” preserved 368 / 362 geometry, NORMAL diagnosis and the corrected right-angle junction. |
+| 8 | GEOMETRY_MISSING Repair | **PASS** | Clearing Mesh produced GEOMETRY_MISSING; Repair restored STANDARD_RESIDENTIAL 368 / 362, NORMAL diagnosis and the corrected right-angle junction. |
+| 9 | BASIC compatibility | **PASS** | New BASIC/schema 1 stair remained 248 / 186 with no issues. |
+| 10 | Stage 3 public-scope guard | **PASS** | No Residential/apply/material operators were registered in `bpy.ops.jhm`. |
+| 11 | REVERSE + oblique Path | **PASS** | P0=(0,0), P1=(3.6,1.8) m, REVERSE: all junction checks passed, 368 / 362 and NORMAL state retained. |
+| 12 | FORWARD + oblique Path | **PASS** | Same oblique Path with FORWARD: all junction checks passed, 368 / 362 and NORMAL state retained. |
+| 13 | Final Mesh health after oblique/FORWARD | **PASS** | 368 vertices, 666 edges, 362 faces; zero non-manifold, boundary and zero-area elements; all coordinates finite. |
+
+### Follow-up accepted scope
+
+This follow-up refines only the STANDARD_RESIDENTIAL Tread/Riser rear junction:
+
+- each independent Residential Tread extends uphill by exactly one `riser_thickness`,
+- Tread rear and the following Riser rear share the plane `x=jg+r`,
+- Riser bottom height remains unchanged at `B+jh`,
+- the old inner/contact micro-step at `x=jg` is removed,
+- accepted corrected Stage 2 visible soffit, flat first-step bottom, lower/upper terminations and full-width closure remain unchanged,
+- BASIC geometry remains unchanged,
+- Stage 3 public functionality remains out of scope.
+
 ## Acceptance conclusion
 
 **Build 07-B Stage 1 — Residential Foundation / Compatibility: ACCEPTED**
@@ -298,7 +358,12 @@ The prior Stage 2 implementation and acceptance remain historical evidence only 
 
 Build 07-B overall is **NOT YET ACCEPTED**.
 
-Corrected Stage 2 runtime-tested production revision:
+Latest Stage 2 runtime-tested production revision (Tread/Riser junction follow-up):
+
+- commit: `beebd18fb55ce2b26dbcd4b4cc45da3eb8d47a92`
+- tree: `8780a98e34a5a981fda7511eab3550cfecaf10d1`
+
+Corrected closed-body foundation revision remains:
 
 - commit: `0b2d3d4530847fa2c11cc10e50f44dbd9672230a`
 - tree: `1f2034079093c1ba76b91a75be51964f46853f77`
