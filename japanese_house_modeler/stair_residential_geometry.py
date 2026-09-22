@@ -10,6 +10,7 @@ from .stair_geometry import (
 from .stair_residential import (
     STANDARD_RESIDENTIAL, STEPPED_CLOSED, ResidentialFields,
     residential_fields, validate_mode_data,
+    validate_side_board_profile_width,
     validate_stepped_closure_depth,
     validate_stepped_underbody_thickness,
 )
@@ -165,8 +166,8 @@ def side_board_profile(layout, fields=ResidentialFields()):
     ``(x-b, z+b)``.  The vertical first/last segments terminate directly at
     ``Z=B`` and ``Z=H``; no body-soffit clipping is involved.
     """
-    depth = validate_stepped_closure_depth(fields, layout.actual_riser,
-                                            layout.going)
+    depth = validate_side_board_profile_width(fields, layout.actual_riser,
+                                               layout.going)
     reference = side_board_reference_profile(layout)
     outer = [(reference[0][0] - depth, reference[0][1])]
     outer.extend((x - depth, z + depth) for x, z in reference[1:-1])
@@ -182,9 +183,9 @@ def build_side_board_fragment(layout, side, fields=ResidentialFields()):
     profile = side_board_profile(layout, values)
     half = layout.width / 2.0
     if side == "LEFT":
-        y_min, y_max, ordinal = half, half + thickness, 1
+        y_min, y_max, ordinal = half - thickness, half, 1
     elif side == "RIGHT":
-        y_min, y_max, ordinal = -half - thickness, -half, 2
+        y_min, y_max, ordinal = -half, -half + thickness, 2
     else:
         raise ValueError("Side Board sideはLEFTまたはRIGHTである必要があります。")
     local = extrude_xz_profile(profile.polygon, y_min, y_max,

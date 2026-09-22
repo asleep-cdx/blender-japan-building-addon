@@ -487,3 +487,14 @@ Blender 5.2 LTS human review rejected the Stage 3 Candidate r1 Side Board direct
 - The rejected Candidate r1 direction (`horizontal -> -Z*b`, `vertical -> +X*b`) and its large clipped upper plate are not production behavior.
 - The lower end closes cleanly on `Z=B` from local `X=-b` to `X=0`; the upper end closes cleanly on `Z=H` from `X=L-b` to `X=L`.
 - A future straight `SLOPED` Side Board variant belongs to Build 07-C. Build 07-B exposes only the corrected `STEPPED` variant.
+
+### 20.1 Candidate r2 placement and canonical-width correction
+
+The Candidate r2 `-X/+Z` stepped profile direction is accepted, but its external-Y placement and shared width field are rejected by Blender 5.2 LTS human review.
+
+- Side Boards are finish boards inside the canonical `stair_width_mm` envelope. LEFT occupies `[+w/2-s,+w/2]`; RIGHT occupies `[-w/2,-w/2+s]`. The finished envelope must not exceed the body width.
+- `side_board_band_width_mm` remains the accepted Stage 2 body closure-depth canonical, default `150 mm`, for backward compatibility.
+- New `side_board_profile_width_mm`, default `40 mm`, exclusively controls the decorative stepped profile width. Changing it must not change Tread, Riser, or Underbody geometry.
+- `side_board_thickness_mm`, default `18 mm`, continues to control only Y thickness.
+- Existing records without the new field read the RNA/dataclass default and are not rewritten at load time.
+- The future SLOPED Side Board remains Build 07-C scope.

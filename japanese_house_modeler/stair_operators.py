@@ -573,11 +573,11 @@ class JHM_OT_edit_residential_stair(_StairOperationMixin, bpy.types.Operator):
     bl_label = "住宅階段仕様を変更"
     bl_options = {"REGISTER", "UNDO"}
     operation = "EDIT_RESIDENTIAL"
-    underside_thickness_mm: bpy.props.FloatProperty(name="下面厚 (mm)")
+    underside_thickness_mm: bpy.props.FloatProperty(name="下面シェル厚 (mm)")
     left_side_board_enabled: bpy.props.BoolProperty(name="左Side Board")
     right_side_board_enabled: bpy.props.BoolProperty(name="右Side Board")
     side_board_thickness_mm: bpy.props.FloatProperty(name="Side Board厚 (mm)")
-    side_board_band_width_mm: bpy.props.FloatProperty(name="Side Board幅 (mm)")
+    side_board_profile_width_mm: bpy.props.FloatProperty(name="Side Board幅 (mm)")
 
     def invoke(self, context, _event):
         obj = self._require_mode(context, STANDARD_RESIDENTIAL)
@@ -585,7 +585,7 @@ class JHM_OT_edit_residential_stair(_StairOperationMixin, bpy.types.Operator):
         values = residential_fields(obj.jhm_stair)
         for name in ("underside_thickness_mm", "left_side_board_enabled",
                      "right_side_board_enabled", "side_board_thickness_mm",
-                     "side_board_band_width_mm"):
+                     "side_board_profile_width_mm"):
             setattr(self, name, getattr(values, name))
         return context.window_manager.invoke_props_dialog(self)
 
@@ -596,7 +596,7 @@ class JHM_OT_edit_residential_stair(_StairOperationMixin, bpy.types.Operator):
         values = vars(candidate["residential"]).copy()
         for name in ("underside_thickness_mm", "left_side_board_enabled",
                      "right_side_board_enabled", "side_board_thickness_mm",
-                     "side_board_band_width_mm"):
+                     "side_board_profile_width_mm"):
             values[name] = getattr(self, name)
         candidate["residential"] = ResidentialFields(**values)
         return self._run_candidate(context, candidate)

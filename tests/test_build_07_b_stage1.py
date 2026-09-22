@@ -71,7 +71,9 @@ class CompatibilityAndDataTests(unittest.TestCase):
         fields = ResidentialFields()
         self.assertEqual((fields.underside_thickness_mm,
                           fields.side_board_thickness_mm,
-                          fields.side_board_band_width_mm), (9.5, 18.0, 150.0))
+                          fields.side_board_band_width_mm,
+                          fields.side_board_profile_width_mm),
+                         (9.5, 18.0, 150.0, 40.0))
         self.assertTrue(fields.left_side_board_enabled)
         self.assertTrue(fields.right_side_board_enabled)
         self.assertTrue(validate_mode_data(STANDARD_RESIDENTIAL, 2, fields))

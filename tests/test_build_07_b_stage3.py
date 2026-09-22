@@ -25,18 +25,18 @@ class SideBoardTests(unittest.TestCase):
   self.assertEqual(p[-1],(l.run_length,l.upper_arrival_z))
  def test_translated_band_uses_correct_exterior_direction(self):
   l=layout(); p=side_board_profile(l)
-  self.assertEqual(p.outer[0],(-.15,l.base_z))
-  self.assertEqual(p.outer[1],(-.15,l.base_z+l.actual_riser+.15))
-  self.assertEqual(p.outer[-1],(l.run_length-.15,l.upper_arrival_z))
-  self.assertNotIn((.15,l.base_z),p.outer)
+  self.assertEqual(p.outer[0],(-.04,l.base_z))
+  self.assertEqual(p.outer[1],(-.04,l.base_z+l.actual_riser+.04))
+  self.assertEqual(p.outer[-1],(l.run_length-.04,l.upper_arrival_z))
+  self.assertNotIn((.04,l.base_z),p.outer)
   for reference,outer in zip(p.reference[1:-1],p.outer[1:-1]):
-   self.assertAlmostEqual(outer[0],reference[0]-.15)
-   self.assertAlmostEqual(outer[1],reference[1]+.15)
+   self.assertAlmostEqual(outer[0],reference[0]-.04)
+   self.assertAlmostEqual(outer[1],reference[1]+.04)
  def test_clean_lower_and_upper_terminations(self):
   l=layout(); p=side_board_profile(l)
-  self.assertEqual([q for q in p.polygon if q[1]==l.base_z],[(0,l.base_z),(-.15,l.base_z)])
+  self.assertEqual([q for q in p.polygon if q[1]==l.base_z],[(0,l.base_z),(-.04,l.base_z)])
   self.assertEqual(min(z for x,z in p.polygon),l.base_z)
-  self.assertEqual([q for q in p.polygon if q[1]==l.upper_arrival_z],[(l.run_length,l.upper_arrival_z),(l.run_length-.15,l.upper_arrival_z)])
+  self.assertEqual([q for q in p.polygon if q[1]==l.upper_arrival_z],[(l.run_length,l.upper_arrival_z),(l.run_length-.04,l.upper_arrival_z)])
   self.assertEqual(max(x for x,z in p.polygon),l.run_length)
  def test_four_combinations_and_body_unchanged(self):
   bodies=[]
@@ -52,17 +52,44 @@ class SideBoardTests(unittest.TestCase):
                    prepare_stage2_residential_geometry(*args,fields=fields))
  def test_width_and_one_side_envelopes(self):
   l=layout(); left=build_side_board_fragment(l,'LEFT'); right=build_side_board_fragment(l,'RIGHT')
-  self.assertAlmostEqual(max(local_y(l,v) for v in left.vertices),.468)
-  self.assertAlmostEqual(min(local_y(l,v) for v in right.vertices),-.468)
-  self.assertAlmostEqual(max(local_y(l,v) for v in left.vertices)-min(local_y(l,v) for v in right.vertices),.936)
+  self.assertAlmostEqual(min(local_y(l,v) for v in left.vertices),.432)
+  self.assertAlmostEqual(max(local_y(l,v) for v in left.vertices),.450)
+  self.assertAlmostEqual(min(local_y(l,v) for v in right.vertices),-.450)
+  self.assertAlmostEqual(max(local_y(l,v) for v in right.vertices),-.432)
+ def test_all_combinations_stay_inside_body_envelope(self):
+  for left,right in ((1,1),(1,0),(0,1),(0,0)):
+   l,_fragments,mesh=prepare_residential_geometry(((0,0),(3.6,0)),'FORWARD',425,2800,16,900,30,12,fields=ResidentialFields(left_side_board_enabled=bool(left),right_side_board_enabled=bool(right)))
+   ys=[local_y(l,v) for v in mesh.vertices]
+   self.assertAlmostEqual(min(ys),-.45); self.assertAlmostEqual(max(ys),.45)
+ def test_profile_width_changes_only_side_boards(self):
+  args=(((0,0),(3.6,0)),'FORWARD',425,2800,16,900,30,12)
+  results=[]
+  for width in (40,60):
+   _l,fragments,_mesh=prepare_residential_geometry(*args,fields=ResidentialFields(side_board_profile_width_mm=width))
+   results.append((tuple(f for f in fragments if f.part_type!='SIDE_BOARD'),
+                   tuple(f for f in fragments if f.part_type=='SIDE_BOARD')))
+  self.assertEqual(results[0][0],results[1][0]); self.assertNotEqual(results[0][1],results[1][1])
+  p40=side_board_profile(layout(),ResidentialFields(side_board_profile_width_mm=40))
+  p60=side_board_profile(layout(),ResidentialFields(side_board_profile_width_mm=60))
+  self.assertEqual(p40.reference,p60.reference); self.assertNotEqual(p40.outer,p60.outer)
+ def test_closure_depth_remains_independent_compatibility_field(self):
+  l=layout(); a=stepped_underbody_profile(l,ResidentialFields(side_board_band_width_mm=150)); b=stepped_underbody_profile(l,ResidentialFields(side_board_band_width_mm=100))
+  self.assertNotEqual(a.outer,b.outer); self.assertEqual(a.inner,b.inner)
  def test_reverse_oblique_and_nonzero_base(self):
   for direction in ('FORWARD','REVERSE'):
    l=layout(direction,((1,2),(4,6)),425); f=build_side_board_fragment(l,'LEFT')
    self.assertAlmostEqual(min(v[2] for v in f.vertices),l.base_z)
-   self.assertAlmostEqual(min(local_y(l,v) for v in f.vertices),l.width/2)
+   self.assertAlmostEqual(min(local_y(l,v) for v in f.vertices),l.width/2-.018)
+   self.assertAlmostEqual(max(local_y(l,v) for v in f.vertices),l.width/2)
    self.assertTrue(validate_mesh_fragments((f,)))
  def test_invalid_band_rejected_atomically_during_prepare(self):
   with self.assertRaises(ValueError): prepare_residential_geometry(((0,0),(3.6,0)),'FORWARD',0,2800,16,900,30,12,fields=ResidentialFields(side_board_band_width_mm=175))
+  for invalid in (0,175,float('nan'),float('inf'),True):
+   with self.subTest(invalid=invalid),self.assertRaises(ValueError):
+    prepare_residential_geometry(((0,0),(3.6,0)),'FORWARD',0,2800,16,900,30,12,fields=ResidentialFields(side_board_profile_width_mm=invalid))
+ def test_invalid_profile_width_is_ignored_when_boards_off(self):
+  fields=ResidentialFields(left_side_board_enabled=False,right_side_board_enabled=False,side_board_profile_width_mm=float('nan'))
+  prepare_residential_geometry(((0,0),(3.6,0)),'FORWARD',0,2800,16,900,30,12,fields=fields)
  def test_corrected_body_regressions(self):
   l=layout(); p=stepped_underbody_profile(l)
   self.assertEqual([q for q in p.outer if q[1]==l.base_z],[(l.riser_thickness,l.base_z),(l.going+.15,l.base_z)])
