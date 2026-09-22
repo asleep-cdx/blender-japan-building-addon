@@ -393,3 +393,83 @@ Until then:
 - Build 07-B Stage 2 closure acceptance is superseded,
 - Build 07-B Stage 3 is blocked,
 - Build 07-B overall remains NOT ACCEPTED.
+
+
+---
+
+## 19. Pre-Stage-3 follow-up — Tread rear / Riser lower junction
+
+This follow-up is a localized refinement to the accepted corrected Stage 2 residential geometry. It does **not** reopen the corrected closed-soffit contract and does not change BASIC Stair geometry.
+
+### 19.1 Human-confirmed target
+
+For `STANDARD_RESIDENTIAL`, the junction between each independent Tread and the next uphill Riser must read as a clean right-angle board junction.
+
+The intended relationship is:
+
+- do **not** extend the Riser downward below its current lower elevation,
+- instead extend the preceding Tread uphill/rearward by exactly one `riser_thickness`,
+- the Tread rear face and the uphill/rear face of the next Riser therefore lie on the same local-X plane,
+- the resulting side silhouette/contact path must not contain the former small local step/notch between the Tread underside and the Riser rear face.
+
+This is a Tread-rear extension, not a Riser-downward extension.
+
+### 19.2 Residential Tread geometry
+
+For independent Tread ordinal `j = 1 .. N-1`:
+
+- existing lower/uphill start remains `x0 = (j-1)g`,
+- Residential rear/uphill end becomes `x1 = jg + r`,
+- top remains `B + jh`,
+- bottom remains `B + jh - t`.
+
+Thus, compared with BASIC, each Residential Tread extends uphill by exactly `r`.
+
+For standard `r = 12 mm`, each Residential Tread therefore extends 12 mm farther uphill.
+
+### 19.3 Riser geometry is unchanged
+
+The existing Riser vertical placement and lower elevations remain authoritative.
+
+In particular:
+
+- Riser lower Z must **not** be lowered by one Tread thickness,
+- the next Riser continues to start at the preceding Tread top elevation,
+- the final Riser contract and upper `L+r` termination remain unchanged.
+
+### 19.4 BASIC compatibility
+
+`BASIC_TREAD_RISER` must retain the accepted Build 07-A Tread geometry.
+
+Do not change the generic BASIC Tread generator in a way that changes legacy/basic output.
+
+The preferred implementation is a Residential-specific Tread preparation path or an equally explicit mode-aware equivalent.
+
+### 19.5 Underbody/contact profile follow-up
+
+The corrected closed body remains mandatory.
+
+The analytical inner/contact path must be updated so that, at each Tread/Riser rear junction:
+
+- the Tread underside continues to the extended rear plane `x = jg + r`,
+- the following vertical contact segment is on that same `x = jg + r` plane,
+- no intermediate `x = jg` micro-step/notch remains solely because the old Tread ended before the Riser rear plane.
+
+The visible corrected stepped soffit `C_visible` remains governed by the accepted closure-depth rules and must not be moved merely to implement this junction cleanup.
+
+### 19.6 Acceptance requirements
+
+Before Stage 3 starts, verify at minimum:
+
+- Residential Treads end at `jg+r`,
+- Riser lower Z values are unchanged,
+- side orthographic close-up shows a clean right-angle Tread-rear / Riser junction,
+- the former small local rear-junction notch is absent,
+- first-step bottom remains flat and notch-free,
+- corrected stepped soffit remains visually closed,
+- lower `base_z` and upper `L+r` terminations remain unchanged,
+- Mesh health remains valid,
+- BASIC remains unchanged,
+- Save/reopen, Regenerate and Repair still reproduce the corrected Residential result.
+
+This follow-up must be accepted before Build 07-B Stage 3 is rebuilt on the corrected foundation.
