@@ -112,17 +112,44 @@ class MaterialTests(unittest.TestCase):
  def test_material_operator_dialog_draws_all_fields_in_stable_order(self):
   tree=ast.parse((ROOT/'japanese_house_modeler'/'stair_operators.py').read_text())
   classes={node.name:node for node in tree.body if isinstance(node,ast.ClassDef)}
+  def string_properties(class_name):
+   return [node.target.id for node in classes[class_name].body
+           if isinstance(node,ast.AnnAssign) and isinstance(node.target,ast.Name)
+           and isinstance(node.annotation,ast.Call)
+           and isinstance(node.annotation.func,ast.Attribute)
+           and node.annotation.func.attr=='StringProperty']
   def drawn_properties(class_name):
    draw=next(node for node in classes[class_name].body if isinstance(node,ast.FunctionDef) and node.name=='draw')
    return [node.args[1].value for node in ast.walk(draw)
            if isinstance(node,ast.Call) and isinstance(node.func,ast.Attribute)
-           and node.func.attr=='prop' and len(node.args)>=2
-           and isinstance(node.args[1],ast.Constant)]
+           and node.func.attr=='prop_search' and len(node.args)>=4
+           and isinstance(node.args[1],ast.Constant)
+           and isinstance(node.args[2],ast.Attribute)
+           and isinstance(node.args[2].value,ast.Name)
+           and node.args[2].value.id=='bpy' and node.args[2].attr=='data'
+           and isinstance(node.args[3],ast.Constant)
+           and node.args[3].value=='materials']
+  expected=['base_material_name','tread_material_name','riser_material_name',
+            'underside_material_name','side_board_material_name']
+  self.assertEqual(string_properties('JHM_OT_edit_stair_materials'),expected)
   self.assertEqual(drawn_properties('JHM_OT_edit_stair_materials'),
-                   ['base_material','tread_material','riser_material',
-                    'underside_material','side_board_material'])
+                   expected)
+  self.assertEqual(string_properties('JHM_OT_apply_residential_stair'),
+                   ['base_material_name'])
   self.assertEqual(drawn_properties('JHM_OT_apply_residential_stair'),
-                   ['base_material'])
+                   ['base_material_name'])
+ def test_material_name_helpers_preserve_none_valid_and_stale_semantics(self):
+  tree=ast.parse((ROOT/'japanese_house_modeler'/'stair_operators.py').read_text())
+  helpers=[node for node in tree.body if isinstance(node,ast.FunctionDef)
+           and node.name in {'_material_name','_material_from_operator_name'}]
+  namespace={'bpy':types.SimpleNamespace(data=types.SimpleNamespace(
+      materials={'Wood':'wood-datablock'}))}
+  exec(compile(ast.Module(body=helpers,type_ignores=[]),'<helpers>','exec'),namespace)
+  self.assertEqual(namespace['_material_name'](types.SimpleNamespace(name='Wood')),'Wood')
+  self.assertEqual(namespace['_material_name'](None),'')
+  self.assertIsNone(namespace['_material_from_operator_name'](''))
+  self.assertEqual(namespace['_material_from_operator_name']('Wood'),'wood-datablock')
+  with self.assertRaises(ValueError): namespace['_material_from_operator_name']('Missing')
  def test_stage3_default_fragment_counts_are_stable(self):
   expected={(True,True):(624,738),(True,False):(496,550),
             (False,True):(496,550),(False,False):(368,362)}

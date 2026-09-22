@@ -33,6 +33,21 @@ _STAIR_DEFAULT_NAMES = (
 _CANONICAL_NAMES = _STAIR_DEFAULT_NAMES
 
 
+def _material_name(material):
+    """Convert a canonical Material pointer to dialog-safe text."""
+    return material.name if material is not None else ""
+
+
+def _material_from_operator_name(name):
+    """Resolve one dialog name without silently losing a stale selection."""
+    if not name:
+        return None
+    material = bpy.data.materials.get(name)
+    if material is None:
+        raise ValueError(f"Material '{name}' が見つかりません。")
+    return material
+
+
 def _canonical_snapshot(stair):
     values = {
         "path_points": tuple(tuple(point.xy) for point in stair.path_points),
@@ -547,27 +562,35 @@ class JHM_OT_apply_residential_stair(_StairOperationMixin, bpy.types.Operator):
     bl_options = {"REGISTER", "UNDO"}
     operation = "APPLY_RESIDENTIAL"
 
-    base_material: bpy.props.PointerProperty(name="Base Material", type=bpy.types.Material)
+    base_material_name: bpy.props.StringProperty()
 
     def draw(self, _context):
-        self.layout.prop(self, "base_material")
+        self.layout.prop_search(
+            self, "base_material_name", bpy.data, "materials",
+            text="Base Material")
 
     def invoke(self, context, _event):
         obj = self._require_mode(context, BASIC_TREAD_RISER)
         if obj is None:
             return {"CANCELLED"}
         materials = tuple(m for m in obj.data.materials if m is not None)
-        self.base_material = materials[0] if len(materials) == 1 else None
+        self.base_material_name = (
+            _material_name(materials[0]) if len(materials) == 1 else "")
         return context.window_manager.invoke_props_dialog(self)
 
     def execute(self, context):
         obj = self._require_mode(context, BASIC_TREAD_RISER)
         if obj is None:
             return {"CANCELLED"}
+        try:
+            base_material = _material_from_operator_name(self.base_material_name)
+        except ValueError as exc:
+            self.report({"WARNING"}, str(exc))
+            return {"CANCELLED"}
         candidate = _canonical_snapshot(obj.jhm_stair)
         candidate["assembly_mode"] = STANDARD_RESIDENTIAL
         candidate["stair_schema_version"] = max(2, candidate["stair_schema_version"])
-        candidate["residential"] = ResidentialFields(base_material=self.base_material)
+        candidate["residential"] = ResidentialFields(base_material=base_material)
         return self._run_candidate(context, candidate)
 
 
@@ -610,37 +633,49 @@ class JHM_OT_edit_stair_materials(_StairOperationMixin, bpy.types.Operator):
     bl_label = "階段部材Materialを変更"
     bl_options = {"REGISTER", "UNDO"}
     operation = "EDIT_MATERIALS"
-    base_material: bpy.props.PointerProperty(name="Base Material", type=bpy.types.Material)
-    tread_material: bpy.props.PointerProperty(name="Tread override", type=bpy.types.Material)
-    riser_material: bpy.props.PointerProperty(name="Riser override", type=bpy.types.Material)
-    underside_material: bpy.props.PointerProperty(name="Underside override", type=bpy.types.Material)
-    side_board_material: bpy.props.PointerProperty(name="Side Board override", type=bpy.types.Material)
+    base_material_name: bpy.props.StringProperty()
+    tread_material_name: bpy.props.StringProperty()
+    riser_material_name: bpy.props.StringProperty()
+    underside_material_name: bpy.props.StringProperty()
+    side_board_material_name: bpy.props.StringProperty()
 
     def draw(self, _context):
         layout = self.layout
-        layout.prop(self, "base_material")
-        layout.prop(self, "tread_material")
-        layout.prop(self, "riser_material")
-        layout.prop(self, "underside_material")
-        layout.prop(self, "side_board_material")
+        layout.prop_search(self, "base_material_name", bpy.data, "materials",
+                           text="Base Material")
+        layout.prop_search(self, "tread_material_name", bpy.data, "materials",
+                           text="Tread override")
+        layout.prop_search(self, "riser_material_name", bpy.data, "materials",
+                           text="Riser override")
+        layout.prop_search(self, "underside_material_name", bpy.data, "materials",
+                           text="Underside override")
+        layout.prop_search(self, "side_board_material_name", bpy.data, "materials",
+                           text="Side Board override")
 
     def invoke(self, context, _event):
         obj = self._require_mode(context, STANDARD_RESIDENTIAL)
         if obj is None: return {"CANCELLED"}
         values = residential_fields(obj.jhm_stair)
-        for name in ("base_material", "tread_material", "riser_material",
-                     "underside_material", "side_board_material"):
-            setattr(self, name, getattr(values, name))
+        for role in ("base", "tread", "riser", "underside", "side_board"):
+            setattr(self, f"{role}_material_name",
+                    _material_name(getattr(values, f"{role}_material")))
         return context.window_manager.invoke_props_dialog(self)
 
     def execute(self, context):
         obj = self._require_mode(context, STANDARD_RESIDENTIAL)
         if obj is None: return {"CANCELLED"}
+        try:
+            materials = {
+                f"{role}_material": _material_from_operator_name(
+                    getattr(self, f"{role}_material_name"))
+                for role in ("base", "tread", "riser", "underside", "side_board")
+            }
+        except ValueError as exc:
+            self.report({"WARNING"}, str(exc))
+            return {"CANCELLED"}
         candidate = _canonical_snapshot(obj.jhm_stair)
         values = vars(candidate["residential"]).copy()
-        for name in ("base_material", "tread_material", "riser_material",
-                     "underside_material", "side_board_material"):
-            values[name] = getattr(self, name)
+        values.update(materials)
         candidate["residential"] = ResidentialFields(**values)
         return self._run_candidate(context, candidate)
 

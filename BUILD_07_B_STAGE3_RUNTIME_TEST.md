@@ -60,6 +60,19 @@ datablock selectors in this order: Base Material, Tread override, Riser
 override, Underside override, and Side Board override. Also open **住宅階段仕様を適用**
 on a BASIC Stair and confirm its Base Material selector is visible.
 
+Confirm the Candidate r5 Operator RNA uses registered String properties:
+
+```python
+import japanese_house_modeler.stair_operators as so
+print([(p.identifier, p.type) for p in so.JHM_OT_edit_stair_materials.bl_rna.properties if "material" in p.identifier])
+print([(p.identifier, p.type) for p in so.JHM_OT_apply_residential_stair.bl_rna.properties if "material" in p.identifier])
+```
+
+The first result must contain `base_material_name`, `tread_material_name`,
+`riser_material_name`, `underside_material_name`, and
+`side_board_material_name`; the second must contain `base_material_name`.
+They must be String properties. An empty selector means canonical `None`.
+
 1. **Case A:** Base=Wood, Riser=White, all overrides otherwise empty. Slots must identity-dedupe to Wood/White; tread, underside and both boards visually use Wood, risers White.
 2. **Case B:** Base empty, Tread=Wood, other overrides empty. Verify exactly one Wood slot plus one empty (`None`) slot. Treads use Wood and every other role uses the empty slot; no substitute Material datablock is created.
 3. **Case C:** all five fields empty. Verify no material datablocks/slots are generated and all faces remain unassigned.
