@@ -55,6 +55,11 @@ white=bpy.data.materials.get('White') or bpy.data.materials.new('White')
 
 Use **階段部材Materialを変更** (do not directly edit RNA for the acceptance action).
 
+First confirm that the dialog visibly presents five usable Blender Material
+datablock selectors in this order: Base Material, Tread override, Riser
+override, Underside override, and Side Board override. Also open **住宅階段仕様を適用**
+on a BASIC Stair and confirm its Base Material selector is visible.
+
 1. **Case A:** Base=Wood, Riser=White, all overrides otherwise empty. Slots must identity-dedupe to Wood/White; tread, underside and both boards visually use Wood, risers White.
 2. **Case B:** Base empty, Tread=Wood, other overrides empty. Verify exactly one Wood slot plus one empty (`None`) slot. Treads use Wood and every other role uses the empty slot; no substitute Material datablock is created.
 3. **Case C:** all five fields empty. Verify no material datablocks/slots are generated and all faces remain unassigned.

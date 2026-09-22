@@ -549,6 +549,9 @@ class JHM_OT_apply_residential_stair(_StairOperationMixin, bpy.types.Operator):
 
     base_material: bpy.props.PointerProperty(name="Base Material", type=bpy.types.Material)
 
+    def draw(self, _context):
+        self.layout.prop(self, "base_material")
+
     def invoke(self, context, _event):
         obj = self._require_mode(context, BASIC_TREAD_RISER)
         if obj is None:
@@ -612,6 +615,14 @@ class JHM_OT_edit_stair_materials(_StairOperationMixin, bpy.types.Operator):
     riser_material: bpy.props.PointerProperty(name="Riser override", type=bpy.types.Material)
     underside_material: bpy.props.PointerProperty(name="Underside override", type=bpy.types.Material)
     side_board_material: bpy.props.PointerProperty(name="Side Board override", type=bpy.types.Material)
+
+    def draw(self, _context):
+        layout = self.layout
+        layout.prop(self, "base_material")
+        layout.prop(self, "tread_material")
+        layout.prop(self, "riser_material")
+        layout.prop(self, "underside_material")
+        layout.prop(self, "side_board_material")
 
     def invoke(self, context, _event):
         obj = self._require_mode(context, STANDARD_RESIDENTIAL)

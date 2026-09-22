@@ -1,6 +1,6 @@
 """Build 07-B Stage 3 side-board, material, and activation contracts."""
 from dataclasses import replace
-import pathlib, sys, types, unittest
+import ast, pathlib, sys, types, unittest
 ROOT=pathlib.Path(__file__).parents[1]
 pkg=types.ModuleType('japanese_house_modeler'); pkg.__path__=[str(ROOT/'japanese_house_modeler')]
 sys.modules.setdefault('japanese_house_modeler',pkg)
@@ -109,6 +109,27 @@ class MaterialTests(unittest.TestCase):
  def test_every_face_has_role(self):
   _l,fragments,mesh=prepare_residential_geometry(((0,0),(3.6,0)),'FORWARD',0,2800,16,900,30,12)
   self.assertEqual(len(mesh.faces),len(mesh.face_roles)); self.assertEqual(set(mesh.face_roles),set(MATERIAL_ROLES))
+ def test_material_operator_dialog_draws_all_fields_in_stable_order(self):
+  tree=ast.parse((ROOT/'japanese_house_modeler'/'stair_operators.py').read_text())
+  classes={node.name:node for node in tree.body if isinstance(node,ast.ClassDef)}
+  def drawn_properties(class_name):
+   draw=next(node for node in classes[class_name].body if isinstance(node,ast.FunctionDef) and node.name=='draw')
+   return [node.args[1].value for node in ast.walk(draw)
+           if isinstance(node,ast.Call) and isinstance(node.func,ast.Attribute)
+           and node.func.attr=='prop' and len(node.args)>=2
+           and isinstance(node.args[1],ast.Constant)]
+  self.assertEqual(drawn_properties('JHM_OT_edit_stair_materials'),
+                   ['base_material','tread_material','riser_material',
+                    'underside_material','side_board_material'])
+  self.assertEqual(drawn_properties('JHM_OT_apply_residential_stair'),
+                   ['base_material'])
+ def test_stage3_default_fragment_counts_are_stable(self):
+  expected={(True,True):(624,738),(True,False):(496,550),
+            (False,True):(496,550),(False,False):(368,362)}
+  for enabled,counts in expected.items():
+   fields=ResidentialFields(left_side_board_enabled=enabled[0],right_side_board_enabled=enabled[1])
+   mesh=prepare_residential_geometry(((0,0),(3.6,0)),'FORWARD',0,2800,16,900,30,12,fields=fields)[2]
+   self.assertEqual((len(mesh.vertices),len(mesh.faces)),counts)
 
 class ActivationTests(unittest.TestCase):
  def test_central_policy_mode_gates(self):
