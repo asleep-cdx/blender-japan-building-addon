@@ -165,6 +165,17 @@ class JHM_PT_house_modeler(bpy.types.Panel):
             normal_actions.operator("jhm.edit_stair_path", text="Path座標を変更")
             normal_actions.operator("jhm.reverse_stair_ascent", text="上り方向を反転")
             normal_actions.operator("jhm.regenerate_stair", text="階段を再生成")
+            if stair.assembly_mode == "BASIC_TREAD_RISER":
+                apply_row = selected_box.row()
+                apply_row.enabled = operation_allowed(
+                    "APPLY_RESIDENTIAL", issues, stair.assembly_mode)
+                apply_row.operator("jhm.apply_residential_stair", text="住宅階段仕様を適用")
+            else:
+                residential = selected_box.column()
+                residential.enabled = operation_allowed(
+                    "EDIT_RESIDENTIAL", issues, stair.assembly_mode)
+                residential.operator("jhm.edit_residential_stair", text="住宅階段仕様を変更")
+                residential.operator("jhm.edit_stair_materials", text="階段部材Materialを変更")
             repair = selected_box.row()
             repair.enabled = operation_allowed("REPAIR", issues)
             repair.operator("jhm.repair_stair", text="管理状態へ復元")

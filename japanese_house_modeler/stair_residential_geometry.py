@@ -10,6 +10,7 @@ from .stair_geometry import (
 from .stair_residential import (
     STANDARD_RESIDENTIAL, STEPPED_CLOSED, ResidentialFields,
     residential_fields, validate_mode_data,
+    validate_side_board_reveal,
     validate_stepped_closure_depth,
     validate_stepped_underbody_thickness,
 )
@@ -21,6 +22,14 @@ class SteppedUnderbodyProfile:
 
     inner: tuple
     outer: tuple
+    polygon: tuple
+
+
+@dataclass(frozen=True)
+class SideBoardProfile:
+    reference: tuple
+    outer: tuple
+    lower: tuple
     polygon: tuple
 
 
@@ -136,6 +145,91 @@ def build_underbody_fragment(layout, fields=ResidentialFields()):
     fragment = MeshFragment("UNDERBODY", 1, vertices, local.faces)
     validate_mesh_fragments((fragment,))
     return fragment
+
+
+def side_board_reference_profile(layout):
+    """Return exact analytical S_ref, independent of generated Mesh data."""
+    points = [(0.0, layout.base_z)]
+    for level in range(1, layout.riser_count + 1):
+        x = min(level - 1, layout.riser_count - 1) * layout.going
+        points.append((x, layout.base_z + level * layout.actual_riser))
+        if level < layout.riser_count:
+            points.append((level * layout.going,
+                           layout.base_z + level * layout.actual_riser))
+    return _without_consecutive_duplicates(points)
+
+
+def side_board_profile(layout, fields=ResidentialFields()):
+    """Build a full-depth board from reveal top to accepted body soffit.
+
+    Horizontal reference lines are translated by ``+Z*b`` and vertical
+    reference lines by ``-X*b``.  Their intersections therefore lie at
+    ``(x-b, z+b)``.  The vertical first/last segments terminate directly at
+    ``Z=B`` and ``Z=H``; no body-soffit clipping is involved.
+    """
+    reveal = validate_side_board_reveal(fields, layout.actual_riser,
+                                        layout.going)
+    reference = side_board_reference_profile(layout)
+    upper = [(reference[0][0] - reveal, reference[0][1])]
+    upper.extend((x - reveal, z + reveal) for x, z in reference[1:-1])
+    upper.append((reference[-1][0] - reveal, reference[-1][1]))
+    # Close the full-depth board on the accepted Final Riser rear plane.
+    # This horizontal terminal followed by the lower profile's matching X
+    # produces a vertical rear edge instead of the rejected diagonal plate.
+    upper.append((layout.run_length + layout.riser_thickness,
+                  layout.upper_arrival_z))
+    closure_depth = validate_stepped_closure_depth(
+        fields, layout.actual_riser, layout.going)
+    lower = stepped_closure_visible_profile(layout, closure_depth)
+    polygon = validate_simple_polygon(list(upper) + list(reversed(lower)))
+    return SideBoardProfile(reference, _without_consecutive_duplicates(upper),
+                            lower, polygon)
+
+
+def build_side_board_fragment(layout, side, fields=ResidentialFields()):
+    values = fields if isinstance(fields, ResidentialFields) else residential_fields(fields)
+    thickness = float(values.side_board_thickness_mm) / 1000.0
+    profile = side_board_profile(layout, values)
+    half = layout.width / 2.0
+    if side == "LEFT":
+        y_min, y_max, ordinal = half, half + thickness, 1
+    elif side == "RIGHT":
+        y_min, y_max, ordinal = -half - thickness, -half, 2
+    else:
+        raise ValueError("Side Board sideはLEFTまたはRIGHTである必要があります。")
+    local = extrude_xz_profile(profile.polygon, y_min, y_max,
+                               part_type="SIDE_BOARD", ordinal=ordinal)
+    forward, left = layout.axes.forward, layout.axes.left
+    vertices = tuple((layout.lower_xy[0] + forward[0] * x + left[0] * y,
+                      layout.lower_xy[1] + forward[1] * x + left[1] * y, z)
+                     for x, y, z in local.vertices)
+    fragment = MeshFragment("SIDE_BOARD", ordinal, vertices, local.faces)
+    validate_mesh_fragments((fragment,))
+    return fragment
+
+
+def prepare_residential_geometry(
+        points, ascent_direction, base_z_mm, floor_to_floor_mm, riser_count,
+        stair_width_mm, tread_thickness_mm, riser_thickness_mm, *,
+        assembly_mode=STANDARD_RESIDENTIAL, stair_schema_version=2,
+        fields=ResidentialFields()):
+    """Prepare the complete Stage 3 candidate without Scene mutation."""
+    values = fields if isinstance(fields, ResidentialFields) else residential_fields(fields)
+    validate_mode_data(assembly_mode, stair_schema_version, values)
+    if assembly_mode != STANDARD_RESIDENTIAL or values.underside_mode != STEPPED_CLOSED:
+        raise ValueError("Residential geometry configurationではありません。")
+    layout = resolve_stair_layout(
+        points, ascent_direction, base_z_mm, floor_to_floor_mm, riser_count,
+        stair_width_mm, tread_thickness_mm, riser_thickness_mm)
+    fragments = list(build_residential_tread_fragments(layout))
+    fragments.extend(build_riser_fragments(layout))
+    fragments.append(build_underbody_fragment(layout, values))
+    if values.left_side_board_enabled:
+        fragments.append(build_side_board_fragment(layout, "LEFT", values))
+    if values.right_side_board_enabled:
+        fragments.append(build_side_board_fragment(layout, "RIGHT", values))
+    fragments = tuple(fragments)
+    return layout, fragments, assemble_stair_mesh(fragments)
 
 
 def prepare_stage2_residential_geometry(

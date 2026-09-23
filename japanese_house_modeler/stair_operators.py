@@ -18,10 +18,11 @@ from .stair_state import (
     duplicate_stair_ids, operation_allowed,
 )
 from .stair_residential import (
-    STANDARD_RESIDENTIAL, residential_fields, semantic_assembly_mode,
+    BASIC_TREAD_RISER, STANDARD_RESIDENTIAL, ResidentialFields,
+    assemble_material_slot_plan, residential_fields, semantic_assembly_mode,
     semantic_schema_version,
 )
-from .stair_residential_geometry import prepare_stage2_residential_geometry
+from .stair_residential_geometry import prepare_residential_geometry
 
 
 _PLANE_EPSILON = 1.0e-10
@@ -30,6 +31,21 @@ _STAIR_DEFAULT_NAMES = (
     "stair_width_mm", "tread_thickness_mm", "riser_thickness_mm",
 )
 _CANONICAL_NAMES = _STAIR_DEFAULT_NAMES
+
+
+def _material_name(material):
+    """Convert a canonical Material pointer to dialog-safe text."""
+    return material.name if material is not None else ""
+
+
+def _material_from_operator_name(name):
+    """Resolve one dialog name without silently losing a stale selection."""
+    if not name:
+        return None
+    material = bpy.data.materials.get(name)
+    if material is None:
+        raise ValueError(f"Material '{name}' が見つかりません。")
+    return material
 
 
 def _canonical_snapshot(stair):
@@ -89,11 +105,16 @@ def _set_canonical(stair, values):
         stair.path_points.add().xy = (x, y)
     for name in _CANONICAL_NAMES:
         setattr(stair, name, values[name])
+    if "assembly_mode" in values:
+        stair.assembly_mode = values["assembly_mode"]
+        stair.stair_schema_version = values["stair_schema_version"]
+        for name, value in vars(values["residential"]).items():
+            setattr(stair, name, value)
 
 
 def _prepare_candidate(values):
     if values.get("assembly_mode") == STANDARD_RESIDENTIAL:
-        return prepare_stage2_residential_geometry(
+        return prepare_residential_geometry(
             values["path_points"], values["ascent_direction"],
             values["base_z_mm"], values["floor_to_floor_mm"],
             values["riser_count"], values["stair_width_mm"],
@@ -109,7 +130,7 @@ def _prepare_candidate(values):
 
 
 def regenerate_stage2_residential_for_runtime(stair_object):
-    """Non-operator runtime hook for a controlled Side-Boards-OFF object."""
+    """Compatibility runtime hook, now dispatching complete Residential."""
     stair = stair_object.jhm_stair
     if semantic_assembly_mode(stair) != STANDARD_RESIDENTIAL:
         raise ValueError("controlled objectをSTANDARD_RESIDENTIALに設定してください。")
@@ -155,10 +176,18 @@ def _transactional_update(stair_object, candidate, *, new_stair_id=None,
         replacement.update()
         if not replacement.vertices or not replacement.polygons:
             raise ValueError("replacement Stair Meshが空です。")
-        materials = getattr(old_data, "materials", ())
-        if materials is not None:
-            for material in materials:
+        if candidate.get("assembly_mode") == STANDARD_RESIDENTIAL:
+            plan = assemble_material_slot_plan(candidate["residential"])
+            for material in plan.slots:
                 replacement.materials.append(material)
+            role_indices = dict(plan.role_indices)
+            for polygon, role in zip(replacement.polygons, mesh_data.face_roles):
+                polygon.material_index = role_indices[role]
+        else:
+            materials = getattr(old_data, "materials", ())
+            if materials is not None:
+                for material in materials:
+                    replacement.materials.append(material)
         stair_object.data = replacement
         swapped = True
         _set_canonical(stair, candidate)
@@ -194,8 +223,16 @@ class _StairOperationMixin:
     def _require_allowed(self, context):
         obj = _selected_stair(context)
         issues = stair_issues(obj, context.scene) if obj else ()
-        if obj is None or not operation_allowed(self.operation, issues):
+        mode = semantic_assembly_mode(obj.jhm_stair) if obj else None
+        if obj is None or not operation_allowed(self.operation, issues, mode):
             self.report({"WARNING"}, "現在の管理状態ではこの操作を実行できません。")
+            return None
+        return obj
+
+    def _require_mode(self, context, mode):
+        obj = self._require_allowed(context)
+        if obj is None or semantic_assembly_mode(obj.jhm_stair) != mode:
+            self.report({"WARNING"}, "現在の階段構成ではこの操作を実行できません。")
             return None
         return obj
 
@@ -265,7 +302,8 @@ class JHM_OT_create_stair(bpy.types.Operator):
                     return {"RUNNING_MODAL"}
                 try:
                     path = canonical_path((self._start_point, point))
-                    _layout, _fragments, mesh_data = prepare_stair_geometry(
+                    fields = ResidentialFields()
+                    _layout, _fragments, mesh_data = prepare_residential_geometry(
                         path,
                         self._stair_defaults["ascent_direction"],
                         self._stair_defaults["base_z_mm"],
@@ -274,6 +312,7 @@ class JHM_OT_create_stair(bpy.types.Operator):
                         self._stair_defaults["stair_width_mm"],
                         self._stair_defaults["tread_thickness_mm"],
                         self._stair_defaults["riser_thickness_mm"],
+                        fields=fields,
                     )
                 except ValueError as exc:
                     self.report({"WARNING"}, str(exc))
@@ -325,6 +364,8 @@ class JHM_OT_create_stair(bpy.types.Operator):
                 stair.path_points.add().xy = (x, y)
             for name, value in self._stair_defaults.items():
                 setattr(stair, name, value)
+            stair.assembly_mode = STANDARD_RESIDENTIAL
+            stair.stair_schema_version = 2
             for selected in context.selected_objects:
                 selected.select_set(False)
             stair_object.select_set(True)
@@ -513,6 +554,130 @@ class JHM_OT_regenerate_stair(_StairOperationMixin, bpy.types.Operator):
         if obj is None:
             return {"CANCELLED"}
         return self._run_candidate(context, _canonical_snapshot(obj.jhm_stair))
+
+
+class JHM_OT_apply_residential_stair(_StairOperationMixin, bpy.types.Operator):
+    bl_idname = "jhm.apply_residential_stair"
+    bl_label = "住宅階段仕様を適用"
+    bl_options = {"REGISTER", "UNDO"}
+    operation = "APPLY_RESIDENTIAL"
+
+    base_material_name: bpy.props.StringProperty()
+
+    def draw(self, _context):
+        self.layout.prop_search(
+            self, "base_material_name", bpy.data, "materials",
+            text="Base Material")
+
+    def invoke(self, context, _event):
+        obj = self._require_mode(context, BASIC_TREAD_RISER)
+        if obj is None:
+            return {"CANCELLED"}
+        materials = tuple(m for m in obj.data.materials if m is not None)
+        self.base_material_name = (
+            _material_name(materials[0]) if len(materials) == 1 else "")
+        return context.window_manager.invoke_props_dialog(self)
+
+    def execute(self, context):
+        obj = self._require_mode(context, BASIC_TREAD_RISER)
+        if obj is None:
+            return {"CANCELLED"}
+        try:
+            base_material = _material_from_operator_name(self.base_material_name)
+        except ValueError as exc:
+            self.report({"WARNING"}, str(exc))
+            return {"CANCELLED"}
+        candidate = _canonical_snapshot(obj.jhm_stair)
+        candidate["assembly_mode"] = STANDARD_RESIDENTIAL
+        candidate["stair_schema_version"] = max(2, candidate["stair_schema_version"])
+        candidate["residential"] = ResidentialFields(base_material=base_material)
+        return self._run_candidate(context, candidate)
+
+
+class JHM_OT_edit_residential_stair(_StairOperationMixin, bpy.types.Operator):
+    bl_idname = "jhm.edit_residential_stair"
+    bl_label = "住宅階段仕様を変更"
+    bl_options = {"REGISTER", "UNDO"}
+    operation = "EDIT_RESIDENTIAL"
+    underside_thickness_mm: bpy.props.FloatProperty(name="下面シェル厚 (mm)")
+    left_side_board_enabled: bpy.props.BoolProperty(name="左Side Board")
+    right_side_board_enabled: bpy.props.BoolProperty(name="右Side Board")
+    side_board_thickness_mm: bpy.props.FloatProperty(name="Side Board厚 (mm)")
+    side_board_reveal_mm: bpy.props.FloatProperty(name="側板突出量 (mm)")
+
+    def invoke(self, context, _event):
+        obj = self._require_mode(context, STANDARD_RESIDENTIAL)
+        if obj is None: return {"CANCELLED"}
+        values = residential_fields(obj.jhm_stair)
+        for name in ("underside_thickness_mm", "left_side_board_enabled",
+                     "right_side_board_enabled", "side_board_thickness_mm",
+                     "side_board_reveal_mm"):
+            setattr(self, name, getattr(values, name))
+        return context.window_manager.invoke_props_dialog(self)
+
+    def execute(self, context):
+        obj = self._require_mode(context, STANDARD_RESIDENTIAL)
+        if obj is None: return {"CANCELLED"}
+        candidate = _canonical_snapshot(obj.jhm_stair)
+        values = vars(candidate["residential"]).copy()
+        for name in ("underside_thickness_mm", "left_side_board_enabled",
+                     "right_side_board_enabled", "side_board_thickness_mm",
+                     "side_board_reveal_mm"):
+            values[name] = getattr(self, name)
+        candidate["residential"] = ResidentialFields(**values)
+        return self._run_candidate(context, candidate)
+
+
+class JHM_OT_edit_stair_materials(_StairOperationMixin, bpy.types.Operator):
+    bl_idname = "jhm.edit_stair_materials"
+    bl_label = "階段部材Materialを変更"
+    bl_options = {"REGISTER", "UNDO"}
+    operation = "EDIT_MATERIALS"
+    base_material_name: bpy.props.StringProperty()
+    tread_material_name: bpy.props.StringProperty()
+    riser_material_name: bpy.props.StringProperty()
+    underside_material_name: bpy.props.StringProperty()
+    side_board_material_name: bpy.props.StringProperty()
+
+    def draw(self, _context):
+        layout = self.layout
+        layout.prop_search(self, "base_material_name", bpy.data, "materials",
+                           text="Base Material")
+        layout.prop_search(self, "tread_material_name", bpy.data, "materials",
+                           text="Tread override")
+        layout.prop_search(self, "riser_material_name", bpy.data, "materials",
+                           text="Riser override")
+        layout.prop_search(self, "underside_material_name", bpy.data, "materials",
+                           text="Underside override")
+        layout.prop_search(self, "side_board_material_name", bpy.data, "materials",
+                           text="Side Board override")
+
+    def invoke(self, context, _event):
+        obj = self._require_mode(context, STANDARD_RESIDENTIAL)
+        if obj is None: return {"CANCELLED"}
+        values = residential_fields(obj.jhm_stair)
+        for role in ("base", "tread", "riser", "underside", "side_board"):
+            setattr(self, f"{role}_material_name",
+                    _material_name(getattr(values, f"{role}_material")))
+        return context.window_manager.invoke_props_dialog(self)
+
+    def execute(self, context):
+        obj = self._require_mode(context, STANDARD_RESIDENTIAL)
+        if obj is None: return {"CANCELLED"}
+        try:
+            materials = {
+                f"{role}_material": _material_from_operator_name(
+                    getattr(self, f"{role}_material_name"))
+                for role in ("base", "tread", "riser", "underside", "side_board")
+            }
+        except ValueError as exc:
+            self.report({"WARNING"}, str(exc))
+            return {"CANCELLED"}
+        candidate = _canonical_snapshot(obj.jhm_stair)
+        values = vars(candidate["residential"]).copy()
+        values.update(materials)
+        candidate["residential"] = ResidentialFields(**values)
+        return self._run_candidate(context, candidate)
 
 
 class JHM_OT_repair_stair(_StairOperationMixin, bpy.types.Operator):

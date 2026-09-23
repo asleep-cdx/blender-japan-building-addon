@@ -473,3 +473,45 @@ Before Stage 3 starts, verify at minimum:
 - Save/reopen, Regenerate and Repair still reproduce the corrected Residential result.
 
 This follow-up must be accepted before Build 07-B Stage 3 is rebuilt on the corrected foundation.
+
+---
+
+## 20. 2026-09-22 Stage 3 Side Board visual clarification
+
+Blender 5.2 LTS human review rejected the Stage 3 Candidate r1 Side Board direction. This clarification supersedes the earlier Side Board interpretation wherever it conflicts; it does not reopen the accepted Stage 2 closed-body geometry.
+
+- The corrected closed Residential body and the decorative Side Board are separate geometry responsibilities. The body remains visually closed with both boards disabled.
+- `side_board_band_width_mm` continues to supply the accepted Stage 2 body closure depth. That use and its validation are unchanged.
+- The 07-B `STEPPED` Side Board follows the analytical upper stair-step contour. Horizontal reference lines translate toward `+Z` by `b`; vertical reference lines translate toward `-X` by `b`; adjacent translated lines meet at their analytical intersections.
+- Consequently the board occupies the exterior/upward and downhill side of the walking-step contour. It does not form, replace, or share the body's lower closure envelope.
+- The rejected Candidate r1 direction (`horizontal -> -Z*b`, `vertical -> +X*b`) and its large clipped upper plate are not production behavior.
+- The lower end closes cleanly on `Z=B` from local `X=-b` to `X=0`; the upper end closes cleanly on `Z=H` from `X=L-b` to `X=L`.
+- A future straight `SLOPED` Side Board variant belongs to Build 07-C. Build 07-B exposes only the corrected `STEPPED` variant.
+
+### 20.1 Candidate r2 placement and canonical-width correction
+
+The Candidate r2 `-X/+Z` stepped profile direction is accepted, but its external-Y placement and shared width field are rejected by Blender 5.2 LTS human review.
+
+- Side Boards are finish boards inside the canonical `stair_width_mm` envelope. LEFT occupies `[+w/2-s,+w/2]`; RIGHT occupies `[-w/2,-w/2+s]`. The finished envelope must not exceed the body width.
+- `side_board_band_width_mm` remains the accepted Stage 2 body closure-depth canonical, default `150 mm`, for backward compatibility.
+- New `side_board_profile_width_mm`, default `40 mm`, exclusively controls the decorative stepped profile width. Changing it must not change Tread, Riser, or Underbody geometry.
+- `side_board_thickness_mm`, default `18 mm`, continues to control only Y thickness.
+- Existing records without the new field read the RNA/dataclass default and are not rewritten at load time.
+- The future SLOPED Side Board remains Build 07-C scope.
+
+### 20.2 Candidate r6 full-depth external Side Board
+
+Candidate r5's thin stepped finish strip is rejected as the final Standard Residential Side Board. Candidate r6 supersedes §20.1 where it conflicts:
+
+- The Side Board is a full-depth external plate covering the accepted body side down to its analytical visible lower/soffit silhouette. Stage 2 body geometry itself remains unchanged and closed without boards.
+- LEFT occupies `[+w/2,+w/2+s]`; RIGHT occupies `[-w/2-s,-w/2]`. At `w=900 mm`, `s=18 mm`, BOTH gives a `936 mm` finished envelope.
+- `side_board_profile_width_mm` is superseded and removed from production canonical state. New `side_board_reveal_mm`, default `40 mm`, controls only the stepped upper-contour reveal (`horizontal -> +Z*q`, `vertical -> -X*q`).
+- The first board bottom remains aligned to body `base_z`; reveal never extends the lower contour below `base_z`.
+- `side_board_band_width_mm`, default `150 mm`, remains the independent accepted Stage 2 closure-depth compatibility field.
+- The future Build 07-C SLOPED Side Board will reuse the same reveal meaning; no SLOPED production behavior is introduced here.
+
+### 20.3 Candidate r7 upper termination correction
+
+Candidate r6's full-depth architecture, lower contour, external Y placement, and reveal semantics remain authoritative. Human review rejected only its upper rear termination: the direct diagonal closure from `(L-q,H)` to the accepted lower rear endpoint produced a spike and large triangular face.
+
+Candidate r7 adds a clean horizontal top terminal from the last reveal point to `(L+r,H)`. The rear edge then descends vertically on the accepted Final Riser rear plane `X=L+r` to the unchanged Stage 2 lower-profile endpoint. No point may exceed `H` or `L+r`. Stage 2 body geometry, the base-aligned first-step termination, Side Board Y placement, and Material behavior are unchanged.

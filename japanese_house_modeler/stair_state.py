@@ -6,7 +6,7 @@ from .stair_geometry import resolve_stair_layout
 from .stair_residential import (
     BASIC_TREAD_RISER, STANDARD_RESIDENTIAL, ResidentialFields,
     validate_mode_data, validate_stepped_closure_depth,
-    validate_stepped_underbody_thickness,
+    validate_side_board_reveal, validate_stepped_underbody_thickness,
 )
 
 
@@ -96,6 +96,10 @@ def diagnose_stair(state, duplicate_ids=()):
                 layout.tread_thickness, layout.riser_thickness)
             validate_stepped_closure_depth(
                 state.residential, layout.actual_riser, layout.going)
+            if (state.residential.left_side_board_enabled
+                    or state.residential.right_side_board_enabled):
+                validate_side_board_reveal(
+                    state.residential, layout.actual_riser, layout.going)
     except (TypeError, ValueError, OverflowError):
         if INVALID_CANONICAL not in issues:
             issues.append(INVALID_CANONICAL)
@@ -111,11 +115,15 @@ def diagnose_stair(state, duplicate_ids=()):
     return tuple(issues)
 
 
-def operation_allowed(operation, issues):
+def operation_allowed(operation, issues, assembly_mode=None):
     """Central policy shared by UI and operator execute-time gates."""
     issues = tuple(issues)
     if operation in NORMAL_ONLY_OPERATIONS:
         return not issues
+    if operation == "APPLY_RESIDENTIAL":
+        return not issues and assembly_mode in (None, BASIC_TREAD_RISER)
+    if operation in {"EDIT_RESIDENTIAL", "EDIT_MATERIALS"}:
+        return not issues and assembly_mode in (None, STANDARD_RESIDENTIAL)
     if operation == "REPAIR":
         return bool(issues) and INVALID_CANONICAL not in issues \
             and set(issues).issubset(RECOVERABLE_ISSUES)

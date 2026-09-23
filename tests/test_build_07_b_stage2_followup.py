@@ -124,13 +124,13 @@ class PreservedCorrectionContractTests(unittest.TestCase):
         self.assertEqual(actual, expected)
         self.assertTrue(validate_mode_data(BASIC_TREAD_RISER, 1, unused))
 
-    def test_stage3_public_operators_remain_absent(self):
+    def test_stage3_public_operators_are_now_registered(self):
         source = "\n".join(path.read_text() for path in
                            (ROOT / "japanese_house_modeler").glob("*.py"))
         for operator in ("jhm.apply_residential_stair",
                          "jhm.edit_residential_stair",
                          "jhm.edit_stair_materials"):
-            self.assertNotIn(operator, source)
+            self.assertIn(operator, source)
 
 
 if __name__ == "__main__":

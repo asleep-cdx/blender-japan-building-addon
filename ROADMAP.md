@@ -961,6 +961,10 @@ Open / support / ささら・力桁系の露出構成は 07-F の別系統とす
 - Material preservation
 - Mesh conversion regression
 
+### Sloped Side Board variant
+
+Straight Stair Finish Variants include a future `SLOPED` Side Board option, kept separate from the 07-B analytical `STEPPED` Side Board.
+
 ### Sloped closed underside
 
 階段下収納・トイレ等で使う住宅階段を想定し、階段下面を連続した斜め面材で閉じる。

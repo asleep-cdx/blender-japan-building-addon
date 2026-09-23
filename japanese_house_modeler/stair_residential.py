@@ -13,6 +13,17 @@ UNASSIGNED = None
 
 
 @dataclass(frozen=True)
+class MaterialSlotPlan:
+    """Derived Blender slot layout; ``None`` denotes a real empty slot."""
+
+    slots: tuple
+    role_indices: tuple
+
+    def index_for(self, role):
+        return dict(self.role_indices)[role]
+
+
+@dataclass(frozen=True)
 class ResidentialFields:
     underside_mode: str = STEPPED_CLOSED
     underside_thickness_mm: float = 9.5
@@ -20,6 +31,7 @@ class ResidentialFields:
     right_side_board_enabled: bool = True
     side_board_thickness_mm: float = 18.0
     side_board_band_width_mm: float = 150.0
+    side_board_reveal_mm: float = 40.0
     base_material: object = None
     tread_material: object = None
     riser_material: object = None
@@ -115,6 +127,23 @@ def validate_stepped_closure_depth(fields, actual_riser, going):
     return depth
 
 
+def validate_side_board_reveal(fields, actual_riser, going):
+    """Return the stepped Side Board reveal in its supported range."""
+    values = (fields if isinstance(fields, ResidentialFields)
+              else residential_fields(fields))
+    if isinstance(values.side_board_reveal_mm, bool):
+        raise ValueError("側板突出量は対応範囲内の有限値である必要があります。")
+    try:
+        width = float(values.side_board_reveal_mm) / 1000.0
+        limit = min(float(actual_riser), float(going))
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("側板突出量は対応範囲内の有限値である必要があります。") from exc
+    if (not math.isfinite(width) or not math.isfinite(limit)
+            or width <= 0.0 or width >= limit):
+        raise ValueError("側板突出量は0より大きく、実蹴上と踏面ピッチの小さい方未満にしてください。")
+    return width
+
+
 def residential_candidate(record):
     """Return an immutable candidate; never mutate or commit Scene state."""
     candidate = StairTransitionSnapshot.capture(record)
@@ -132,6 +161,39 @@ def resolve_material_roles(fields):
                    if getattr(values, f"{role.lower()}_material") is not None
                    else values.base_material)
             for role in MATERIAL_ROLES}
+
+
+def assemble_material_slot_plan(fields):
+    """Resolve roles in stable order and deduplicate datablocks by identity.
+
+    The empty slot is appended only when assigned and unassigned roles are
+    mixed.  With every role unassigned there are no slots, and faces retain
+    Blender's harmless index zero without inventing a Material datablock.
+    """
+    effective = resolve_material_roles(fields)
+    assigned = any(value is not None for value in effective.values())
+    unassigned = any(value is None for value in effective.values())
+    slots = []
+    indices = []
+    for role in MATERIAL_ROLES:
+        material = effective[role]
+        if material is None:
+            index = None
+        else:
+            index = next((i for i, existing in enumerate(slots)
+                          if existing is material), None)
+            if index is None:
+                slots.append(material)
+                index = len(slots) - 1
+        indices.append((role, index))
+    if assigned and unassigned:
+        empty_index = len(slots)
+        slots.append(None)
+        indices = [(role, empty_index if index is None else index)
+                   for role, index in indices]
+    elif not assigned:
+        indices = [(role, 0) for role, _index in indices]
+    return MaterialSlotPlan(tuple(slots), tuple(indices))
 
 
 @dataclass(frozen=True)

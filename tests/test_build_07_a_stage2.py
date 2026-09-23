@@ -215,8 +215,8 @@ class StairStage2StructureTests(unittest.TestCase):
         modal = next(node for node in ast.walk(self.tree)
                      if isinstance(node, ast.FunctionDef) and node.name == "modal")
         modal_source = ast.unparse(modal)
-        self.assertEqual(modal_source.count("prepare_stair_geometry("), 1)
-        self.assertLess(modal_source.index("prepare_stair_geometry("),
+        self.assertEqual(modal_source.count("prepare_residential_geometry("), 1)
+        self.assertLess(modal_source.index("prepare_residential_geometry("),
                         modal_source.index("self._commit("))
         self.assertEqual(calls.count("bpy.data.meshes.new"), 1)
         self.assertEqual(calls.count("bpy.data.objects.new"), 1)
