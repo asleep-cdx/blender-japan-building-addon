@@ -23,18 +23,16 @@ print('boundary',sum(not e.is_manifold for e in bm.edges),'degenerate',sum(f.cal
 
 Note: the managed object is an assembly of individually closed overlapping solids, so global coincident/contact edges are not expected to weld into one shell. Judge the required visible closure in addition to the component health check.
 
-## 1. Candidate r6 geometry tests
+## 1. Candidate r7 geometry tests
 
-0. Create a new default Residential Stair. Confirm BOTH boards ON, `side_board_reveal_mm=40`, thickness 18 mm, internal compatibility band 150 mm, and `stair_issues(...) == ()`.
-1. For an X-axis 900 mm Stair inspect local/world Y: body `[-0.450,+0.450]`, LEFT `[+0.450,+0.468]`, RIGHT `[-0.468,-0.450]`, complete envelope `[-0.468,+0.468]` (936 mm). Path remains centered.
-2. In side orthographic view confirm each board is a full-depth plate: its upper edge is the 40 mm stepped reveal and its lower edge reaches the accepted body soffit. Reject a thin-strip-only appearance, a giant upper plate, gaps, or z-fighting.
-3. Closely inspect the first step: board minimum Z and body minimum Z both equal `base_z`; their first bottoms are aligned/parallel and nothing extends below base.
-4. Change reveal 40 -> 60 mm. Only the board upper/XZ silhouette changes; Tread, Riser, Underbody, lower soffit, and board Y thickness stay unchanged. Restore 40. Change thickness 18 -> 24 mm and confirm only Y extent changes; restore 18.
-5. Test BOTH, LEFT-only, RIGHT-only, and OFF/OFF. OFF/OFF must leave the complete accepted closed body. One-sided envelopes are intentionally asymmetric.
-6. With LEFT-only, Reverse ascent. The boolean remains LEFT while the board swaps world side.
-7. Set an oblique Path `(1,2)` to `(4,6)` metres and confirm correct local axes and external placement.
-8. Set `base_z=425 mm`; both body and board minimum Z must be `0.425 m`.
-9. With boards OFF inspect the accepted Stage 2 regression: clean `jg+r` Tread/Riser 90-degree rear junction, unchanged `B+jh` Riser bottom, no micro-notch, accepted stepped soffit, flat first-step body bottom, no internal void or exposed backs.
+0. Create a default Residential Stair. Confirm BOTH ON, reveal 40 mm, thickness 18 mm, compatibility band 150 mm, r7 BOTH count `620/732`, and `stair_issues(...) == ()`.
+1. Inspect the complete full-depth boards and 936 mm Y envelope: body ±0.450, LEFT +0.450..+0.468, RIGHT -0.468..-0.450.
+2. **Upper termination close-up:** use side orthographic, perspective, and wireframe. Confirm the stepped reveal remains correct; the last reveal point runs horizontally to Final Riser rear; the rear edge is vertical; and there is no spike, giant triangle, diagonal closing plate, gap, or z-fighting. Numerically verify upper rear `(L+r,H)`, lower rear X `L+r`, max X `L+r`, and max Z `H`.
+3. Recheck the r6-passed first-step bottom: board/body minimum Z both equal `base_z`, bottoms align, and nothing extends below base.
+4. Change reveal 40 -> 60 -> 40: only the Side Board upper XZ silhouette changes. Change thickness 18 -> 24 -> 18: only Y extent changes.
+5. Test BOTH, LEFT-only, RIGHT-only, OFF/OFF; then Reverse world-side swap.
+6. Test an oblique Path and nonzero `base_z=425 mm`.
+7. With boards OFF, visually recheck the accepted Stage 2 `jg+r` rear junction, unchanged `B+jh` Riser bottom, no micro-notch, stepped soffit, flat first-step body bottom, and closed body.
 
 ## 3. Materials
 
@@ -52,18 +50,15 @@ datablock selectors in this order: Base Material, Tread override, Riser
 override, Underside override, and Side Board override. Also open **住宅階段仕様を適用**
 on a BASIC Stair and confirm its Base Material selector is visible.
 
-Confirm Candidate r6 preserves the Candidate r5 registered String-property Material UI:
+Confirm Candidate r7 preserves the Candidate r5 Material UI using the registered class annotations and the actual dialogs (Blender 5.2 does not reliably enumerate these custom annotations through `bl_rna.properties`):
 
 ```python
 import japanese_house_modeler.stair_operators as so
-print([(p.identifier, p.type) for p in so.JHM_OT_edit_stair_materials.bl_rna.properties if "material" in p.identifier])
-print([(p.identifier, p.type) for p in so.JHM_OT_apply_residential_stair.bl_rna.properties if "material" in p.identifier])
+print(so.JHM_OT_edit_stair_materials.__annotations__)
+print(so.JHM_OT_apply_residential_stair.__annotations__)
 ```
 
-The first result must contain `base_material_name`, `tread_material_name`,
-`riser_material_name`, `underside_material_name`, and
-`side_board_material_name`; the second must contain `base_material_name`.
-They must be String properties. An empty selector means canonical `None`.
+Verify the five edit `*_material_name` PropertyDeferred annotations and the apply `base_material_name` annotation exist. An empty selector means canonical `None`; then verify the actual selectors and Cases A/B/C below.
 
 1. **Case A:** Base=Wood, Riser=White, all overrides otherwise empty. Slots must identity-dedupe to Wood/White; tread, underside and both boards visually use Wood, risers White.
 2. **Case B:** Base empty, Tread=Wood, other overrides empty. Verify exactly one Wood slot plus one empty (`None`) slot. Treads use Wood and every other role uses the empty slot; no substitute Material datablock is created.

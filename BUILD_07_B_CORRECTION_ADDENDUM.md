@@ -509,3 +509,9 @@ Candidate r5's thin stepped finish strip is rejected as the final Standard Resid
 - The first board bottom remains aligned to body `base_z`; reveal never extends the lower contour below `base_z`.
 - `side_board_band_width_mm`, default `150 mm`, remains the independent accepted Stage 2 closure-depth compatibility field.
 - The future Build 07-C SLOPED Side Board will reuse the same reveal meaning; no SLOPED production behavior is introduced here.
+
+### 20.3 Candidate r7 upper termination correction
+
+Candidate r6's full-depth architecture, lower contour, external Y placement, and reveal semantics remain authoritative. Human review rejected only its upper rear termination: the direct diagonal closure from `(L-q,H)` to the accepted lower rear endpoint produced a spike and large triangular face.
+
+Candidate r7 adds a clean horizontal top terminal from the last reveal point to `(L+r,H)`. The rear edge then descends vertically on the accepted Final Riser rear plane `X=L+r` to the unchanged Stage 2 lower-profile endpoint. No point may exceed `H` or `L+r`. Stage 2 body geometry, the base-aligned first-step termination, Side Board Y placement, and Material behavior are unchanged.

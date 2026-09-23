@@ -28,19 +28,32 @@ class SideBoardTests(unittest.TestCase):
   l=layout(); p=side_board_profile(l)
   self.assertEqual(p.outer[0],(-.04,l.base_z))
   self.assertEqual(p.outer[1],(-.04,l.base_z+l.actual_riser+.04))
-  self.assertEqual(p.outer[-1],(l.run_length-.04,l.upper_arrival_z))
+  self.assertEqual(p.outer[-2],(l.run_length-.04,l.upper_arrival_z))
+  self.assertEqual(p.outer[-1],(l.run_length+l.riser_thickness,l.upper_arrival_z))
   self.assertNotIn((.04,l.base_z),p.outer)
-  for reference,outer in zip(p.reference[1:-1],p.outer[1:-1]):
+  for reference,outer in zip(p.reference[1:-1],p.outer[1:-2]):
    self.assertAlmostEqual(outer[0],reference[0]-.04)
    self.assertAlmostEqual(outer[1],reference[1]+.04)
  def test_clean_lower_and_upper_terminations(self):
   l=layout(); p=side_board_profile(l)
   self.assertEqual(min(z for x,z in p.polygon),l.base_z)
   self.assertEqual(p.outer[0],(-.04,l.base_z))
-  self.assertEqual(p.outer[-1],(l.run_length-.04,l.upper_arrival_z))
+  self.assertEqual(p.outer[-2],(l.run_length-.04,l.upper_arrival_z))
+  self.assertEqual(p.outer[-1],(l.run_length+l.riser_thickness,l.upper_arrival_z))
   self.assertEqual(p.lower,stepped_underbody_profile(l).outer)
   self.assertGreater(max(z for x,z in p.outer[1:-1]),max(z for x,z in p.lower))
   self.assertLessEqual(max(x for x,z in p.polygon),l.run_length+l.riser_thickness)
+  rear=(l.run_length+l.riser_thickness)
+  upper_rear=(rear,l.upper_arrival_z); lower_rear=p.lower[-1]
+  self.assertEqual(lower_rear[0],rear)
+  index=p.polygon.index(upper_rear)
+  neighbors={p.polygon[index-1],p.polygon[(index+1)%len(p.polygon)]}
+  self.assertIn(lower_rear,neighbors)
+  self.assertNotIn((p.outer[-2],lower_rear),
+                   tuple(zip(p.polygon,p.polygon[1:]+p.polygon[:1])))
+  self.assertEqual(max(x for x,z in p.polygon),rear)
+  self.assertEqual(max(z for x,z in p.polygon),l.upper_arrival_z)
+  self.assertEqual(len(p.polygon),len(set(p.polygon)))
  def test_four_combinations_and_body_unchanged(self):
   bodies=[]
   for left,right in ((1,1),(1,0),(0,1),(0,0)):
@@ -159,8 +172,8 @@ class MaterialTests(unittest.TestCase):
   self.assertEqual(namespace['_material_from_operator_name']('Wood'),'wood-datablock')
   with self.assertRaises(ValueError): namespace['_material_from_operator_name']('Missing')
  def test_stage3_default_fragment_counts_are_stable(self):
-  expected={(True,True):(616,726),(True,False):(492,544),
-            (False,True):(492,544),(False,False):(368,362)}
+  expected={(True,True):(620,732),(True,False):(494,547),
+            (False,True):(494,547),(False,False):(368,362)}
   for enabled,counts in expected.items():
    fields=ResidentialFields(left_side_board_enabled=enabled[0],right_side_board_enabled=enabled[1])
    mesh=prepare_residential_geometry(((0,0),(3.6,0)),'FORWARD',0,2800,16,900,30,12,fields=fields)[2]

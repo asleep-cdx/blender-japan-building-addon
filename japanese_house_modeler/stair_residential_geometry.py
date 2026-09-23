@@ -173,6 +173,11 @@ def side_board_profile(layout, fields=ResidentialFields()):
     upper = [(reference[0][0] - reveal, reference[0][1])]
     upper.extend((x - reveal, z + reveal) for x, z in reference[1:-1])
     upper.append((reference[-1][0] - reveal, reference[-1][1]))
+    # Close the full-depth board on the accepted Final Riser rear plane.
+    # This horizontal terminal followed by the lower profile's matching X
+    # produces a vertical rear edge instead of the rejected diagonal plate.
+    upper.append((layout.run_length + layout.riser_thickness,
+                  layout.upper_arrival_z))
     closure_depth = validate_stepped_closure_depth(
         fields, layout.actual_riser, layout.going)
     lower = stepped_closure_visible_profile(layout, closure_depth)
