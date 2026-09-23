@@ -10,7 +10,7 @@ from .stair_geometry import (
 from .stair_residential import (
     STANDARD_RESIDENTIAL, STEPPED_CLOSED, ResidentialFields,
     residential_fields, validate_mode_data,
-    validate_side_board_profile_width,
+    validate_side_board_reveal,
     validate_stepped_closure_depth,
     validate_stepped_underbody_thickness,
 )
@@ -29,6 +29,7 @@ class SteppedUnderbodyProfile:
 class SideBoardProfile:
     reference: tuple
     outer: tuple
+    lower: tuple
     polygon: tuple
 
 
@@ -159,22 +160,25 @@ def side_board_reference_profile(layout):
 
 
 def side_board_profile(layout, fields=ResidentialFields()):
-    """Build the stepped finish band on S_ref's exterior/upward side.
+    """Build a full-depth board from reveal top to accepted body soffit.
 
     Horizontal reference lines are translated by ``+Z*b`` and vertical
     reference lines by ``-X*b``.  Their intersections therefore lie at
     ``(x-b, z+b)``.  The vertical first/last segments terminate directly at
     ``Z=B`` and ``Z=H``; no body-soffit clipping is involved.
     """
-    depth = validate_side_board_profile_width(fields, layout.actual_riser,
-                                               layout.going)
+    reveal = validate_side_board_reveal(fields, layout.actual_riser,
+                                        layout.going)
     reference = side_board_reference_profile(layout)
-    outer = [(reference[0][0] - depth, reference[0][1])]
-    outer.extend((x - depth, z + depth) for x, z in reference[1:-1])
-    outer.append((reference[-1][0] - depth, reference[-1][1]))
-    polygon = validate_simple_polygon(list(reference) + list(reversed(outer)))
-    return SideBoardProfile(reference, _without_consecutive_duplicates(outer),
-                            polygon)
+    upper = [(reference[0][0] - reveal, reference[0][1])]
+    upper.extend((x - reveal, z + reveal) for x, z in reference[1:-1])
+    upper.append((reference[-1][0] - reveal, reference[-1][1]))
+    closure_depth = validate_stepped_closure_depth(
+        fields, layout.actual_riser, layout.going)
+    lower = stepped_closure_visible_profile(layout, closure_depth)
+    polygon = validate_simple_polygon(list(upper) + list(reversed(lower)))
+    return SideBoardProfile(reference, _without_consecutive_duplicates(upper),
+                            lower, polygon)
 
 
 def build_side_board_fragment(layout, side, fields=ResidentialFields()):
@@ -183,9 +187,9 @@ def build_side_board_fragment(layout, side, fields=ResidentialFields()):
     profile = side_board_profile(layout, values)
     half = layout.width / 2.0
     if side == "LEFT":
-        y_min, y_max, ordinal = half - thickness, half, 1
+        y_min, y_max, ordinal = half, half + thickness, 1
     elif side == "RIGHT":
-        y_min, y_max, ordinal = -half, -half + thickness, 2
+        y_min, y_max, ordinal = -half - thickness, -half, 2
     else:
         raise ValueError("Side Board sideはLEFTまたはRIGHTである必要があります。")
     local = extrude_xz_profile(profile.polygon, y_min, y_max,

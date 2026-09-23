@@ -74,7 +74,7 @@ class JHM_StairProperties(bpy.types.PropertyGroup):
     right_side_board_enabled: bpy.props.BoolProperty(default=True, options={"HIDDEN"})
     side_board_thickness_mm: bpy.props.FloatProperty(default=18.0, options={"HIDDEN"})
     side_board_band_width_mm: bpy.props.FloatProperty(default=150.0, options={"HIDDEN"})
-    side_board_profile_width_mm: bpy.props.FloatProperty(default=40.0, options={"HIDDEN"})
+    side_board_reveal_mm: bpy.props.FloatProperty(default=40.0, options={"HIDDEN"})
     base_material: bpy.props.PointerProperty(type=bpy.types.Material, options={"HIDDEN"})
     tread_material: bpy.props.PointerProperty(type=bpy.types.Material, options={"HIDDEN"})
     riser_material: bpy.props.PointerProperty(type=bpy.types.Material, options={"HIDDEN"})

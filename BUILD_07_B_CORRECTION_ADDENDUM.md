@@ -498,3 +498,14 @@ The Candidate r2 `-X/+Z` stepped profile direction is accepted, but its external
 - `side_board_thickness_mm`, default `18 mm`, continues to control only Y thickness.
 - Existing records without the new field read the RNA/dataclass default and are not rewritten at load time.
 - The future SLOPED Side Board remains Build 07-C scope.
+
+### 20.2 Candidate r6 full-depth external Side Board
+
+Candidate r5's thin stepped finish strip is rejected as the final Standard Residential Side Board. Candidate r6 supersedes §20.1 where it conflicts:
+
+- The Side Board is a full-depth external plate covering the accepted body side down to its analytical visible lower/soffit silhouette. Stage 2 body geometry itself remains unchanged and closed without boards.
+- LEFT occupies `[+w/2,+w/2+s]`; RIGHT occupies `[-w/2-s,-w/2]`. At `w=900 mm`, `s=18 mm`, BOTH gives a `936 mm` finished envelope.
+- `side_board_profile_width_mm` is superseded and removed from production canonical state. New `side_board_reveal_mm`, default `40 mm`, controls only the stepped upper-contour reveal (`horizontal -> +Z*q`, `vertical -> -X*q`).
+- The first board bottom remains aligned to body `base_z`; reveal never extends the lower contour below `base_z`.
+- `side_board_band_width_mm`, default `150 mm`, remains the independent accepted Stage 2 closure-depth compatibility field.
+- The future Build 07-C SLOPED Side Board will reuse the same reveal meaning; no SLOPED production behavior is introduced here.

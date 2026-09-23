@@ -31,7 +31,7 @@ class ResidentialFields:
     right_side_board_enabled: bool = True
     side_board_thickness_mm: float = 18.0
     side_board_band_width_mm: float = 150.0
-    side_board_profile_width_mm: float = 40.0
+    side_board_reveal_mm: float = 40.0
     base_material: object = None
     tread_material: object = None
     riser_material: object = None
@@ -127,20 +127,20 @@ def validate_stepped_closure_depth(fields, actual_riser, going):
     return depth
 
 
-def validate_side_board_profile_width(fields, actual_riser, going):
-    """Return the decorative stepped-band width in its supported range."""
+def validate_side_board_reveal(fields, actual_riser, going):
+    """Return the stepped Side Board reveal in its supported range."""
     values = (fields if isinstance(fields, ResidentialFields)
               else residential_fields(fields))
-    if isinstance(values.side_board_profile_width_mm, bool):
-        raise ValueError("Side Board幅は対応範囲内の有限値である必要があります。")
+    if isinstance(values.side_board_reveal_mm, bool):
+        raise ValueError("側板突出量は対応範囲内の有限値である必要があります。")
     try:
-        width = float(values.side_board_profile_width_mm) / 1000.0
+        width = float(values.side_board_reveal_mm) / 1000.0
         limit = min(float(actual_riser), float(going))
     except (TypeError, ValueError, OverflowError) as exc:
-        raise ValueError("Side Board幅は対応範囲内の有限値である必要があります。") from exc
+        raise ValueError("側板突出量は対応範囲内の有限値である必要があります。") from exc
     if (not math.isfinite(width) or not math.isfinite(limit)
             or width <= 0.0 or width >= limit):
-        raise ValueError("Side Board幅は0より大きく、実蹴上と踏面ピッチの小さい方未満にしてください。")
+        raise ValueError("側板突出量は0より大きく、実蹴上と踏面ピッチの小さい方未満にしてください。")
     return width
 
 
