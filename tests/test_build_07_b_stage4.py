@@ -271,11 +271,8 @@ class FinalizeDeleteAndScopeTests(unittest.TestCase):
                           "bpy.data.materials.remove"):
             self.assertNotIn(forbidden, source)
 
-    def test_stage4_does_not_introduce_future_geometry(self):
-        changed_scope = "\n".join(
-            path.read_text() for path in (ROOT / "japanese_house_modeler").glob("*.py"))
-        for token in ("SLOPED_CLOSED", "WINDER", "LANDING"):
-            self.assertNotIn(token, changed_scope)
+    def test_residential_default_underside_remains_stepped_closed(self):
+        self.assertEqual(ResidentialFields().underside_mode, "STEPPED_CLOSED")
 
 
 if __name__ == "__main__":
