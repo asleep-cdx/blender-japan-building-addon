@@ -36,6 +36,12 @@ STEPPED body depth change, schema 3, NORMAL, and no change to floor-to-floor,
 riser count, tread/riser thickness, width, Side Board thickness/reveal, Path,
 ID, Materials, or transform.
 
+Before changing body depth, use a fresh schema-2 copy to change only a 07-B
+setting such as Side Board thickness or reveal. Confirm it remains schema 2.
+Also open the dialog and press OK without changing anything; confirm schema 2 is
+still preserved. Then use another schema-2 copy for the 150→120 mm body-depth
+edit and confirm that this explicit 07-C change alone commits schema 3.
+
 ## Test 5 — Invalid body depth atomic rejection
 Snapshot Object/data identity and all Test 4 state. Submit 175 mm or greater when
 actual riser is 175 mm. Expect CANCELLED/warning before mutation; mesh, canonical

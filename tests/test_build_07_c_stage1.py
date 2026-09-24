@@ -17,6 +17,7 @@ from japanese_house_modeler.stair_residential import (
     BEVEL, ROUND, SLOPED, SLOPED_CLOSED, SQUARE, STEPPED, STEPPED_CLOSED,
     ResidentialFields, StairTransitionSnapshot, assemble_material_slot_plan,
     residential_candidate, residential_fields, validate_mode_data,
+    schema_version_after_residential_edit,
 )
 from japanese_house_modeler.stair_residential_geometry import prepare_residential_geometry
 
@@ -113,6 +114,35 @@ class SchemaSnapshotAndMaterialTests(unittest.TestCase):
         self.assertEqual(candidate.stair_schema_version, 3)
         self.assertEqual(candidate.assembly_mode, "STANDARD_RESIDENTIAL")
 
+    def test_schema_two_side_board_thickness_edit_stays_schema_two(self):
+        before = ResidentialFields()
+        after = replace(before, side_board_thickness_mm=24.0)
+        self.assertEqual(
+            schema_version_after_residential_edit(2, before, after), 2)
+
+    def test_schema_two_side_board_reveal_edit_stays_schema_two(self):
+        before = ResidentialFields()
+        after = replace(before, side_board_reveal_mm=55.0)
+        self.assertEqual(
+            schema_version_after_residential_edit(2, before, after), 2)
+
+    def test_schema_two_body_depth_edit_bumps_to_schema_three(self):
+        before = ResidentialFields(side_board_band_width_mm=150.0)
+        after = replace(before, side_board_band_width_mm=120.0)
+        self.assertEqual(
+            schema_version_after_residential_edit(2, before, after), 3)
+
+    def test_schema_two_no_op_stays_schema_two(self):
+        value = ResidentialFields()
+        self.assertEqual(
+            schema_version_after_residential_edit(2, value, replace(value)), 2)
+
+    def test_schema_three_legacy_edit_stays_schema_three(self):
+        before = ResidentialFields()
+        after = replace(before, side_board_thickness_mm=24.0)
+        self.assertEqual(
+            schema_version_after_residential_edit(3, before, after), 3)
+
     def test_snapshot_round_trip_keeps_new_fields(self):
         snapshot = StairTransitionSnapshot.capture(self.record())
         restored = snapshot.restore_values()
@@ -132,7 +162,8 @@ class SchemaSnapshotAndMaterialTests(unittest.TestCase):
     def test_source_schema_policy_and_thickness_ui(self):
         source = (ROOT / "japanese_house_modeler/stair_operators.py").read_text()
         self.assertIn('stair.stair_schema_version = 3', source)
-        self.assertGreaterEqual(source.count('max(3, candidate["stair_schema_version"])'), 2)
+        self.assertEqual(source.count('max(3, candidate["stair_schema_version"])'), 1)
+        self.assertIn("schema_version_after_residential_edit(", source)
         self.assertIn('name="階段本体厚み (mm)"', source)
         self.assertNotIn("closed_body_depth_mm", source)
         self.assertNotIn("stair_body_thickness_mm", source)

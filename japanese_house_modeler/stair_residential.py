@@ -16,6 +16,9 @@ ROUND = "ROUND"
 UNDERSIDE_MODES = frozenset({STEPPED_CLOSED, SLOPED_CLOSED})
 SIDE_BOARD_MODES = frozenset({STEPPED, SLOPED})
 TREAD_FRONT_EDGE_MODES = frozenset({SQUARE, BEVEL, ROUND})
+# Add fields here only when their production behavior becomes available.  This
+# keeps an ordinary edit of legacy 07-B settings from becoming a migration.
+STAGE1_SCHEMA_3_EDIT_FIELDS = ("side_board_band_width_mm",)
 ASSEMBLY_MODES = frozenset({BASIC_TREAD_RISER, STANDARD_RESIDENTIAL})
 MATERIAL_ROLES = ("TREAD", "RISER", "UNDERSIDE", "SIDE_BOARD")
 UNASSIGNED = None
@@ -70,6 +73,21 @@ def residential_fields(record=None):
         name: getattr(record, name, getattr(defaults, name))
         for name in defaults.__dataclass_fields__
     })
+
+
+def schema_version_after_residential_edit(schema_version, before, after):
+    """Return the schema committed by a Residential settings edit.
+
+    Stage 1 migrates a legacy record only when the user actually changes its
+    newly exposed stair-body depth.  Later stages can extend the field tuple as
+    their geometry becomes producible, without broadening legacy 07-B edits.
+    """
+    old = before if isinstance(before, ResidentialFields) else residential_fields(before)
+    new = after if isinstance(after, ResidentialFields) else residential_fields(after)
+    if any(getattr(old, name) != getattr(new, name)
+           for name in STAGE1_SCHEMA_3_EDIT_FIELDS):
+        return max(3, schema_version)
+    return schema_version
 
 
 def validate_mode_data(assembly_mode, schema_version, fields=None):

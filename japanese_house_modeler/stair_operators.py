@@ -20,7 +20,7 @@ from .stair_state import (
 from .stair_residential import (
     BASIC_TREAD_RISER, STANDARD_RESIDENTIAL, ResidentialFields,
     assemble_material_slot_plan, residential_fields, semantic_assembly_mode,
-    semantic_schema_version,
+    semantic_schema_version, schema_version_after_residential_edit,
 )
 from .stair_residential_geometry import prepare_residential_geometry
 
@@ -625,8 +625,11 @@ class JHM_OT_edit_residential_stair(_StairOperationMixin, bpy.types.Operator):
                      "right_side_board_enabled", "side_board_thickness_mm",
                      "side_board_reveal_mm", "side_board_band_width_mm"):
             values[name] = getattr(self, name)
-        candidate["residential"] = ResidentialFields(**values)
-        candidate["stair_schema_version"] = max(3, candidate["stair_schema_version"])
+        before = candidate["residential"]
+        after = ResidentialFields(**values)
+        candidate["residential"] = after
+        candidate["stair_schema_version"] = schema_version_after_residential_edit(
+            candidate["stair_schema_version"], before, after)
         return self._run_candidate(context, candidate)
 
 
