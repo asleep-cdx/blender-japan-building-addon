@@ -45,17 +45,25 @@ ascent direction) and record `max uphill X`; expect `<= L+r`. Record `min Z >= B
 2. **SLOPED_CLOSED, boards OFF/OFF.** Side orthographic screenshot must show
    the `Z=B` lower flat, one straight soffit, vertical upper closure, no cavity,
    exposed backs, floor-filled mass, spike, or giant triangle. Record the common
-   evidence and isolated-body topology evidence above.
+   evidence and isolated-body topology evidence above. Compare against candidate
+   r1: the corrected main soffit must be parallel to the canonical rise/going
+   pitch and visibly less steep; upper-step projection must remain visually
+   consistent instead of progressively diverging toward the top.
 3. **Board enable states.** Test BOTH, LEFT, RIGHT, and OFF/OFF. The body remains
    visually CLOSED and NORMAL in every state.
 4. **STEPPED_CLOSED + SLOPED board.** Confirm a straight (not sawtooth) visible
-   edge, first-step lower end, horizontal bottom cap, short top cap, vertical rear
-   closure, and no notch or diagonal rear plate.
-5. **SLOPED_CLOSED + STEPPED board.** Confirm accepted stepped board and closed
-   sloped body coexist without an interior gap.
+   upper edge beginning above the traditional vertical front closure, a stepped
+   bottom edge, first-step lower end, horizontal bottom cap, short top cap,
+   vertical rear closure, and no notch, giant triangle, or diagonal rear plate.
+5. **SLOPED_CLOSED + STEPPED board.** Confirm the board upper edge retains the
+   accepted stepped silhouette while its entire lower edge follows the corrected
+   sloped body underside. Confirm there is no stepped lower edge or interior gap.
 6. **SLOPED_CLOSED + SLOPED board.** Confirm both new silhouettes, role
-   separation, clean ends, and NORMAL diagnosis. Tests 1/4/5/6 cover all four
-   body/board combinations.
+   separation, clean ends, and NORMAL diagnosis. Its upper edge is one clean
+   slope after the front vertical closure, while its lower edge follows the same
+   corrected sloped family as the body. Tests 1/4/5/6 cover all four combinations
+   as top/bottom pairs: stepped/stepped, sloped/stepped, stepped/sloped, and
+   sloped/sloped.
 7. **FORWARD / REVERSE.** Use the UI Reverse operator and mandatory Undo/Redo.
    Lower/upper ends move to their physical elevation roles; LEFT/RIGHT remains
    uphill-relative and neither shape breaks.

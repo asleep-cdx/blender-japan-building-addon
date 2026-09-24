@@ -35,16 +35,22 @@ class SideBoardProfile:
 
 
 def C_sloped(layout, closure_depth):
-    """Return the exact Stage-2 visible sloped soffit path P0/P1/P2."""
+    """Return the corrected visible soffit: lower flat then walking-line slope.
+
+    Candidate r1 located P2 by subtracting a vertical ``closure_depth`` from
+    the penultimate rise.  Since P1 is also shifted uphill, that made P1-P2
+    steeper than the Stair pitch.  The corrected line is parallel to the
+    canonical going/rise line, starting exactly at P1.
+    """
     upper_x = layout.run_length + layout.riser_thickness
-    points = ((layout.riser_thickness, layout.base_z),
-              (layout.going + closure_depth, layout.base_z),
-              (upper_x, layout.base_z
-               + (layout.riser_count - 1) * layout.actual_riser
-               - closure_depth))
-    if not points[1][0] < upper_x:
+    slope_start_x = layout.going + closure_depth
+    if not slope_start_x < upper_x:
         raise ValueError("SLOPED_CLOSEDの勾配runは正である必要があります。")
-    return points
+    slope = layout.actual_riser / layout.going
+    return ((layout.riser_thickness, layout.base_z),
+            (slope_start_x, layout.base_z),
+            (upper_x, layout.base_z
+             + (upper_x - slope_start_x) * slope))
 
 
 def _without_consecutive_duplicates(points):
@@ -208,30 +214,38 @@ def side_board_profile(layout, fields=ResidentialFields()):
     # produces a vertical rear edge instead of the rejected diagonal plate.
     upper.append((layout.run_length + layout.riser_thickness,
                   layout.upper_arrival_z))
-    closure_depth = validate_stepped_closure_depth(
-        fields, layout.actual_riser, layout.going)
-    lower = stepped_closure_visible_profile(layout, closure_depth)
+    lower = side_board_lower_profile(layout, fields)
     polygon = validate_simple_polygon(list(upper) + list(reversed(lower)))
     return SideBoardProfile(reference, _without_consecutive_duplicates(upper),
                             lower, polygon)
 
 
+def side_board_lower_profile(layout, fields=ResidentialFields()):
+    """Select only the board bottom family from ``underside_mode``."""
+    values = (fields if isinstance(fields, ResidentialFields)
+              else residential_fields(fields))
+    depth = validate_stepped_closure_depth(values, layout.actual_riser,
+                                            layout.going)
+    if values.underside_mode == SLOPED_CLOSED:
+        return C_sloped(layout, depth)
+    return stepped_closure_visible_profile(layout, depth)
+
+
 def sloped_side_board_profile(layout, fields=ResidentialFields()):
-    """Build the straight visible board with horizontal/vertical end caps."""
+    """Build a front closure, straight upper run, cap, and rear closure."""
     reveal = validate_side_board_reveal(fields, layout.actual_riser,
                                         layout.going)
     reference = side_board_reference_profile(layout)
     rear = layout.run_length + layout.riser_thickness
-    # The visible top is one straight run.  Its end remains short of the rear
-    # plane so the final segment is an explicit horizontal cap.
+    # Preserve the accepted first-step front: rise vertically from B to the
+    # reveal-offset first tread corner.  Only then begin the one straight
+    # visible run.  Candidate r1 incorrectly ran from B directly to H, making
+    # the board a large triangular plate rather than the confirmed silhouette.
     upper = ((-reveal, layout.base_z),
+             (-reveal, layout.base_z + layout.actual_riser + reveal),
              (layout.run_length - reveal, layout.upper_arrival_z),
              (rear, layout.upper_arrival_z))
-    depth = validate_stepped_closure_depth(fields, layout.actual_riser,
-                                            layout.going)
-    lower = (C_sloped(layout, depth)
-             if fields.underside_mode == SLOPED_CLOSED
-             else stepped_closure_visible_profile(layout, depth))
+    lower = side_board_lower_profile(layout, fields)
     polygon = validate_simple_polygon(upper + tuple(reversed(lower)))
     return SideBoardProfile(reference, upper, lower, polygon)
 

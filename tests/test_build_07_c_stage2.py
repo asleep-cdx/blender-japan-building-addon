@@ -13,8 +13,9 @@ from japanese_house_modeler.stair_residential import (BEVEL, ROUND, SLOPED,
     schema_version_after_residential_edit, validate_mode_data)
 from japanese_house_modeler.stair_residential_geometry import (C_sloped,
     build_side_board_fragment, build_underbody_fragment,
-    prepare_residential_geometry, sloped_side_board_profile,
-    sloped_underbody_profile)
+    prepare_residential_geometry, side_board_lower_profile,
+    side_board_profile, sloped_side_board_profile, sloped_underbody_profile,
+    stepped_closure_visible_profile)
 
 ARGS = (((0, 0), (3.6, 0)), "FORWARD", 425, 2800, 16, 900, 30, 12)
 def layout(direction="FORWARD", path=((0, 0), (3.6, 0)), base=425):
@@ -29,7 +30,19 @@ def local_y(l, v):
 class SlopedBodyTests(unittest.TestCase):
     def test_c_sloped_exact_endpoints(self):
         l=layout(); d=.15
-        self.assertEqual(C_sloped(l,d),((l.riser_thickness,l.base_z),(l.going+d,l.base_z),(l.run_length+l.riser_thickness,l.base_z+15*l.actual_riser-d)))
+        upper_x=l.run_length+l.riser_thickness
+        points=C_sloped(l,d)
+        self.assertEqual(points[:2],((l.riser_thickness,l.base_z),
+                                     (l.going+d,l.base_z)))
+        self.assertEqual(points[2][0],upper_x)
+        self.assertAlmostEqual(points[2][1],l.base_z
+                               +(upper_x-l.going-d)*l.actual_riser/l.going)
+    def test_corrected_slope_is_pitch_parallel_and_shallower_than_r1(self):
+        l=layout(); d=.15; p=C_sloped(l,d)
+        slope=(p[2][1]-p[1][1])/(p[2][0]-p[1][0])
+        self.assertAlmostEqual(slope,l.actual_riser/l.going)
+        r1_upper=l.base_z+(l.riser_count-1)*l.actual_riser-d
+        self.assertLess(p[2][1],r1_upper)
     def test_lower_flat_and_single_slope(self):
         p=C_sloped(layout(),.15); self.assertEqual(p[0][1],p[1][1]); self.assertEqual(len(p),3)
     def test_upper_closure_plane(self):
@@ -71,7 +84,11 @@ class SlopedBodyTests(unittest.TestCase):
 class SlopedBoardTests(unittest.TestCase):
     def fields(self, **kw): return replace(ResidentialFields(side_board_mode=SLOPED),**kw)
     def test_main_edge_straight_and_not_sawtooth(self):
-        p=sloped_side_board_profile(layout(),self.fields()); self.assertEqual(len(p.outer),3); self.assertNotEqual(p.outer[0][1],p.outer[1][1])
+        l=layout(); p=sloped_side_board_profile(l,self.fields())
+        self.assertEqual(len(p.outer),4)
+        self.assertEqual(p.outer[0][0],p.outer[1][0])
+        self.assertEqual(p.outer[1][1],l.base_z+l.actual_riser+.04)
+        self.assertNotEqual(p.outer[1][1],p.outer[2][1])
     def test_lower_end_and_upper_caps(self):
         l=layout(); p=sloped_side_board_profile(l,self.fields())
         self.assertEqual(p.outer[0][1],l.base_z); self.assertEqual(p.lower[0][1],l.base_z)
@@ -87,6 +104,36 @@ class SlopedBoardTests(unittest.TestCase):
         self.assertAlmostEqual(min(local_y(l,v) for v in right.vertices),-l.width/2-.018); self.assertAlmostEqual(max(local_y(l,v) for v in right.vertices),-l.width/2)
     def test_reveal_controls_visible_projection(self):
         l=layout(); a=sloped_side_board_profile(l,self.fields(side_board_reveal_mm=40)); b=sloped_side_board_profile(l,self.fields(side_board_reveal_mm=60)); self.assertNotEqual(a.outer,b.outer); self.assertEqual(a.lower,b.lower)
+    def test_underside_mode_alone_selects_lower_edge_for_both_tops(self):
+        l=layout()
+        stepped_lower=stepped_closure_visible_profile(l,.15)
+        sloped_lower=C_sloped(l,.15)
+        for board_mode,builder in ((STEPPED,side_board_profile),
+                                   (SLOPED,sloped_side_board_profile)):
+            with self.subTest(board_mode=board_mode):
+                stepped=builder(l,ResidentialFields(
+                    underside_mode=STEPPED_CLOSED,side_board_mode=board_mode))
+                sloped=builder(l,ResidentialFields(
+                    underside_mode=SLOPED_CLOSED,side_board_mode=board_mode))
+                self.assertEqual(stepped.lower,stepped_lower)
+                self.assertEqual(sloped.lower,sloped_lower)
+                self.assertEqual(stepped.lower,side_board_lower_profile(
+                    l,ResidentialFields(underside_mode=STEPPED_CLOSED)))
+                self.assertEqual(sloped.lower,side_board_lower_profile(
+                    l,ResidentialFields(underside_mode=SLOPED_CLOSED)))
+                self.assertNotEqual(stepped.lower,sloped.lower)
+    def test_stepped_top_is_unchanged_when_lower_family_changes(self):
+        l=layout()
+        a=side_board_profile(l,ResidentialFields())
+        b=side_board_profile(l,ResidentialFields(underside_mode=SLOPED_CLOSED))
+        self.assertEqual(a.outer,b.outer)
+        self.assertNotEqual(a.lower,b.lower)
+    def test_sloped_top_is_unchanged_when_lower_family_changes(self):
+        l=layout()
+        a=sloped_side_board_profile(l,self.fields())
+        b=sloped_side_board_profile(l,self.fields(underside_mode=SLOPED_CLOSED))
+        self.assertEqual(a.outer,b.outer)
+        self.assertNotEqual(a.lower,b.lower)
 
 class MigrationAndRegressionTests(unittest.TestCase):
     def test_stage2_migration_triggers(self):
