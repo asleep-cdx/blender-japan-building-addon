@@ -18,7 +18,9 @@ SIDE_BOARD_MODES = frozenset({STEPPED, SLOPED})
 TREAD_FRONT_EDGE_MODES = frozenset({SQUARE, BEVEL, ROUND})
 # Add fields here only when their production behavior becomes available.  This
 # keeps an ordinary edit of legacy 07-B settings from becoming a migration.
-STAGE1_SCHEMA_3_EDIT_FIELDS = ("side_board_band_width_mm",)
+STAGE2_SCHEMA_3_EDIT_FIELDS = (
+    "side_board_band_width_mm", "underside_mode", "side_board_mode",
+)
 ASSEMBLY_MODES = frozenset({BASIC_TREAD_RISER, STANDARD_RESIDENTIAL})
 MATERIAL_ROLES = ("TREAD", "RISER", "UNDERSIDE", "SIDE_BOARD")
 UNASSIGNED = None
@@ -78,14 +80,13 @@ def residential_fields(record=None):
 def schema_version_after_residential_edit(schema_version, before, after):
     """Return the schema committed by a Residential settings edit.
 
-    Stage 1 migrates a legacy record only when the user actually changes its
-    newly exposed stair-body depth.  Later stages can extend the field tuple as
-    their geometry becomes producible, without broadening legacy 07-B edits.
+    A legacy record migrates only when a production 07-C geometry field is
+    actually changed; ordinary 07-B edits and no-op submissions stay schema 2.
     """
     old = before if isinstance(before, ResidentialFields) else residential_fields(before)
     new = after if isinstance(after, ResidentialFields) else residential_fields(after)
     if any(getattr(old, name) != getattr(new, name)
-           for name in STAGE1_SCHEMA_3_EDIT_FIELDS):
+           for name in STAGE2_SCHEMA_3_EDIT_FIELDS):
         return max(3, schema_version)
     return schema_version
 
@@ -109,9 +110,6 @@ def validate_mode_data(assembly_mode, schema_version, fields=None):
         raise ValueError("不明なSide Board modeです。")
     if values.tread_front_edge_mode not in TREAD_FRONT_EDGE_MODES:
         raise ValueError("不明な踏板前端modeです。")
-    # Stage 1 persists future identifiers, but cannot produce their geometry.
-    if values.underside_mode != STEPPED_CLOSED or values.side_board_mode != STEPPED:
-        raise ValueError("SLOPED形状はBuild 07-C Stage 1では生成できません。")
     if not isinstance(values.left_side_board_enabled, bool) \
             or not isinstance(values.right_side_board_enabled, bool):
         raise ValueError("Side Board enabled値はboolである必要があります。")
@@ -133,7 +131,7 @@ def validate_mode_data(assembly_mode, schema_version, fields=None):
     if not math.isfinite(overhang) or overhang < 0.0:
         raise ValueError("踏板前端出は0以上の有限値である必要があります。")
     if overhang != 0.0 or values.tread_front_edge_mode != SQUARE:
-        raise ValueError("踏板前端形状はBuild 07-C Stage 1では生成できません。")
+        raise ValueError("踏板前端形状はBuild 07-C Stage 2では生成できません。")
     return True
 
 

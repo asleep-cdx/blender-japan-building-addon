@@ -60,10 +60,8 @@ class FoundationTests(unittest.TestCase):
                            "BEVEL", "ROUND"):
             self.assertIn(f'"{identifier}"', source)
 
-    def test_stage1_rejects_unimplemented_geometry(self):
-        for value in (ResidentialFields(underside_mode=SLOPED_CLOSED),
-                      ResidentialFields(side_board_mode=SLOPED),
-                      ResidentialFields(tread_front_overhang_mm=5.0),
+    def test_stage2_still_rejects_unimplemented_front_edges(self):
+        for value in (ResidentialFields(tread_front_overhang_mm=5.0),
                       ResidentialFields(tread_front_edge_mode=BEVEL),
                       ResidentialFields(tread_front_edge_mode=ROUND)):
             with self.subTest(value=value), self.assertRaises(ValueError):
