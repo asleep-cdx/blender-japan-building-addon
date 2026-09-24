@@ -1,7 +1,7 @@
 # BUILD 07-C SPECIFICATION
 ## 日本住宅モデラー — Sloped Closed Underside + Straight Stair Finish Variants
 
-> **Status: DRAFT FOR REVIEW**  
+> **Status: FINAL / IMPLEMENTATION AUTHORITY**  
 > Date: 2026-09-24  
 > Build 07-B overall Acceptance を baseline とし、07-B の accepted canonical / lifecycle / geometry contract を壊さずに Straight Stair の finish variants を追加する。
 
@@ -11,13 +11,13 @@
 
 Build 07-C は、Build 07-B で Acceptance 済みとなった Standard Residential Straight Stair を維持したまま、直線住宅階段としての見た目・仕上げ選択を拡張する Build である。
 
-07-C の中心目的は次の5点とする。
+中心目的は次の5点とする。
 
 1. `SLOPED_CLOSED` の連続勾配下面を追加する。
 2. Side Board に `SLOPED` variant を追加する。
-3. Tread front overhang / nosing を追加する。
+3. Tread front overhang / nosing（段鼻）を追加する。
 4. Tread front edge の basic `BEVEL` / `ROUND` variant を追加する。
-5. Build 07-B で内部互換fieldとして保持していた closed-body depth を、明確なユーザー向け「本体下面深さ」として操作可能にする。
+5. Build 07-B で内部互換fieldとして保持していた closed-body depth を、ユーザー向け「階段本体厚み」として操作可能にする。
 
 07-C は **Straight Stair の finish/detail 拡張**であり、Path topology 自体は 07-B と同じ 2-point Straight Path のままとする。
 
@@ -38,36 +38,30 @@ Build 07-C は、Build 07-B で Acceptance 済みとなった Standard Residenti
 - `DEVELOPMENT_WORKFLOW.md`
 - `ROADMAP.md`
 
-07-C specification drafting baseline `main`:
+07-C specification drafting baseline:
 
 ```text
 commit ececf52e759896344fc48c1fbe07a8e4d033361f
 tree   2374ee4f504fb39942890030da6b758ccfe898de
 ```
 
-07-B accepted production behavior is regression authority. 07-C implementation must not silently change existing 07-B saved Stair geometry.
+07-B accepted production behavior is regression authority. Existing 07-B saved Stair must not silently change merely because 07-C is installed.
 
 ---
 
 ## 3. Roadmap position
 
 ```text
-07-A  Stair Core + 2-point Straight Stair
-      ACCEPTED
-        ↓
-07-B  Standard Residential Straight Stair
-      + STEPPED_CLOSED
-      + full-depth Side Boards
-      + part Materials
-      ACCEPTED
-        ↓
-07-C  SLOPED_CLOSED
-      + Straight Stair Finish Variants
-        ↓
+07-A  Stair Core + 2-point Straight Stair          ACCEPTED
+  ↓
+07-B  Standard Residential Straight Stair          ACCEPTED
+  ↓
+07-C  Sloped Closed Underside + Straight Finish Variants
+  ↓
 07-D  Multi-point Path + L/U + Landing
-        ↓
+  ↓
 07-E  Winder / 廻り段
-        ↓
+  ↓
 07-F  Open / Support Variants
 ```
 
@@ -77,7 +71,7 @@ tree   2374ee4f504fb39942890030da6b758ccfe898de
 
 ## 4. Add-on identification
 
-07-C production implementation では以下を使用する。
+07-C production implementation:
 
 ```text
 version = (0, 7, 2)
@@ -88,7 +82,7 @@ description = "Build 07-C: Sloped Closed Underside + Straight Stair Finish Varia
 
 ## 5. Coordinate and terminology contract
 
-Resolved local axes は 07-B を継承する。
+07-B を継承する。
 
 ```text
 +X = uphill / forward
@@ -109,38 +103,38 @@ B = base_z
 H = B + N*h
 w = stair_width
 u = underside_thickness
-d = closed_body_depth
+d = closed_body_depth / stair_body_thickness
 s = side_board_thickness
 v = side_board_reveal
 n = tread_front_overhang
 q = tread_front_edge_size
 ```
 
-`START / END` は Path draw order の意味だけを持つ。高さ側は `lower / upper` とし、FORWARD / REVERSE から解決する。
+`START / END` は Path draw order。高さ側は `lower / upper` とし、FORWARD / REVERSE から解決する。
 
 ---
 
-## 6. 07-C production scope
+## 6. Production scope
 
 - existing 2-point Straight Stair Path
-- existing FORWARD / REVERSE
+- FORWARD / REVERSE
 - BASIC / STANDARD_RESIDENTIAL separation
 - schema compatibility
 - `STEPPED_CLOSED` preservation
 - new `SLOPED_CLOSED`
-- user-facing closed-body depth
-- existing full-depth external Side Boards
+- user-facing stair-body thickness / closed-body depth
+- existing external Side Boards
 - `STEPPED` Side Board preservation
 - new `SLOPED` Side Board variant
 - tread front overhang / nosing
 - tread front edge `SQUARE / BEVEL / ROUND`
 - existing part Materials
-- Regenerate / Repair / failure rollback
+- Regenerate / Repair / rollback
 - Save / full exit / reopen
 - Undo / Redo
 - duplicate-ID lifecycle
 - Editable Mesh finalization
-- dedicated active-only Delete
+- active-only Delete
 - oblique Straight Path
 - Wall / Finish isolation regression
 - practical straight-stair placement smoke test
@@ -149,13 +143,12 @@ q = tread_front_edge_size
 
 ## 7. Explicit non-scope
 
-07-C では以下を production 実装しない。
+07-C では実装しない。
 
 - Multi-point Path
 - Shift angle constraint
 - mouse Path-point relocation
-- L-shaped Stair
-- U-shaped Stair
+- L / U Stair
 - Landing
 - Winder / 廻り段
 - Riser OFF
@@ -166,49 +159,40 @@ q = tread_front_edge_size
 - handrail / newel / baluster
 - anti-slip groove
 - separate nosing Material role
-- arbitrary custom nosing Profile
-- arbitrary custom Side Board Profile
+- arbitrary custom nosing / Side Board Profile
 - production UV / guaranteed wood-grain direction
 - automatic Floor / Wall / Room connection
-- universal arbitrary Mesh framework
 
 ---
 
-## 8. CLOSED invariant — 07-B correctionを継承
+## 8. CLOSED invariant
 
 `STANDARD_RESIDENTIAL + STEPPED_CLOSED` と `STANDARD_RESIDENTIAL + SLOPED_CLOSED` は、どちらも CLOSED Stair である。
 
 必須：
 
-- Tread / Riser の内部側 backside を Stair 内部として露出させない。
+- Tread / Riser backside を Stair interior として露出させない。
 - Stair interior cavity を下面から見せない。
 - Side Board ON/OFF に依存せず body 自体が閉じている。
-- lower termination が閉じている。
-- upper termination が閉じている。
+- lower termination / upper termination が閉じている。
 - body は `base_z` より下へ出ない。
 - floor まで埋める巨大solidにしない。
 
-`SLOPED_CLOSED` と `STEPPED_CLOSED` の差は **visible soffit shape** であり、closed / open の差ではない。
+`SLOPED_CLOSED` と `STEPPED_CLOSED` の差は visible soffit shape だけである。
 
-### 8.1 Intentional nosing exception
-
-07-C の Tread front overhang は finished exterior projection である。
-
-そのため、nosing として意図的に突出した部分の下面・前面・側面が外から見えることは許容する。
-
-ただし、その突出部の後ろから Stair interior cavity、Riser backside、または本来 closed body 内に隠れる Tread underside が見えてはならない。
+Nosingとして意図的に突出したTread前端の下面・前面・側面は exterior finish として見えてよい。ただし、その後ろから Stair interior、Riser backside、closed body内部を見せてはならない。
 
 ---
 
 ## 9. Managed Object / transaction contract
 
-07-C でも:
+07-Cでも:
 
 ```text
 1 Managed Stair = 1 Blender Mesh Object
 ```
 
-Normal managed Transform:
+Normal transform:
 
 ```text
 Location = (0,0,0)
@@ -216,16 +200,15 @@ Rotation = (0,0,0)
 Scale    = (1,1,1)
 ```
 
-すべての geometry / material candidate は Scene mutation 前に prepare / validate する。
+全 geometry / material candidate は Scene mutation 前に prepare / validate する。
 
-Rollback target は最低限次を含む。
+Rollback target は最低限:
 
 - old Mesh datablock
 - canonical dimensions
 - Path / ascent
-- assembly mode
-- schema version
-- all Residential / 07-C fields
+- assembly mode / schema
+- Residential / 07-C fields
 - Material pointers / slots
 - Stair ID
 - Object Transform
@@ -234,93 +217,93 @@ prepare failure / post-swap commit failure のどちらでも partial commit を
 
 ---
 
-## 10. Assembly mode
+## 10. Assembly mode / schema policy
 
-07-C は 07-B の assembly mode を変更しない。
+Assembly modeは変更しない。
 
 ```text
 BASIC_TREAD_RISER
 STANDARD_RESIDENTIAL
 ```
 
-BASIC ordinary operations は 07-C Residential fields を無視し、07-A accepted behavior を維持する。
-
----
-
-## 11. Schema version policy
-
-07-C の current schema は:
+07-C current schema:
 
 ```text
 schema = 3
 ```
 
-### 11.1 Existing 07-B Residential file
+### Existing 07-B schema 2 file
 
-07-B schema 2 file を開いただけでは:
+開いただけでは:
 
-- schema を書き換えない
-- geometry を再生成しない
-- new fields を明示保存しない
-- UUID / Path / Materials を変更しない
+- schemaを書き換えない
+- geometryを再生成しない
+- UUID / Path / Materialsを変更しない
+- 07-C固有fieldを理由に見た目を変えない
 
-07-C runtime で ordinary Regenerate を行った場合も、new 07-C fields の semantic default により 07-B accepted geometry を再現しなければならない。
+Legacy semantic defaults:
 
-### 11.2 Schema bump condition
+```text
+side_board_mode = STEPPED
+tread_front_overhang_mm = 0.0
+tread_front_edge_mode = SQUARE
+tread_front_edge_size_mm = 5.0
+```
 
-07-C 固有状態をユーザーが明示commitした場合は:
+つまり **既存07-B fileはnosingなしのまま**である。
+
+07-C固有状態を明示commitした場合:
 
 ```text
 stair_schema_version = max(current, 3)
 ```
 
-07-C 固有状態には最低限以下を含む。
+### New 07-C Stair final default
 
-- `underside_mode = SLOPED_CLOSED`
-- `side_board_mode = SLOPED`
-- nonzero tread front overhang
-- front edge mode `BEVEL` / `ROUND`
-
-既存field `side_board_band_width_mm` の値を user-facing closed-body depth として編集するだけの場合も、07-C settings operator を通じて commit した時点で schema 3 としてよい。
-
-### 11.3 New 07-C Stair
-
-新規 Stair は:
+Build 07-C完成時の新規Residential Stair:
 
 ```text
 assembly_mode = STANDARD_RESIDENTIAL
 stair_schema_version = 3
+underside_mode = STEPPED_CLOSED
+side_board_mode = STEPPED
+closed_body_depth = 150.0 mm
+tread_front_overhang_mm = 5.0
+tread_front_edge_mode = SQUARE
+tread_front_edge_size_mm = 5.0
 ```
 
-ただし default visual geometry は 07-B accepted default と同一にする。
+**新規07-C Stairの段鼻突出量は5.0 mmを既定値とする。**
+
+Stage 1 / Stage 2の途中Buildでは、まだnosing geometryを有効化しない。Stage 3でnosing production geometryを導入すると同時に、新規Stair creation defaultを5.0 mmへ有効化する。
 
 ---
 
-## 12. Canonical 07-C fields
+## 11. Canonical 07-C fields
 
-07-B canonical fields は維持する。
-
-### 12.1 Existing field retained as storage authority
+### Existing storage authority retained
 
 ```text
 side_board_band_width_mm
 ```
 
-この property は schema compatibility のため **rename / delete しない**。
+schema compatibility のため rename / delete しない。同じ意味のduplicate persistent propertyも追加しない。
 
-07-C では意味を明確化し、UI label を:
+07-C UI label:
 
 ```text
-本体下面深さ (mm)
+階段本体厚み (mm)
 ```
 
-とする。
+説明上は「段形状からvisible soffitまでの本体下面深さ」であり、`underside_thickness_mm`（下面シェル厚）とは別概念。
 
-semantic name / helper として `closed_body_depth` を使用してよいが、同じ意味の duplicate persistent property を追加しない。
+Default:
 
-### 12.2 New persistent fields
+```text
+150.0 mm
+```
 
-Conceptual canonical additions:
+### New persistent fields
 
 ```text
 side_board_mode
@@ -337,64 +320,22 @@ tread_front_edge_mode
 tread_front_edge_size_mm
 ```
 
-Recommended defaults:
+Legacy-compatible property defaults may remain overhang 0.0 so old files stay unchanged. Final new-07-C Stair creation explicitly sets overhang 5.0 mm.
 
-```text
-side_board_mode = STEPPED
-tread_front_overhang_mm = 0.0
-tread_front_edge_mode = SQUARE
-tread_front_edge_size_mm = 5.0
-```
-
-`5.0` mm edge size is stored but inactive while mode is `SQUARE`.
-
-### 12.3 Existing underside field extension
-
-`underside_mode` choices become:
+### underside_mode extension
 
 ```text
 STEPPED_CLOSED
 SLOPED_CLOSED
 ```
 
-Default remains:
-
-```text
-STEPPED_CLOSED
-```
+Existing / semantic default remains `STEPPED_CLOSED`.
 
 ---
 
-## 13. Compatibility-neutral default
+## 12. Residential settings UI
 
-New 07-C Residential Stair defaults must produce the same accepted shape as 07-B default:
-
-```text
-underside_mode = STEPPED_CLOSED
-side_board_mode = STEPPED
-tread_front_overhang_mm = 0.0
-tread_front_edge_mode = SQUARE
-closed_body_depth = 150.0 mm
-side_board_reveal = 40.0 mm
-side_board_thickness = 18.0 mm
-left_side_board = ON
-right_side_board = ON
-```
-
-Expected default accepted geometry before any opt-in 07-C variant remains:
-
-```text
-620 vertices
-732 faces
-```
-
-07-C installation alone must not visually alter accepted 07-B Stair files.
-
----
-
-## 14. User-facing Residential settings UI
-
-Existing `住宅階段仕様を変更` operator / dialog を拡張する。
+Existing `住宅階段仕様を変更` dialogを拡張する。
 
 Recommended order:
 
@@ -403,38 +344,38 @@ Recommended order:
     段々閉じ
     勾配閉じ
 
-本体下面深さ (mm)
-下面厚 (mm)
+階段本体厚み (mm)        # default 150.0
+下面シェル厚 (mm)
 
 左Side Board
 右Side Board
-側板下面形状
+側板形状
     段々
     勾配
 側板厚 (mm)
 側板突出量 (mm)
 
-踏板前出し (mm)
+段鼻突出量 (mm)          # new Stair default 5.0
 踏板前縁
     角
     面取り
     丸
-前縁サイズ (mm)   # BEVEL / ROUND時のみ有効表示
+前縁サイズ (mm)          # BEVEL / ROUND時のみ有効
 ```
 
-Material editing remains the existing separate Material operator.
-
-Dialog commit は一つの Undo step とする。
+Material editingは既存の別operatorを維持する。Dialog commitは1 Undo step。
 
 ---
 
-## 15. Closed-body depth semantics
+## 13. Stair-body thickness / closed-body depth
 
-`d = side_board_band_width_mm / 1000` is the closed-body depth authority.
+```text
+d = side_board_band_width_mm / 1000
+```
 
-07-B corrected body と同じく、`d` は visible soffit location を決める。
+`d` は visible soffit location を決める。Defaultは150 mm。
 
-`underside_thickness_mm` は `d` と別概念であり、visible soffit depth を決めない。
+`underside_thickness_mm` はphysical shell thicknessであり、visible soffit depthを決めない。
 
 Validation baseline:
 
@@ -442,160 +383,117 @@ Validation baseline:
 0 < d < min(h, g)
 ```
 
-加えて selected profile は:
+selected profileは finite / positive-area / simple / no zero-length / no self-intersection / valid triangulation が必要。
 
-- finite
-- positive-area
-- no duplicate consecutive points after cleanup
-- no zero-length edge
-- no self-intersection
-- valid winding / triangulation
-
-でなければならない。
-
-Depth edit は Tread / Riser canonical dimensions、Path、Stair width、Side Board thickness/reveal を変更しない。
+Depth editはPath、Tread/Riser dimensions、Stair width、Side Board thickness/revealを変更しない。
 
 ---
 
-## 16. STEPPED_CLOSED preservation
+## 14. STEPPED_CLOSED preservation
 
-07-C は accepted 07-B `stepped_closure_visible_profile()` contract を壊さない。
+Accepted 07-B `STEPPED_CLOSED` contractを壊さない。
 
-Default 07-C Stair と existing schema-2 07-B Stair の `STEPPED_CLOSED` output は 07-B accepted productionと一致すること。
+Existing schema-2 07-B Stairをordinary Regenerateしても、07-B accepted stepped bodyを再現する。
 
-Tread overhang / edge finish は exterior Tread detail として扱い、closed body silhouette の canonical reference を暗黙に移動しない。
+Nosing / front edge finishは exterior Tread detailであり、stepped body canonical referenceを勝手に移動しない。
 
 ---
 
-## 17. SLOPED_CLOSED visible soffit
+## 15. SLOPED_CLOSED — human-confirmed body shape
 
-`SLOPED_CLOSED` は accepted corrected body の contact profile を再利用し、visible lower profile だけを連続勾配へ置き換える。
+SLOPED_CLOSEDのside-view targetは、2026-09-24に人間確認した参照画像1・2の形を正とする。
 
-Body/contact inner profile は 07-B Residential Tread/Riser junction contract を維持する。
+見た目の契約:
 
-### 17.1 Upper legal plane
+1. 一段目の下部は `Z=B` に**一つの水平底面**を持つ。
+2. その水平底面の後端から、上階側まで**一本の連続した斜め直線soffit**で上がる。
+3. 最上段側は**縦のupper closure**で閉じる。
+4. Side BoardをOFFにしても、この本体形状だけでCLOSED Stairとして成立する。
+5. 階段下の空間は残し、床までsolidで埋めない。
+
+### Analytical contract
+
+Upper legal plane:
 
 ```text
 X_upper = L + r
 ```
 
-No geometry may extend uphill beyond `L+r` as a consequence of underside generation.
-
-### 17.2 Lower flat termination
-
-07-B の lowest-step visual ruleを継承し、lower start は `base_z` 上で閉じる。
-
-Define:
+Lower flat:
 
 ```text
 P0 = (r, B)
 P1 = (g + d, B)
 ```
 
-`P0 → P1` is one flat lower termination segment.
-
-For `SLOPED_CLOSED`, a positive sloped run requires:
-
-```text
-g + d < L + r
-```
-
-If this condition is not satisfied, the selected configuration is unsupported and must be rejected before Scene mutation rather than silently generating a degenerate shape.
-
-### 17.3 Sloped soffit endpoint
-
-Define:
+Main sloped soffit endpoint:
 
 ```text
 P2 = (L + r, B + (N - 1)h - d)
 ```
 
-Visible profile:
+Visible lower path:
 
 ```text
-C_sloped = [P0, P1, P2]
+P0 -> P1 -> P2
 ```
 
-Thus:
+The closed polygon then meets the accepted upper contact/body path on `X=L+r`, producing the required vertical upper closure.
 
-- first-step/lower region remains flat at `Z=B`,
-- the main soffit from `P1` to `P2` is one straight segment,
-- upper rear remains on `X=L+r`,
-- body remains above floor rather than becoming a floor-to-stair solid mass.
+Supported positive sloped run requires:
 
-### 17.4 Geometry validation
+```text
+g + d < L + r
+```
 
-`C_sloped` + accepted component-contact inner profile must form a valid simple closed XZ polygon.
+Reject atomically if the sloped line crosses the contact profile, creates nonpositive depth/area, self-intersects, falls below B, or extends beyond L+r.
 
-Validation must reject configurations where the sloped soffit:
-
-- crosses the inner/contact profile,
-- produces zero or negative body depth,
-- self-intersects,
-- creates zero-area geometry,
-- falls below `B`,
-- extends beyond `L+r`.
-
-Do not infer the sloped profile from existing Mesh vertices.
-
----
-
-## 18. SLOPED_CLOSED lateral closure
-
-The body spans full Stair width:
+Full width:
 
 ```text
 Y = [-w/2, +w/2]
 ```
 
-All four Side Board combinations must remain visually CLOSED:
-
-- BOTH
-- LEFT only
-- RIGHT only
-- OFF/OFF
-
-Side Board enable flags never decide whether the body exists.
+BOTH / LEFT / RIGHT / OFF-OFF board states must all remain visually CLOSED.
 
 ---
 
-## 19. Side Board modes
+## 16. Side Board modes
 
-07-C Side Board is still an external decorative/finish component.
+Side Boardは外付けfinish componentでありbody closure mechanismではない。
 
-LEFT / RIGHT semantics remain uphill-relative.
-
-Side Board extrusion remains outside the body:
+Extrusion remains external:
 
 ```text
 LEFT  = [+w/2, +w/2+s]
 RIGHT = [-w/2-s, -w/2]
 ```
 
-### 19.1 STEPPED
+### STEPPED
 
-`STEPPED` preserves accepted 07-B Stage 3 board geometry.
+Accepted 07-B Stage 3 board geometryをそのまま維持する。
 
-- accepted stepped upper/reveal contour
-- accepted stepped lower/body contour
-- accepted vertical upper rear termination
-- no r6-style spike / giant triangle
+### SLOPED — human-confirmed visual contract
 
-### 19.2 SLOPED
+SLOPED Side Boardのtargetは、2026-09-24に人間確認した参照画像3を正とする。
 
-`SLOPED` means:
+**重要: SLOPED boardの主要なvisible outlineを階段段形状のsawtoothにしない。斜めの直線仕上げとする。**
 
-- upper edge remains the stair-following accepted reveal contour,
-- lower edge uses the same continuous sloped lower profile contract as `SLOPED_CLOSED`,
-- lower start remains clipped/closed at `B`,
-- upper rear remains `X=L+r` with a vertical closing rear edge,
-- no diagonal giant rear plate.
+必須:
 
-This produces a board with a stair-following top and a straight sloped lower edge.
+- 主たるvisible longitudinal edgeは、lower側からupper側まで一本のstraight slopeとして読む。
+- 07-B STEPPED boardのような段々のvisible upper contourにはしない。
+- lower terminationは07-Bでacceptした考え方を継承し、**一段目下部と揃う**。`base_z`より下へ出さない。
+- lower endは必要なvertical/front closure + horizontal bottom capで閉じ、最下段周辺にmicro-notchを作らない。
+- upper terminationは参照画像3の形を再現し、`X=L+r`を越えない。
+- upper sideではstraight sloped runを終えた後、**vertical rear closure と短いhorizontal top cap**で閉じる。
+- r6型のspike / giant triangle / diagonal rear plateを作らない。
+- LEFT / RIGHT semanticsはuphill-relative。
+- Side Board inner faceとbodyの間からinterior cavityを見せない。
 
-`side_board_mode` is independent from `underside_mode`.
+`side_board_reveal_mm` はSLOPED boardでもvisible projection controlとして保持する。ただしSLOPED modeでは、revealを理由にsawtooth upper edgeを再導入しない。exact offset/intersection helperはStage 2でpure geometryとして定義し、上記visual/end-condition contractを満たすこと。
 
-Therefore all combinations are legal if geometry validation succeeds:
+`side_board_mode` と `underside_mode` は独立。以下の組み合わせをvalidationの範囲で許可する。
 
 ```text
 STEPPED_CLOSED + STEPPED board
@@ -604,87 +502,67 @@ SLOPED_CLOSED  + STEPPED board
 SLOPED_CLOSED  + SLOPED board
 ```
 
-The body remains CLOSED even when the board shape differs from the body soffit.
-
 ---
 
-## 20. Side Board reveal and nosing relationship
+## 17. Nosing / tread-front overhang
 
-Existing `side_board_reveal_mm` meaning is preserved.
-
-When either Side Board is enabled and tread overhang `n > 0`, supported 07-C relationship is:
+「踏板前出し」は **段鼻（nosing）を作る機能**として扱う。
 
 ```text
-n <= v
+n = tread_front_overhang_mm / 1000
 ```
 
-This keeps the nosing/downhill projection within the accepted board reveal envelope.
-
-If both Side Boards are OFF, this relation is not required.
-
-Invalid combinations must be rejected atomically.
-
----
-
-## 21. Tread front overhang / nosing
-
-`n = tread_front_overhang_mm / 1000`.
-
-Default:
+Existing 07-B / legacy semantic default:
 
 ```text
 n = 0
 ```
 
-Validation baseline:
+Final new 07-C Stair creation default:
+
+```text
+n = 5.0 mm
+```
+
+Validation:
 
 ```text
 0 <= n < g
 ```
 
-For Residential independent Tread ordinal `j = 1 .. N-1`, accepted 07-B rear/uphill extension remains unchanged.
-
-07-B:
+Residential independent Tread `j = 1 .. N-1`:
 
 ```text
+07-B:
 x0 = (j - 1)g
 x1 = jg + r
-```
 
-07-C with overhang:
-
-```text
+07-C:
 x_front = (j - 1)g - n
 x_rear  = jg + r
 ```
 
-Tread top/bottom Z remain unchanged.
+Only downhill/front extent changes。Tread top/bottom Z、rear plane `jg+r`、Riser geometry、Final Riserは変えない。上階到達面に追加Treadを作らない。
 
-Riser geometry remains unchanged.
+Side Board enabled時は基本supported relation:
 
-Final Riser remains unchanged.
+```text
+n <= side_board_reveal
+```
 
-No arrival/upper-floor Tread is invented.
-
-The overhang changes only the downhill/front extent of each independent Tread.
+invalid combinationはScene mutation前にrejectする。
 
 ---
 
-## 22. Tread front edge mode
+## 18. Tread front edge finish
 
-Front edge variants are Tread geometry, not a new material role.
+全faceはMaterial role `TREAD` のまま。
 
-All resulting faces remain Material role `TREAD`.
+### SQUARE
 
-### 22.1 SQUARE
+既存rectangular front。
 
-Existing rectangular front edge.
-
-`q` is ignored.
-
-### 22.2 BEVEL
-
-Requires:
+### BEVEL
 
 ```text
 n > 0
@@ -692,73 +570,44 @@ n > 0
 q <= n
 ```
 
-Apply a symmetric 45-degree chamfer to the two front corners of the Tread XZ section.
-
-For front `x = x_front`, bottom `z0`, top `z1`:
+Front XZ sectionに上下対称45° chamferを作る。
 
 ```text
 (x_front + q, z0)
-→ (x_front,     z0 + q)
-→ (x_front,     z1 - q)
-→ (x_front + q, z1)
+-> (x_front,     z0 + q)
+-> (x_front,     z1 - q)
+-> (x_front + q, z1)
 ```
 
-The remaining Tread section continues to the accepted rear plane.
+### ROUND
 
-### 22.3 ROUND
+同じsupported rangeを使う。上下front cornerをquarter-circle arcへ置換する。
 
-Requires the same supported range:
-
-```text
-n > 0
-0 < q < t/2
-q <= n
-```
-
-Each of the two front corners is replaced by a quarter-circle arc of radius `q` in the XZ section.
-
-For deterministic Build 07-C production geometry:
+Deterministic production geometry:
 
 ```text
 4 linear segments per quarter arc
 ```
 
-No adaptive segment count in 07-C.
+Managed canonical representationをunapplied Bevel Modifierへ依存させない。
 
-The upper and lower quarter arcs may retain a short vertical front segment between them.
-
-### 22.4 No hidden Modifier dependency
-
-Managed geometry must be deterministically regenerable from canonical fields.
-
-Do not depend on an unapplied user-editable Bevel modifier as the canonical representation.
+Final new-07-C Stairのedge mode defaultは `SQUARE`。`q=5.0 mm` はstored defaultとしてよいがSQUARE時はinactive。
 
 ---
 
-## 23. BASIC compatibility
+## 19. BASIC compatibility
 
-`BASIC_TREAD_RISER` remains accepted 07-A geometry.
+`BASIC_TREAD_RISER` は accepted 07-A geometryのまま。
 
-Ordinary BASIC operations must not:
+Ordinary BASIC operationは underbody / Side Board / nosing / bevel / round を追加しない。assembly mode、Path、IDを書き換えない。Residential-only fieldsはBASIC validityに参加しない。
 
-- add underbody
-- add Side Boards
-- add nosing
-- bevel/round Treads
-- bump assembly mode
-- rewrite Path / ID
-
-07-C Residential-only fields may exist semantically/defaulted but do not participate in BASIC validity.
-
-Explicit BASIC → Residential apply under 07-C creates current Residential schema 3 with compatibility-neutral defaults.
-
-Undo after Apply restores the exact BASIC state.
+Explicit BASIC -> Residential Applyはcurrent Residential schemaへ移行し、Undoでexact BASICへ戻る。
 
 ---
 
-## 24. Material contract
+## 20. Material contract
 
-Existing roles remain:
+Roles remain:
 
 ```text
 TREAD
@@ -767,112 +616,94 @@ UNDERSIDE
 SIDE_BOARD
 ```
 
-No new NOSING role.
+No NOSING role。
 
-- overhang / BEVEL / ROUND faces → `TREAD`
-- SLOPED_CLOSED faces → `UNDERSIDE`
-- SLOPED Side Board faces → `SIDE_BOARD`
+- nosing / BEVEL / ROUND -> `TREAD`
+- SLOPED_CLOSED -> `UNDERSIDE`
+- SLOPED Side Board -> `SIDE_BOARD`
 
-Base fallback / role override / true UNASSIGNED semantics remain exactly as accepted in 07-B.
-
-Material slot identity deduplication remains required.
+Base fallback / override / true UNASSIGNED / slot dedup semanticsは07-Bを維持。
 
 ---
 
-## 25. State diagnosis / operation policy
+## 21. State / lifecycle policy
 
-07-B managed-state policy is preserved.
+07-B policyを維持する。
 
-Normal-only operations remain blocked on abnormal state.
+- normal-only operationsはabnormal stateでblock
+- Repairはrecoverable stateのみ
+- `INVALID_CANONICAL`をguess repairしない
+- Deleteはmanaged abnormal Stairでも可能
+- new fieldsはResidentialでrelevantな場合だけcanonical validationへ参加
 
-Repair continues only for recoverable states.
+Undo/Redo minimum:
 
-`INVALID_CANONICAL` remains non-repairable by guessing new canonical values.
+- underside mode
+- stair-body thickness
+- Side Board mode
+- nosing amount
+- SQUARE / BEVEL / ROUND
+- edge size
+- combined settings
 
-Delete remains available for managed abnormal Stair objects.
-
-New 07-C fields must participate in canonical validation only when relevant to Residential mode.
-
----
-
-## 26. UI / Undo / lifecycle requirements
-
-At minimum verify Undo/Redo for:
-
-- underside mode change
-- closed-body depth edit
-- Side Board mode change
-- overhang edit
-- SQUARE → BEVEL / ROUND
-- edge size edit
-- combined settings edit
-
-Also verify:
-
-- Regenerate
-- dimension edit
-- Path edit
-- Reverse
-- Material edit
-- Repair
-- Save/full exit/reopen
-- Duplicate ID Repair
-- Transform Repair
-- Finalize
-- active-only Delete
+また Regenerate / dimensions / Path / Reverse / Material / Repair / Save-reopen / duplicate ID / Transform Repair / Finalize / Delete を維持する。
 
 ---
 
-## 27. Stage plan
+## 22. Stage plan
 
-### Stage 1 — 07-C Foundation / Compatibility + Closed-body Depth UI
+### Stage 1 — Foundation / Compatibility + Stair-body Thickness UI
 
 Implement:
 
 - version / description 0.7.2
 - schema 3 foundation
-- new canonical fields/defaults
-- `SLOPED_CLOSED` / `side_board_mode` identifiers and validators as data foundation
-- user-facing `本体下面深さ (mm)` mapped to existing `side_board_band_width_mm`
+- new canonical identifiers/fields/default semantics
+- `SLOPED_CLOSED` and `side_board_mode` data identifiers/validators only
+- user-facing `階段本体厚み (mm)` mapped to existing `side_board_band_width_mm`
 - extended Residential settings transaction
-- no `SLOPED_CLOSED` production geometry yet unless explicitly included and tested as Stage 2 work
-- strict 07-B schema2 compatibility
-- default 07-C geometry identical to accepted 07-B
+- existing schema2 07-B compatibility
+- no SLOPED production geometry yet
+- no nosing production geometry yet
+- old 07-B file ordinary Regenerate remains accepted stepped/no-nosing geometry
 
-Stage 1 acceptance must prove old 07-B files do not visually migrate.
+Stage 1 must not silently activate final 5 mm nosing before Stage 3 geometry exists.
 
 ### Stage 2 — SLOPED_CLOSED + SLOPED Side Board
 
 Implement:
 
 - analytical `C_sloped`
-- sloped closed-body fragment
-- all board/body mode combinations
-- SLOPED Side Board lower profile
+- sloped body fragment
+- all body/board combinations
+- human-confirmed SLOPED Side Board straight-line outline
+- lower first-step-aligned termination
+- image-3 upper cap/rear termination contract
 - FORWARD / REVERSE
 - oblique Path
 - nonzero base_z
-- depth edit
+- stair-body thickness edit
 - geometry health + visual CLOSED gates
 
-### Stage 3 — Tread Nosing + Front Edge Variants
+### Stage 3 — Nosing + Front Edge Variants
 
 Implement:
 
-- overhang
+- nosing overhang
+- final new-Stair default `5.0 mm`
 - SQUARE preservation
 - BEVEL
 - ROUND
 - board reveal compatibility
-- role-based Material preservation
-- all relevant body/board combinations
+- Material role preservation
+- body/board combinations
 
 ### Stage 4 — Lifecycle / Full Regression / Practical Placement
 
 Verify:
 
-- 07-C lifecycle for every new field
-- 07-B default regression
+- every new field lifecycle
+- 07-B existing-file regression
 - 07-A BASIC regression
 - failure rollback
 - Save/full exit/reopen
@@ -881,198 +712,191 @@ Verify:
 - Finalize / Delete
 - Material Cases A/B/C
 - Wall / Finish isolation
-- manual Wall/Floor-like practical scene placement
+- practical Wall/Floor-like scene placement
 - final visual / numerical / topology acceptance
 - Build 07-C Acceptance Record
 
 ---
 
-## 28. Stage 1 automated acceptance requirements
-
-Minimum Blender-independent coverage:
-
-- new constants / default fields
-- schema 2 old record semantic defaults
-- schema 3 current record semantics
-- no load-time mutation design
-- `side_board_band_width_mm` remains storage authority
-- closed-body depth label/property mapping does not add duplicate persistent data
-- BASIC ignores 07-C fields
-- default current Residential remains `STEPPED_CLOSED`
-- default side board remains `STEPPED`
-- default overhang = 0
-- default edge = `SQUARE`
-- default 07-C prepare path reproduces accepted 07-B counts/roles
-- invalid 07-C values rejected before mutation
-- future 07-D/07-F identifiers are not globally prohibited by historical tests
-
----
-
-## 29. Stage 2 automated acceptance requirements
+## 23. Stage 1 automated acceptance requirements
 
 Minimum:
 
-- `C_sloped` exact endpoint contract
-- lower flat segment at `Z=B`
-- no vertex below B
+- new constants / fields
+- schema2 record semantic defaults
+- schema3 current semantics
+- no load-time mutation
+- `side_board_band_width_mm` remains storage authority
+- UI label mapping does not create duplicate persistent depth property
+- default stored body depth = 150 mm
+- BASIC ignores 07-C fields
+- existing 07-B semantic underside = STEPPED_CLOSED
+- existing 07-B semantic board = STEPPED
+- existing 07-B semantic overhang = 0
+- existing 07-B semantic edge = SQUARE
+- invalid values reject before mutation
+- default Stage1 prepare of an old 07-B Stair reproduces accepted 07-B geometry/material roles
+- historical tests do not globally prohibit future 07-D/07-F identifiers
+
+---
+
+## 24. Stage 2 automated acceptance requirements
+
+Minimum:
+
+- `C_sloped` endpoints
+- lower flat at `Z=B`
+- one straight main sloped segment
+- upper vertical closure on `X=L+r`
+- no body vertex below B
 - max body X = L+r
-- sloped segment is one straight line
-- positive sloped run required
 - simple valid closed profile
-- no intersection with contact/inner profile
+- no contact-profile intersection
 - full-width closure
-- Side Board OFF/OFF still closed
-- BOTH / LEFT / RIGHT / OFF configurations
+- BOTH / LEFT / RIGHT / OFF-OFF
 - STEPPED / SLOPED board modes
 - all underside/board combinations
-- FORWARD / REVERSE canonical semantics
-- oblique Path resolved axes
+- SLOPED board visible main edge is straight, not sawtooth
+- SLOPED board lower termination aligns with first-step lower rule
+- SLOPED board upper termination has vertical rear closure + short horizontal cap, no diagonal rear plate
+- FORWARD / REVERSE
+- oblique Path
 - nonzero base_z
-- depth changes move visible body/board envelope but not Path/Tread/Riser canonical dimensions
-- thickness does not locate visible soffit
+- depth edit moves visible envelope but not Path/Tread/Riser canonical dimensions
+- underside shell thickness does not locate visible soffit
 - 07-B STEPPED geometry unchanged
 
-Topology checks are required but do not replace visual CLOSED acceptance.
+Topology checks are required but do not replace visual acceptance。
 
 ---
 
-## 30. Stage 3 automated acceptance requirements
+## 25. Stage 3 automated acceptance requirements
 
 Minimum:
 
-- overhang n=0 exact 07-B Tread regression
+- legacy/existing overhang 0 exact 07-B Tread regression
+- new 07-C Stair final default overhang 5.0 mm
 - positive overhang shifts front only by `-n`
 - rear remains `jg+r`
-- Riser geometry unchanged
+- Riser unchanged
 - no extra upper Tread
 - `0 <= n < g`
 - board-enabled `n <= reveal`
 - SQUARE exact rectangular front
-- BEVEL exact four-point front section contract
+- BEVEL exact 45° front section
 - ROUND deterministic 4-segment quarter arcs
-- q range validation
-- generated Tread fragment is finite / closed / non-zero-area
-- new Tread detail faces keep `TREAD` role
-- Material slot plan unchanged for same Materials
+- q validation
+- Tread fragment finite / closed / positive area
+- detail faces retain `TREAD` role
+- same Materials -> same slot semantics
 - body closure independent of nosing
 
 ---
 
-## 31. Blender runtime visual gates
+## 26. Blender runtime visual gates
 
-### 31.1 SLOPED_CLOSED
+### SLOPED_CLOSED
 
-Inspect at minimum:
+Inspect:
 
 - side orthographic
 - oblique underside
-- lower termination
-- upper termination
-- BOTH boards
-- LEFT only
-- RIGHT only
-- OFF/OFF
-- FORWARD
-- REVERSE
+- lower horizontal first-step bottom
+- one straight sloped soffit
+- vertical upper closure
+- BOTH / LEFT / RIGHT / OFF-OFF
+- FORWARD / REVERSE
 - oblique Path
 - nonzero base_z
-- at least two closed-body depth values
-
-Required visual result:
-
-- continuous straight sloped soffit after the lower flat segment
-- no internal cavity
-- no exposed unintended Tread/Riser backside
-- no floor-to-stair solid mass
-- no geometry below base_z
-- no upper spike/giant triangle
-- no body/board gap revealing interior
-
-### 31.2 SLOPED Side Board
-
-Inspect:
-
-- stepped upper/reveal relation remains coherent
-- lower edge is continuous slope
-- vertical rear termination
-- no diagonal rear plate
-- LEFT/RIGHT semantic correctness under Reverse
-
-### 31.3 Nosing / edge finish
-
-Inspect:
-
-- SQUARE
-- overhang only
-- BEVEL
-- ROUND
-- close-up front edge
-- first / middle / highest independent Tread
-- with Side Boards ON and OFF
+- at least two stair-body thickness values
 
 Required:
 
-- no self-overlap
-- no z-fighting
-- no visible internal cavity behind nose
-- no accidental Riser displacement
-- consistent repeated profile on all independent Treads
+- reference-image-1/2 silhouette
+- no interior cavity
+- no unintended Tread/Riser backside
+- no floor-to-stair solid mass
+- no geometry below B
+- no spike/giant triangle
+
+### SLOPED Side Board
+
+Inspect:
+
+- reference-image-3 silhouette
+- straight sloped visible finish, not sawtooth upper outline
+- first-step-aligned lower termination
+- upper short horizontal cap + vertical rear closure
+- no diagonal rear plate
+- LEFT / RIGHT semantic correctness under Reverse
+
+### Nosing / edge
+
+Inspect:
+
+- 5.0 mm nosing scale on new final 07-C Stair
+- SQUARE
+- BEVEL
+- ROUND
+- first / middle / highest independent Tread
+- Side Boards ON / OFF
+- no z-fighting / self-overlap / cavity behind nose
+- Riser position unchanged
 
 ---
 
-## 32. Final numerical / topology gates
+## 27. Numerical / topology gates
 
-For every final accepted representative configuration:
+Representative accepted configurations must have:
 
-- all coordinates finite
+- finite coordinates
 - zero zero-area faces
-- closed fragments valid
-- assembled geometry has no unintended boundary / non-manifold edges for the accepted closed body configuration
+- valid closed fragments
+- no unintended boundary / non-manifold edges for closed body configuration
 - min Z >= B
-- body / Side Board max X <= L+r except intentional Tread front overhang which extends only downhill (`-X`)
+- body / Side Board max uphill X <= L+r
+- intentional nosing extends downhill only
 - managed state NORMAL
 
-Do not freeze one universal vertex/face count across all finish variants.
-
-Counts must be recorded per representative configuration at runtime rather than predicted in this specification.
+Do not freeze one universal vertex/face count across all variants。Record actual counts per representative runtime configuration。
 
 ---
 
-## 33. Practical placement smoke test
+## 28. Practical placement smoke test
 
-Build 07-C Acceptance must include one small residential-use visual scene.
+Build 07-C Acceptance includes one small residential-use visual scene using manually prepared Wall / Floor-like geometry。
 
-The scene may use manually prepared simple Wall / Floor-like geometry; Build 08 Floor system is not required.
+Inspect:
 
-At minimum place one 07-C Stair next to/within simple architectural context and inspect:
+- stair-body thickness
+- sloped underside usefulness
+- Side Board appearance
+- 5 mm nosing scale
+- upper/lower terminations
+- no unexpected dependency on Wall/Floor Object types
 
-- perceived stair-body thickness
-- sloped underside visual usefulness
-- Side Board choice
-- nosing scale
-- upper/lower termination in architectural context
-- no unexpected dependency on Wall / Floor Object types
-
-This test is visual/usability evidence only and does not create new automatic Wall/Floor attachment behavior.
+This is visual/usability evidence only; no automatic Wall/Floor attachment is added。
 
 ---
 
-## 34. Regression authority
-
-07-C must keep the following accepted behaviors:
+## 29. Regression authority
 
 ### 07-B Residential
 
-- default STEPPED_CLOSED body
-- corrected closed visual invariant
-- Residential Tread rear extension to `jg+r`
-- full-depth external boards
-- reveal/thickness semantics
-- accepted upper termination
+Preserve:
+
+- existing schema2 load behavior
+- STEPPED_CLOSED closed invariant
+- Tread rear extension `jg+r`
+- accepted 07-B STEPPED Side Board
+- reveal / thickness semantics
+- r7 upper termination
 - Materials
 - lifecycle / Repair / rollback
 
 ### 07-A BASIC
+
+Preserve:
 
 - 2-point Path
 - 2800 / 16 rise contract
@@ -1087,13 +911,13 @@ This test is visual/usability evidence only and does not create new automatic Wa
 
 ### Wall / Finish
 
-Stair edits must not mutate managed Wall / Finish canonical state or geometry.
+Stair edits must not mutate managed Wall / Finish canonical state or geometry。
 
 ---
 
-## 35. Acceptance evidence identity
+## 30. Acceptance evidence identity
 
-Every runtime Candidate must record:
+Every runtime Candidate records:
 
 - GitHub commit SHA
 - Git tree SHA
@@ -1103,24 +927,24 @@ Every runtime Candidate must record:
 - Blender version
 - add-on version / description
 
-If Codex local commit SHA differs from GitHub because of the known environment/manual-PR workflow, tree SHA and GitHub-visible content are used to establish content identity according to the project workflow.
+Known Codex/manual-PR workflow may produce different local and GitHub commit SHAs。When content identity is in question, compare Git tree SHA / GitHub-visible content according to `DEVELOPMENT_WORKFLOW.md`。
 
-Automated evidence and Blender runtime evidence remain separate.
+Automated evidence and Blender runtime evidence remain separate。
 
 ---
 
-## 36. Completion condition
+## 31. Completion condition
 
 Build 07-C is accepted only when:
 
-- Stages 1–4 are accepted,
-- 07-B default compatibility passes,
-- 07-A BASIC compatibility passes,
-- SLOPED_CLOSED visual CLOSED gates pass,
-- SLOPED Side Board gates pass,
-- nosing / BEVEL / ROUND gates pass,
-- lifecycle / rollback / persistence pass,
-- practical placement smoke test passes,
-- Acceptance Record is updated in a docs-only acceptance commit distinct from the runtime production revision.
+- Stages 1–4 accepted
+- existing 07-B compatibility passes
+- 07-A BASIC compatibility passes
+- SLOPED_CLOSED image-1/2 visual contract passes
+- SLOPED Side Board image-3 visual contract passes
+- 5 mm nosing / BEVEL / ROUND gates pass
+- lifecycle / rollback / persistence pass
+- practical placement smoke test passes
+- Acceptance Record is updated in a docs-only acceptance commit distinct from runtime production revision
 
-After 07-C Acceptance, Roadmap checkpoint is executed before starting 07-D, as already planned.
+After 07-C Acceptance, execute the Roadmap checkpoint before 07-D。
