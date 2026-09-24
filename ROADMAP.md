@@ -1,6 +1,6 @@
 # Japanese House Modeler — Development Roadmap
 
-最終更新: 2026-09-20
+最終更新: 2026-09-24
 
 この文書は、Blender 5.2 LTS 向け **Japanese House Modeler / 日本住宅モデラー** の今後の開発順序と、各Buildをまたいで維持する設計方針をまとめたロードマップである。
 
@@ -55,13 +55,15 @@
 - **Build 06-C overall — ACCEPTED**
 - **Build 07-A — ACCEPTED**
 - **Build 07-A overall — ACCEPTED**
-- **Build 07-B — NEXT**
-- Add-on version: **0.7.0**
-- Build 07-A final identification: `Build 07-A: Stair Core + Top-view 2-point Straight Stair`
+- **Build 07-B — ACCEPTED**
+- **Build 07-B overall — ACCEPTED**
+- **Build 07-C — NEXT**
+- Current accepted add-on version: **0.7.1**
+- Build 07-B final identification: `Build 07-B: Standard Residential Straight Stair`
 
-現時点で、Wall System、Finish Attachment Foundation、Baseboard、Crown Moulding、およびstandalone Managed Stair Coreまでの基盤が成立している。
+現時点で、Wall System、Finish Attachment Foundation、Baseboard、Crown Moulding、standalone Managed Stair Core、およびStandard Residential Straight Stairまでの基盤が成立している。
 
-次の主要開発は **Build 07-B — Standard Residential Straight Stair + Stepped Closed Underside + Side Boards** とする。
+次の主要開発は **Build 07-C — Sloped Closed Underside + Straight Stair Finish Variants** とする。
 
 Build 07では、07-A〜07-Fを階段システムの主要本線として段階的に開発する。
 ただし開発順は固定ではなく、**07-Cおよび07-E完了時点で実用性・残作業・他機能との優先順位を再評価し、必要に応じて08/09との順序を見直せる**。
@@ -80,8 +82,8 @@ Build 07では、07-A〜07-Fを階段システムの主要本線として段階�
 | **06-B** | Baseboard / 巾木 | **DONE / ACCEPTED** |
 | **06-C** | Crown Moulding / 廻り縁 + Profile Thumbnail UI | **DONE / ACCEPTED** |
 | **07-A** | Stair Core + Top-view 2-point Straight Stair | **DONE / ACCEPTED** |
-| **07-B** | Standard Residential Straight Stair + Stepped Closed Underside + Side Boards | **NEXT / PLANNED** |
-| **07-C** | Sloped Closed Underside + Straight Stair Finish Variants | Planned |
+| **07-B** | Standard Residential Straight Stair + Stepped Closed Underside + Side Boards | **DONE / ACCEPTED** |
+| **07-C** | Sloped Closed Underside + Straight Stair Finish Variants | **NEXT / PLANNED** |
 | **07-D** | Multi-point Path + L/U + Landing | Planned |
 | **07-E** | Winder / 廻り段 | Planned |
 | **07-F** | Open / Support Variants | Planned |
@@ -884,7 +886,9 @@ Undo/Redo + Save/Reopen + Editable Mesh + regression
 
 ## 12.9 Build 07-B — Standard Residential Straight Stair
 
-07-AのStair Core上に、最初の実用的な住宅直階段を完成させる。
+**Status: ACCEPTED**
+
+07-AのStair Core上に、最初の実用的な住宅直階段を完成させた。Stage 1〜4およびBuild全体はBlender 5.2 LTS runtime acceptance済み。詳細は `BUILD_07_B_ACCEPTANCE_RECORD.md` を正とする。
 
 主要機能：
 
@@ -949,21 +953,24 @@ Open / support / ささら・力桁系の露出構成は 07-F の別系統とす
 
 ## 12.10 Build 07-C — Sloped Closed Underside + Straight Stair Finish Variants
 
+**Status: NEXT / SPECIFICATION FINAL**
+
+実装authorityは `BUILD_07_C_SPECIFICATION.md` とする。
+
 主要機能：
 
 - `STEPPED_CLOSED`
 - `SLOPED_CLOSED`
-- underside thickness / placement
-- start / end termination
-- side-boardとの境界整合
-- tread front overhang
+- user-facing stair-body thickness / closed-body depth
+- `STEPPED` / `SLOPED` Side Board
+- tread front overhang / nosing
 - basic front-edge Bevel / Round
 - Material preservation
 - Mesh conversion regression
 
 ### Sloped Side Board variant
 
-Straight Stair Finish Variants include a future `SLOPED` Side Board option, kept separate from the 07-B analytical `STEPPED` Side Board.
+07-Cの `SLOPED` Side Boardは、07-Bのanalytical `STEPPED` Side Boardとは別variantとして実装する。human-confirmed visual targetは、直線勾配のvisible finish、first-step aligned lower termination、upper short horizontal cap + vertical rear closureとする。
 
 ### Sloped closed underside
 
@@ -1375,20 +1382,26 @@ Roadmap変更は許可するが、Accepted historyは消さない。
 06-B  ACCEPTED
 06-C  ACCEPTED
 07-A  ACCEPTED
+07-B  ACCEPTED
 ```
 
 次：
 
 ```text
-07-B Standard Residential Straight Stair
-     + Stepped Closed Underside
-     + Side Boards
+07-C Sloped Closed Underside
+     + Straight Stair Finish Variants
 ```
 
 状態遷移：
 
 ```text
-07-A ACCEPTED → 07-B NEXT
+07-B ACCEPTED → 07-C NEXT
+```
+
+07-C implementation authority:
+
+```text
+BUILD_07_C_SPECIFICATION.md
 ```
 
 ---
