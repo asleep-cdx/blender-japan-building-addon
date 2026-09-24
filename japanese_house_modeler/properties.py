@@ -67,7 +67,8 @@ class JHM_StairProperties(bpy.types.PropertyGroup):
     tread_thickness_mm: bpy.props.FloatProperty(name="踏板厚", default=30.0, min=0.1)
     riser_thickness_mm: bpy.props.FloatProperty(name="蹴込み板厚", default=12.0, min=0.1)
     underside_mode: bpy.props.EnumProperty(
-        items=(("STEPPED_CLOSED", "Stepped Closed", "段々閉じ下面"),),
+        items=(("STEPPED_CLOSED", "Stepped Closed", "段々閉じ下面"),
+               ("SLOPED_CLOSED", "Sloped Closed", "傾斜閉じ下面（将来対応）")),
         default="STEPPED_CLOSED", options={"HIDDEN"})
     underside_thickness_mm: bpy.props.FloatProperty(default=9.5, options={"HIDDEN"})
     left_side_board_enabled: bpy.props.BoolProperty(default=True, options={"HIDDEN"})
@@ -75,6 +76,16 @@ class JHM_StairProperties(bpy.types.PropertyGroup):
     side_board_thickness_mm: bpy.props.FloatProperty(default=18.0, options={"HIDDEN"})
     side_board_band_width_mm: bpy.props.FloatProperty(default=150.0, options={"HIDDEN"})
     side_board_reveal_mm: bpy.props.FloatProperty(default=40.0, options={"HIDDEN"})
+    side_board_mode: bpy.props.EnumProperty(
+        items=(("STEPPED", "Stepped", "段型側板"),
+               ("SLOPED", "Sloped", "傾斜側板（将来対応）")),
+        default="STEPPED", options={"HIDDEN"})
+    tread_front_overhang_mm: bpy.props.FloatProperty(default=0.0, options={"HIDDEN"})
+    tread_front_edge_mode: bpy.props.EnumProperty(
+        items=(("SQUARE", "Square", "角形"), ("BEVEL", "Bevel", "面取り"),
+               ("ROUND", "Round", "丸形")),
+        default="SQUARE", options={"HIDDEN"})
+    tread_front_edge_size_mm: bpy.props.FloatProperty(default=5.0, options={"HIDDEN"})
     base_material: bpy.props.PointerProperty(type=bpy.types.Material, options={"HIDDEN"})
     tread_material: bpy.props.PointerProperty(type=bpy.types.Material, options={"HIDDEN"})
     riser_material: bpy.props.PointerProperty(type=bpy.types.Material, options={"HIDDEN"})

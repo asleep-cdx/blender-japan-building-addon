@@ -365,7 +365,7 @@ class JHM_OT_create_stair(bpy.types.Operator):
             for name, value in self._stair_defaults.items():
                 setattr(stair, name, value)
             stair.assembly_mode = STANDARD_RESIDENTIAL
-            stair.stair_schema_version = 2
+            stair.stair_schema_version = 3
             for selected in context.selected_objects:
                 selected.select_set(False)
             stair_object.select_set(True)
@@ -589,7 +589,7 @@ class JHM_OT_apply_residential_stair(_StairOperationMixin, bpy.types.Operator):
             return {"CANCELLED"}
         candidate = _canonical_snapshot(obj.jhm_stair)
         candidate["assembly_mode"] = STANDARD_RESIDENTIAL
-        candidate["stair_schema_version"] = max(2, candidate["stair_schema_version"])
+        candidate["stair_schema_version"] = max(3, candidate["stair_schema_version"])
         candidate["residential"] = ResidentialFields(base_material=base_material)
         return self._run_candidate(context, candidate)
 
@@ -604,6 +604,7 @@ class JHM_OT_edit_residential_stair(_StairOperationMixin, bpy.types.Operator):
     right_side_board_enabled: bpy.props.BoolProperty(name="右Side Board")
     side_board_thickness_mm: bpy.props.FloatProperty(name="Side Board厚 (mm)")
     side_board_reveal_mm: bpy.props.FloatProperty(name="側板突出量 (mm)")
+    side_board_band_width_mm: bpy.props.FloatProperty(name="階段本体厚み (mm)")
 
     def invoke(self, context, _event):
         obj = self._require_mode(context, STANDARD_RESIDENTIAL)
@@ -611,7 +612,7 @@ class JHM_OT_edit_residential_stair(_StairOperationMixin, bpy.types.Operator):
         values = residential_fields(obj.jhm_stair)
         for name in ("underside_thickness_mm", "left_side_board_enabled",
                      "right_side_board_enabled", "side_board_thickness_mm",
-                     "side_board_reveal_mm"):
+                     "side_board_reveal_mm", "side_board_band_width_mm"):
             setattr(self, name, getattr(values, name))
         return context.window_manager.invoke_props_dialog(self)
 
@@ -622,9 +623,10 @@ class JHM_OT_edit_residential_stair(_StairOperationMixin, bpy.types.Operator):
         values = vars(candidate["residential"]).copy()
         for name in ("underside_thickness_mm", "left_side_board_enabled",
                      "right_side_board_enabled", "side_board_thickness_mm",
-                     "side_board_reveal_mm"):
+                     "side_board_reveal_mm", "side_board_band_width_mm"):
             values[name] = getattr(self, name)
         candidate["residential"] = ResidentialFields(**values)
+        candidate["stair_schema_version"] = max(3, candidate["stair_schema_version"])
         return self._run_candidate(context, candidate)
 
 
