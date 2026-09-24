@@ -1,4 +1,4 @@
-"""Pure Build 07-B Stage 1 residential data and transaction foundation."""
+"""Pure residential Stair data and transaction foundation."""
 
 from dataclasses import dataclass, replace
 import math
@@ -7,6 +7,18 @@ import math
 BASIC_TREAD_RISER = "BASIC_TREAD_RISER"
 STANDARD_RESIDENTIAL = "STANDARD_RESIDENTIAL"
 STEPPED_CLOSED = "STEPPED_CLOSED"
+SLOPED_CLOSED = "SLOPED_CLOSED"
+STEPPED = "STEPPED"
+SLOPED = "SLOPED"
+SQUARE = "SQUARE"
+BEVEL = "BEVEL"
+ROUND = "ROUND"
+UNDERSIDE_MODES = frozenset({STEPPED_CLOSED, SLOPED_CLOSED})
+SIDE_BOARD_MODES = frozenset({STEPPED, SLOPED})
+TREAD_FRONT_EDGE_MODES = frozenset({SQUARE, BEVEL, ROUND})
+# Add fields here only when their production behavior becomes available.  This
+# keeps an ordinary edit of legacy 07-B settings from becoming a migration.
+STAGE1_SCHEMA_3_EDIT_FIELDS = ("side_board_band_width_mm",)
 ASSEMBLY_MODES = frozenset({BASIC_TREAD_RISER, STANDARD_RESIDENTIAL})
 MATERIAL_ROLES = ("TREAD", "RISER", "UNDERSIDE", "SIDE_BOARD")
 UNASSIGNED = None
@@ -32,6 +44,10 @@ class ResidentialFields:
     side_board_thickness_mm: float = 18.0
     side_board_band_width_mm: float = 150.0
     side_board_reveal_mm: float = 40.0
+    side_board_mode: str = STEPPED
+    tread_front_overhang_mm: float = 0.0
+    tread_front_edge_mode: str = SQUARE
+    tread_front_edge_size_mm: float = 5.0
     base_material: object = None
     tread_material: object = None
     riser_material: object = None
@@ -59,6 +75,21 @@ def residential_fields(record=None):
     })
 
 
+def schema_version_after_residential_edit(schema_version, before, after):
+    """Return the schema committed by a Residential settings edit.
+
+    Stage 1 migrates a legacy record only when the user actually changes its
+    newly exposed stair-body depth.  Later stages can extend the field tuple as
+    their geometry becomes producible, without broadening legacy 07-B edits.
+    """
+    old = before if isinstance(before, ResidentialFields) else residential_fields(before)
+    new = after if isinstance(after, ResidentialFields) else residential_fields(after)
+    if any(getattr(old, name) != getattr(new, name)
+           for name in STAGE1_SCHEMA_3_EDIT_FIELDS):
+        return max(3, schema_version)
+    return schema_version
+
+
 def validate_mode_data(assembly_mode, schema_version, fields=None):
     """Validate only data active for the assembly mode."""
     if assembly_mode not in ASSEMBLY_MODES:
@@ -72,13 +103,20 @@ def validate_mode_data(assembly_mode, schema_version, fields=None):
               else residential_fields(fields))
     if isinstance(values.underside_thickness_mm, bool):
         raise ValueError("下面厚は正の有限値である必要があります。")
-    if values.underside_mode != STEPPED_CLOSED:
-        raise ValueError("未対応の下面modeです。")
+    if values.underside_mode not in UNDERSIDE_MODES:
+        raise ValueError("不明な下面modeです。")
+    if values.side_board_mode not in SIDE_BOARD_MODES:
+        raise ValueError("不明なSide Board modeです。")
+    if values.tread_front_edge_mode not in TREAD_FRONT_EDGE_MODES:
+        raise ValueError("不明な踏板前端modeです。")
+    # Stage 1 persists future identifiers, but cannot produce their geometry.
+    if values.underside_mode != STEPPED_CLOSED or values.side_board_mode != STEPPED:
+        raise ValueError("SLOPED形状はBuild 07-C Stage 1では生成できません。")
     if not isinstance(values.left_side_board_enabled, bool) \
             or not isinstance(values.right_side_board_enabled, bool):
         raise ValueError("Side Board enabled値はboolである必要があります。")
     for name in ("underside_thickness_mm", "side_board_thickness_mm",
-                 "side_board_band_width_mm"):
+                 "side_board_band_width_mm", "tread_front_edge_size_mm"):
         value = getattr(values, name)
         if isinstance(value, bool):
             raise ValueError(f"{name}は正の有限値である必要があります。")
@@ -88,6 +126,14 @@ def validate_mode_data(assembly_mode, schema_version, fields=None):
             raise ValueError(f"{name}は正の有限値である必要があります。") from exc
         if not math.isfinite(value) or value <= 0.0:
             raise ValueError(f"{name}は正の有限値である必要があります。")
+    try:
+        overhang = float(values.tread_front_overhang_mm)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("踏板前端出は0以上の有限値である必要があります。") from exc
+    if not math.isfinite(overhang) or overhang < 0.0:
+        raise ValueError("踏板前端出は0以上の有限値である必要があります。")
+    if overhang != 0.0 or values.tread_front_edge_mode != SQUARE:
+        raise ValueError("踏板前端形状はBuild 07-C Stage 1では生成できません。")
     return True
 
 
@@ -148,7 +194,7 @@ def residential_candidate(record):
     """Return an immutable candidate; never mutate or commit Scene state."""
     candidate = StairTransitionSnapshot.capture(record)
     candidate = replace(candidate, assembly_mode=STANDARD_RESIDENTIAL,
-                        stair_schema_version=max(candidate.stair_schema_version, 2))
+                        stair_schema_version=max(candidate.stair_schema_version, 3))
     validate_mode_data(candidate.assembly_mode, candidate.stair_schema_version,
                        candidate.residential)
     return candidate

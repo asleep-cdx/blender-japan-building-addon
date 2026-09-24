@@ -102,11 +102,11 @@ class CompatibilityAndDataTests(unittest.TestCase):
                      "transform", "base_material", "side_board_material"):
             self.assertIn(name, snapshot.restore_values())
 
-    def test_schema_1_basic_candidate_uses_residential_schema_2(self):
-        self.assert_candidate_schema(1, 2)
+    def test_schema_1_basic_candidate_uses_current_residential_schema(self):
+        self.assert_candidate_schema(1, 3)
 
-    def test_schema_2_basic_candidate_remains_schema_2(self):
-        self.assert_candidate_schema(2, 2)
+    def test_schema_2_basic_candidate_uses_current_residential_schema(self):
+        self.assert_candidate_schema(2, 3)
 
     def test_schema_3_basic_candidate_is_not_downgraded(self):
         self.assert_candidate_schema(3, 3)
