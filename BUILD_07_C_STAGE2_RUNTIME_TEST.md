@@ -53,15 +53,19 @@ ascent direction) and record `max uphill X`; expect `<= L+r`. Record `min Z >= B
    visually CLOSED and NORMAL in every state.
 4. **STEPPED_CLOSED + SLOPED board.** Confirm a straight (not sawtooth) visible
    upper edge beginning above the traditional vertical front closure, a stepped
-   bottom edge, first-step lower end, horizontal bottom cap, short top cap,
-   vertical rear closure, and no notch, giant triangle, or diagonal rear plate.
+   bottom edge, and first-step lower end. At the upper termination, the main
+   slope must end visibly above `H`, the short horizontal cap must remain above
+   `H`, and an explicit vertical rear closure must drop to `H`. Confirm there is
+   no notch, giant triangle, spike, or diagonal rear plate.
 5. **SLOPED_CLOSED + STEPPED board.** Confirm the board upper edge retains the
    accepted stepped silhouette while its entire lower edge follows the corrected
    sloped body underside. Confirm there is no stepped lower edge or interior gap.
 6. **SLOPED_CLOSED + SLOPED board.** Confirm both new silhouettes, role
    separation, clean ends, and NORMAL diagnosis. Its upper edge is one clean
    slope after the front vertical closure, while its lower edge follows the same
-   corrected sloped family as the body. Tests 1/4/5/6 cover all four combinations
+   corrected sloped family as the body. Confirm the same visible rise above the
+   top landing, horizontal cap above `H`, and vertical rear drop to `H` as Test 4.
+   Tests 1/4/5/6 cover all four combinations
    as top/bottom pairs: stepped/stepped, sloped/stepped, stepped/sloped, and
    sloped/sloped.
 7. **FORWARD / REVERSE.** Use the UI Reverse operator and mandatory Undo/Redo.

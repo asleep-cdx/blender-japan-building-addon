@@ -85,19 +85,29 @@ class SlopedBoardTests(unittest.TestCase):
     def fields(self, **kw): return replace(ResidentialFields(side_board_mode=SLOPED),**kw)
     def test_main_edge_straight_and_not_sawtooth(self):
         l=layout(); p=sloped_side_board_profile(l,self.fields())
-        self.assertEqual(len(p.outer),4)
+        self.assertEqual(len(p.outer),5)
         self.assertEqual(p.outer[0][0],p.outer[1][0])
         self.assertEqual(p.outer[1][1],l.base_z+l.actual_riser+.04)
-        self.assertNotEqual(p.outer[1][1],p.outer[2][1])
+        slope=(p.outer[2][1]-p.outer[1][1])/(p.outer[2][0]-p.outer[1][0])
+        self.assertAlmostEqual(slope,l.actual_riser/l.going)
     def test_lower_end_and_upper_caps(self):
         l=layout(); p=sloped_side_board_profile(l,self.fields())
         self.assertEqual(p.outer[0][1],l.base_z); self.assertEqual(p.lower[0][1],l.base_z)
-        self.assertEqual(p.outer[-2][1],p.outer[-1][1]); self.assertEqual(p.outer[-1][0],l.run_length+l.riser_thickness)
-        self.assertEqual(p.lower[-1][0],p.outer[-1][0])
+        slope_end,cap_end,rear_end=p.outer[-3:]
+        self.assertGreater(slope_end[1],l.upper_arrival_z)
+        self.assertGreater(cap_end[1],l.upper_arrival_z)
+        self.assertEqual(slope_end[1],cap_end[1])
+        self.assertEqual(cap_end[0],rear_end[0])
+        self.assertEqual(rear_end,(l.run_length+l.riser_thickness,
+                                   l.upper_arrival_z))
+        self.assertEqual(p.lower[-1][0],rear_end[0])
     def test_no_diagonal_rear_or_overshoot(self):
         l=layout(); p=sloped_side_board_profile(l,self.fields()); rear=l.run_length+l.riser_thickness
         self.assertEqual(max(x for x,z in p.polygon),rear)
-        rear_points=[q for q in p.polygon if q[0]==rear]; self.assertEqual(len(rear_points),2)
+        rear_points=[q for q in p.polygon if q[0]==rear]
+        self.assertEqual(len(rear_points),3)
+        self.assertIn((rear,l.upper_arrival_z+.04),rear_points)
+        self.assertIn((rear,l.upper_arrival_z),rear_points)
     def test_external_left_right_extrusion(self):
         l=layout(); left=build_side_board_fragment(l,'LEFT',self.fields()); right=build_side_board_fragment(l,'RIGHT',self.fields())
         self.assertAlmostEqual(min(local_y(l,v) for v in left.vertices),l.width/2); self.assertAlmostEqual(max(local_y(l,v) for v in left.vertices),l.width/2+.018)

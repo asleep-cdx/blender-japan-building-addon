@@ -241,9 +241,11 @@ def sloped_side_board_profile(layout, fields=ResidentialFields()):
     # reveal-offset first tread corner.  Only then begin the one straight
     # visible run.  Candidate r1 incorrectly ran from B directly to H, making
     # the board a large triangular plate rather than the confirmed silhouette.
+    elevated_top = layout.upper_arrival_z + reveal
     upper = ((-reveal, layout.base_z),
              (-reveal, layout.base_z + layout.actual_riser + reveal),
-             (layout.run_length - reveal, layout.upper_arrival_z),
+             (layout.run_length - reveal, elevated_top),
+             (rear, elevated_top),
              (rear, layout.upper_arrival_z))
     lower = side_board_lower_profile(layout, fields)
     polygon = validate_simple_polygon(upper + tuple(reversed(lower)))

@@ -520,6 +520,9 @@ SLOPED Side Boardのtargetは、2026-09-24に人間確認した参照画像3を�
 - lower endは必要なvertical/front closure + horizontal bottom capで閉じ、最下段周辺にmicro-notchを作らない。
 - upper terminationは参照画像3の形を再現し、`X=L+r`を越えない。
 - upper sideではstraight sloped runを終えた後、**vertical rear closure と短いhorizontal top cap**で閉じる。
+- **2026-09-24 Blender runtime visual correction:** main slopeの終点は
+  top landing `H`より上に位置し、短いhorizontal top capも`H`より上に保つ。
+  rear plane `X=L+r`上に明示的なvertical closureを設け、capから`H`まで下ろす。
 - r6型のspike / giant triangle / diagonal rear plateを作らない。
 - LEFT / RIGHT semanticsはuphill-relative。
 - Side Board inner faceとbodyの間からinterior cavityを見せない。
