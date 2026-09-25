@@ -7,11 +7,15 @@ Date: 2026-09-25
 
 - Build 07-C Stage 1 — **ACCEPTED**
 - Build 07-C Stage 2 — **ACCEPTED**
+- Build 07-C Stage 3 — **ACCEPTED**
 - Build 07-C overall — **IN PROGRESS**
-- Next implementation stage — **Stage 3: 5 mm nosing + SQUARE / BEVEL / ROUND**
+- Next implementation stage — **Stage 4: lifecycle / full regression / practical placement acceptance**
 
-Stage 1 acceptance covers foundation / compatibility / schema 3 plumbing and the user-facing stair-body thickness control.
-Stage 2 acceptance adds production acceptance of `SLOPED_CLOSED` body geometry and `SLOPED` Side Board geometry. It does **not** accept Stage 3 finish geometry or final 07-C practical-placement / lifecycle scope.
+Stage 1 accepted schema / compatibility / transaction foundations and user-facing stair-body thickness control.
+Stage 2 accepted `SLOPED_CLOSED` body geometry and `SLOPED` Side Board geometry.
+Stage 3 accepts production nosing behavior, the top-arrival nosing correction, SQUARE / BEVEL / ROUND tread-front geometry, positive-nosing STEPPED Side Board upper termination, and the associated legacy / Material / placement regression gates.
+
+Stage 3 acceptance does **not** mark Build 07-C overall complete. Stage 4 practical-placement and lifecycle acceptance remains outstanding.
 
 ## 2. Runtime-tested production revisions
 
@@ -19,14 +23,10 @@ Stage 2 acceptance adds production acceptance of `SLOPED_CLOSED` body geometry a
 
 GitHub PR: #22
 
-Runtime-tested exact production revision:
-
 ```text
 commit 6482062def1fdca769c179dacb93f727dd4f8237
 tree   a681502fa8c107c77e10a0a4323c3c8e053740af
 ```
-
-Codex local report used a different commit SHA after its workspace operation, but reported the same tree SHA. Content identity was therefore established by tree equality.
 
 Runtime Candidate:
 
@@ -39,8 +39,6 @@ SHA256  218a6af7b690c8a501f499e463a135b441fe3a47159d4ca0080588ad99ed3829
 ### Stage 2
 
 GitHub PR: #23
-
-Runtime-tested exact production revision:
 
 ```text
 commit 63b498a3391ced44a8e6e88468ce4aea3f0425ae
@@ -55,13 +53,34 @@ SIZE    117682 bytes
 SHA256  ad25b539dbcc9878c7e3b5eebe3052bdd0f88acc1d6022fc73a9bd4015345e9b
 ```
 
-Runtime environment for accepted Stage 1 / Stage 2 evidence:
+### Stage 3
+
+GitHub PR: #24
+
+Runtime-tested exact production revision:
+
+```text
+commit 82e00898ef28068c676693d2f8f8b36d26265d5a
+tree   8ffa50464797cfb2398335a2b8b7a62225205416
+```
+
+Runtime Candidate:
+
+```text
+Japanese_House_Modeler_Build_07_C_Stage3_Candidate_r2.zip
+SIZE    119151 bytes
+SHA256  3796163958cd72e39566b8fe96fefbf7ad69d75687426b1ae23ead5093518822
+```
+
+Runtime environment:
 
 ```text
 Blender 5.2.0 LTS
 Add-on version: (0, 7, 2)
 Description: Build 07-C: Sloped Closed Underside + Straight Stair Finish Variants
 ```
+
+Documentation-only commits after runtime review do not supersede the exact production revisions listed above.
 
 ## 3. Automated evidence
 
@@ -84,9 +103,7 @@ compileall                               PASS
 git diff --check                         PASS
 ```
 
-`stair_residential_geometry.py` was not changed in Stage 1. No SLOPED_CLOSED, SLOPED Side Board, nosing, BEVEL, or ROUND production geometry was introduced.
-
-### Stage 2 final candidate
+### Stage 2 accepted tree
 
 ```text
 tests.test_build_07_c_stage2              24 PASS
@@ -95,262 +112,79 @@ compileall                               PASS
 git diff --check                         PASS
 ```
 
-## 4. Stage 1 resolved pre-acceptance review issue
+### Stage 3 accepted production tree
 
-Initial Stage 1 implementation bumped an existing schema-2 Residential Stair to schema 3 whenever the Residential settings dialog committed, including edits to legacy 07-B fields.
+```text
+tests.test_build_07_c_stage3              27 PASS
+requested targeted suites                253 PASS
+full unittest discovery                  616 PASS
+compileall                               PASS
+git diff --check                         PASS
+git status --short                       clean
+```
 
-This was corrected before runtime acceptance.
+## 4. Stage 1 accepted contracts
 
-Accepted policy:
+Stage 1 accepts:
+
+- add-on identity `(0, 7, 2)` / Build 07-C description
+- current Residential schema 3 for explicit 07-C creation/state
+- strict load compatibility for existing schema-2 07-B Stair
+- `side_board_band_width_mm` retained as persistent storage authority
+- user-facing `階段本体厚み (mm)` editing
+- persistence foundation for `side_board_mode`, `tread_front_overhang_mm`, `tread_front_edge_mode`, and `tread_front_edge_size_mm`
+- BASIC schema-1 isolation
+- Material / lifecycle / Wall / Finish isolation
+
+Accepted schema policy:
 
 - schema 2 + legacy 07-B Residential field edit -> remain schema 2
 - schema 2 + dialog no-op -> remain schema 2
-- schema 2 + `side_board_band_width_mm` / user-facing stair-body thickness change -> schema 3
+- schema 2 + explicit 07-C production field edit -> schema 3
 - existing schema 3 -> remain schema 3
 - new 07-C Residential Stair -> schema 3
 - explicit BASIC -> Residential Apply -> schema 3
 
-The accepted implementation uses `schema_version_after_residential_edit()` and limits the Stage 1 migration trigger to `side_board_band_width_mm`.
+## 5. Stage 1 runtime summary
 
-## 5. Stage 1 Blender runtime evidence
+All required Blender 5.2 LTS gates passed, including:
 
-All Stage 1 runtime gates passed in Blender 5.2 LTS.
+- new Residential creation
+- existing schema-2 load / Regenerate compatibility
+- schema migration only on explicit 07-C field changes
+- stair-body thickness `150 -> 120 mm`
+- invalid body-depth atomic rejection
+- save / full exit / reopen
+- BASIC compatibility
+- BASIC -> Residential Apply with Undo / Redo
+- Material preservation
+- Transform Repair with Undo / Redo
+- Wall / Finish isolation
 
-### Test 0 — Candidate identity — PASS
-
-Confirmed:
-
-```text
-Blender 5.2.0 LTS
-version (0, 7, 2)
-description Build 07-C: Sloped Closed Underside + Straight Stair Finish Variants
-```
-
-### Test 1 — New Stage 1 Residential Stair — PASS
-
-Confirmed:
+Representative accepted default / legacy counts:
 
 ```text
-MODE=STANDARD_RESIDENTIAL
-SCHEMA=3
-UNDERSIDE=STEPPED_CLOSED
-BOARD_MODE=STEPPED
-BODY_DEPTH=150.0
-OVERHANG=0.0
-EDGE=SQUARE
-EDGE_SIZE=5.0
-BOARDS=(True, True)
-VERTS=620
-FACES=732
+Residential 620 vertices / 732 faces
+BASIC       248 vertices / 186 faces
 ISSUES=()
-```
-
-Visual geometry remained the accepted 07-B default: stepped closed body, stepped Side Boards, no nosing, no BEVEL/ROUND geometry.
-
-### Test 2 — Existing 07-B schema-2 load compatibility — PASS
-
-Opening a saved 07-B Residential Stair preserved:
-
-```text
-SCHEMA=2
-UNDERSIDE=STEPPED_CLOSED
-BOARD_MODE=STEPPED
-BODY_DEPTH=150.0
-OVERHANG=0.0
-EDGE=SQUARE
-EDGE_SIZE=5.0
-VERTS=620
-FACES=732
-ISSUES=()
-```
-
-No silent nosing, board-shape, body-shape, Path, ID, or Material migration was observed.
-
-### Test 3 — schema-2 ordinary Regenerate — PASS
-
-Regenerate preserved schema 2, Path, Stair ID, board state, accepted 620/732 geometry, and `ISSUES=()`.
-
-### Test 4 — schema migration / stair-body thickness — PASS
-
-Sub-gates:
-
-1. legacy Side Board thickness edit on schema 2 -> schema 2 preserved
-2. body depth `150 -> 120 mm` -> schema 3
-3. no-op dialog commit -> schema 2 preserved
-4. Undo/Redo for the body-depth edit passed
-5. visual stepped body became thinner at 120 mm without geometry breakage
-
-Accepted body-depth edit result included:
-
-```text
-SCHEMA=3
-BODY_DEPTH=120.0
-VERTS=620
-FACES=732
-ISSUES=()
-```
-
-### Test 5 — Invalid body depth atomic rejection — PASS
-
-Submitting 175 mm where actual riser was 175 mm produced the expected validation warning.
-
-Post-rejection evidence:
-
-```text
-SAME_MESH=True
-SAME_STATE=True
-SCHEMA=2
-BODY_DEPTH=150.0
-VERTS=620
-FACES=732
-ISSUES=()
-```
-
-### Test 6 — Save / full exit / reopen — PASS
-
-After changing body depth to 120 mm, saving, fully exiting Blender, and reopening:
-
-```text
-SCHEMA=3
-BODY_DEPTH=120.0
-LOC=(0,0,0)
-ROT=(0,0,0)
-SCALE=(1,1,1)
-VERTS=620
-FACES=732
-ISSUES=()
-```
-
-Stair ID and canonical state were preserved.
-
-### Test 7 — BASIC compatibility — PASS
-
-Baseline confirmed:
-
-```text
-MODE=BASIC_TREAD_RISER
-SCHEMA=1
-VERTS=248
-FACES=186
-ISSUES=()
-```
-
-Supplemental final BASIC gate exercised Dimension, Path, Reverse, Regenerate, Transform Repair, save, full exit, and reopen. Final evidence remained:
-
-```text
-MODE=BASIC_TREAD_RISER
-SCHEMA=1
-LOC=(0,0,0)
-ROT=(0,0,0)
-SCALE=(1,1,1)
-VERTS=248
-FACES=186
-ISSUES=()
-```
-
-### Test 8 — BASIC -> Residential Apply / Undo / Redo — PASS
-
-Redo result:
-
-```text
-MODE=STANDARD_RESIDENTIAL
-SCHEMA=3
-UNDERSIDE=STEPPED_CLOSED
-BOARD_MODE=STEPPED
-BODY_DEPTH=150.0
-OVERHANG=0.0
-EDGE=SQUARE
-EDGE_SIZE=5.0
-VERTS=620
-FACES=732
-ISSUES=()
-```
-
-Supplemental exact Undo gate captured a BASIC snapshot before Apply and confirmed:
-
-```text
-UNDO_EXACT_BASIC=True
-MODE=BASIC_TREAD_RISER
-SCHEMA=1
-VERTS=248
-FACES=186
-```
-
-### Test 9 — Material preservation — PASS
-
-Material Case A style state:
-
-```text
-PTRS=('Wood', None, 'White', None, None)
-SLOTS=['Wood', 'White']
-```
-
-After body-depth `150 -> 120 mm` and Regenerate:
-
-```text
-SCHEMA=3
-BODY_DEPTH=120.0
-PTRS=('Wood', None, 'White', None, None)
-SLOTS=['Wood', 'White']
-COUNTS={0:636, 1:96}
-VERTS=620
-FACES=732
-ISSUES=()
-```
-
-### Test 10 — Transform Repair + Undo/Redo — PASS
-
-After intentional transform corruption, Repair, Undo, and Redo:
-
-```text
-SCHEMA=3
-BODY_DEPTH=120.0
-LOC=(0,0,0)
-ROT=(0,0,0)
-SCALE=(1,1,1)
-PTRS=('Wood', None, 'White', None, None)
-SLOTS=['Wood', 'White']
-VERTS=620
-FACES=732
-ISSUES=()
-```
-
-### Test 11 — Wall / Finish isolation — PASS
-
-Scene contained 3 Walls and 2 Finishes. After Stair creation, body-depth edit, Regenerate, transform corruption, and Repair:
-
-```text
-WALL_UNCHANGED=True
-FINISH_UNCHANGED=True
-WALLS=3
-FINISHES=2
 ```
 
 ## 6. Stage 2 correction history
 
-Stage 2 required two Blender runtime corrections before acceptance.
-
 ### Candidate r1 — rejected
 
-Blender runtime review found:
+Runtime review found:
 
-- `SLOPED_CLOSED` visible soffit became too steep toward the upper end.
-- `SLOPED` Side Board silhouette did not match the human-confirmed target.
-
-The body slope was corrected so the main visible soffit is parallel to the canonical `actual_riser / going` pitch, while the accepted contact profile and closed full-width body construction were retained.
+- `SLOPED_CLOSED` visible soffit too steep near the upper end
+- `SLOPED` Side Board silhouette did not match the intended target
 
 ### Candidate r2 — rejected
 
-Candidate r2 corrected the body slope and separated Side Board upper/lower responsibilities:
-
-- `side_board_mode` selects the upper visible profile family.
-- `underside_mode` selects the lower profile family.
-
-Runtime review then found one remaining defect: the `SLOPED` Side Board main upper run and horizontal cap ended directly at `H`, so the Side Board had no visible rise above the top landing.
+The body slope and Side Board upper/lower responsibility split were corrected, but the SLOPED Side Board still ended at `H` without the required visible rise above the top landing.
 
 ### Candidate r3 — accepted
 
-The accepted five-point SLOPED upper profile is:
+Accepted SLOPED Side Board upper profile:
 
 ```text
 A = (-reveal, B)
@@ -360,355 +194,315 @@ D = (L + r, H + reveal)
 E = (L + r, H)
 ```
 
-This preserves:
+Accepted responsibilities:
 
-- traditional front vertical closure
-- one straight main upper run
-- upper endpoint above `H`
-- short horizontal top cap above `H`
-- explicit vertical rear closure down to `H`
-- no rear-plane overshoot
+- `side_board_mode` -> upper visible profile family
+- `underside_mode` -> lower profile family
 
-The lower profile remains independently selected from `underside_mode`.
+## 7. Stage 2 accepted contracts and runtime summary
 
-## 7. Stage 2 Blender runtime evidence
+Stage 2 accepts:
 
-All required Stage 2 runtime gates passed in Blender 5.2 LTS using Candidate r3.
+- corrected `SLOPED_CLOSED` full-width closed body geometry
+- visible soffit main slope parallel to `actual_riser / going`
+- accepted five-point `SLOPED` Side Board upper profile
+- all four body / Side Board profile combinations
+- BOTH / LEFT / RIGHT / OFF board states
+- FORWARD / REVERSE with mandatory Undo / Redo
+- oblique two-point Path
+- nonzero base Z
+- stair-body thickness editing without profile regression
+- stored underside-shell-thickness editing without visible reference-line drift
+- existing schema-2 and BASIC schema-1 compatibility
+- UNDERSIDE / SIDE_BOARD Material mapping, fallback, UNASSIGNED, and identity dedup
 
-### Test 0 — Candidate identity — PASS
-
-```text
-Blender=5.2.0 LTS
-version=(0, 7, 2)
-description=Build 07-C: Sloped Closed Underside + Straight Stair Finish Variants
-```
-
-### Test 1 — Default regression — PASS
-
-```text
-UNDERSIDE=STEPPED_CLOSED
-BOARD_MODE=STEPPED
-OVERHANG=0.0
-VERTS=620
-FACES=732
-ISSUES=()
-```
-
-Accepted 07-B / Stage-1 appearance remained unchanged.
-
-### Test 2 — SLOPED_CLOSED body — PASS
-
-With Side Boards OFF/OFF:
-
-- lower flat remained at `B`
-- one straight visible soffit
-- vertical upper closure
-- no cavity, floor-filled mass, spike, giant triangle, or exposed backs
-- main soffit slope matched `actual_riser / going`
-- corrected candidate-r3 P2 was lower than rejected candidate-r1 P2
-
-Representative numerical evidence:
+Representative accepted SLOPED/SLOPED state:
 
 ```text
-SOFFIT_SLOPE=0.6220278018234807
-STAIR_SLOPE=0.6220278018234807
-DIFF=0.0
-NEW_IS_LOWER=True
-ISSUES=()
-```
-
-Isolated underbody topology:
-
-```text
-UNDERBODY_V=66
-F=95
-ZEROAREA=0
-BOUNDARY=0
-NONMANIFOLD=0
-```
-
-### Test 3 — Side Board enable states — PASS
-
-BOTH, LEFT, RIGHT, and OFF/OFF all passed. The body remained closed and visually normal in every state.
-
-### Test 4 — STEPPED_CLOSED + SLOPED Side Board — PASS
-
-Accepted visual contract:
-
-- upper profile = one straight sloped run
-- lower profile = stepped
-- front vertical closure
-- upper endpoint above `H`
-- horizontal top cap above `H`
-- vertical rear closure down to `H`
-- no spike / giant triangle / diagonal rear plate / notch
-
-Representative numerical evidence:
-
-```text
-OUTER_POINTS=5
-FRONT_VERTICAL=True
-DIFF=1.11e-16
-C_ABOVE_H=True
-D_ABOVE_H=True
-TOP_CAP_HORIZONTAL=True
-REAR_VERTICAL=True
-REAR_END_AT_H=True
-ISSUES=()
-```
-
-LEFT and RIGHT Side Board topology both passed:
-
-```text
-V=70
-F=101
-ZEROAREA=0
-BOUNDARY=0
-NONMANIFOLD=0
-```
-
-### Test 5 — SLOPED_CLOSED + STEPPED Side Board — PASS
-
-Accepted separation:
-
-- upper profile = stepped
-- lower profile = corrected sloped body family
-- no stepped lower-edge regression
-- no interior gap
-
-Evidence included:
-
-```text
-UPPER_POINTS=33
-UPPER_IS_STEPPED=True
-LOWER_POINTS=3
-LOWER_IS_SLOPED=True
-ISSUES=()
-```
-
-### Test 6 — SLOPED_CLOSED + SLOPED Side Board — PASS
-
-Both upper and lower main slopes remained pitch-parallel.
-
-```text
-UPPER_DIFF=1.11e-16
-LOWER_DIFF=0.0
-TOP_ABOVE_H=True
-TOP_CAP=True
-REAR_VERTICAL=True
-REAR_AT_H=True
-LOWER_MATCH=True
-ISSUES=()
-```
-
-First-step and top-end terminations were visually accepted.
-
-### Test 7 — FORWARD / REVERSE + Undo / Redo — PASS
-
-UI Reverse preserved physical low/high-end semantics, Side Board end semantics, and identity transform.
-
-Redo evidence:
-
-```text
-AFTER_REDO_ASCENT=REVERSE
 UNDERSIDE=SLOPED_CLOSED
 BOARD_MODE=SLOPED
 BOARDS=(True, True)
 VERTS=346
 FACES=321
-TRANSFORM=((0,0,0),(0,0,0),(1,1,1))
-ISSUES=()
-```
-
-Mandatory UI operation -> Ctrl+Z -> Ctrl+Shift+Z -> Console order passed without geometry breakage.
-
-### Test 8 — Oblique two-point Path — PASS
-
-Resolved forward / left axes remained orthonormal and geometry aligned correctly.
-
-```text
-ORTHO=0.0
-F_LEN=1.0
-L_LEN=1.0
-TRANSFORM=((0,0,0),(0,0,0),(1,1,1))
-ISSUES=()
-```
-
-### Test 9 — nonzero base_z — PASS
-
-Tested at 500 mm:
-
-```text
-BASE_Z_MM=500.0
-B=0.5
-BODY_MIN_Z=0.5
-LEFT_MIN_Z=0.5
-RIGHT_MIN_Z=0.5
-MESH_MIN_Z=0.5
-WORLD_ZERO_UNUSED=True
-ISSUES=()
-```
-
-Nothing remained fixed at world Z=0.
-
-### Test 10 — Stair-body thickness — PASS
-
-Changed `150 -> 120 mm` through the UI.
-
-```text
-BODY_DEPTH_MM=120.0
-SCHEMA=3
-ASCENT=REVERSE
-BASE_Z_MM=500.0
-UNDERSIDE=SLOPED_CLOSED
-BOARD_MODE=SLOPED
 TRANSFORM=identity
 ISSUES=()
 ```
 
-Path, floor-to-floor, riser count, tread/riser sizes, width, Side Board thickness/reveal, Stair ID, Materials, and transform remained preserved. Mandatory Undo / Redo passed.
+## 8. Stage 3 correction history
 
-### Test 11 — Underside shell thickness — PASS
+### Candidate r1 — runtime rejected
 
-Changed shell thickness `9.5 -> 12.0 mm`.
+Candidate r1 correctly introduced the new-stair 5 mm ordinary tread nosing but omitted the required upper-arrival nosing.
+
+Runtime review confirmed the ordinary 5 mm noses and then stopped the remaining Stage-3 profile gates.
+
+### Candidate r2 — accepted
+
+Candidate r2 added the human-confirmed top-arrival finish and the positive-nosing STEPPED Side Board upper termination.
+
+The accepted top-arrival cap contract is:
 
 ```text
-BEFORE_SHELL=9.5
-AFTER_SHELL=12.0
-P_UNCHANGED=True
+n = tread_front_overhang
+t = tread_thickness
+L = run_length
+r = riser_thickness
+H = B + floor_to_floor
+
+x_front  = L - n
+x_rear   = L + r
+z_bottom = H - t
+z_top    = H
+Y        = [-w/2, +w/2]
+```
+
+The cap is a dedicated `TREAD` finish fragment associated with the arrival edge. It is not an extra stair step and does not change `independent_tread_count = N - 1`.
+
+For positive nosing, the Final Riser terminates at `H - t`, with the top-arrival cap occupying `H - t .. H`. Runtime measurement confirmed the intended visible-riser relationship and floor-height semantics.
+
+For `n = 0`, no arrival cap is generated and the accepted legacy Final Riser geometry remains unchanged.
+
+## 9. Stage 3 accepted runtime evidence
+
+All grouped Stage-3 runtime gates passed in Blender 5.2 LTS using Candidate r2.
+
+### Test 0 — Candidate identity — PASS
+
+```text
+BLENDER=5.2.0 LTS
+VERSION=(0,7,2)
+DESCRIPTION=Build 07-C: Sloped Closed Underside + Straight Stair Finish Variants
+```
+
+### Test 1 — new default / top-arrival / finished height / thickness / Side Board — PASS
+
+Confirmed:
+
+- new Residential Stair default nose `5.0 mm`
+- SQUARE ordinary nosing present on every independent Tread
+- dedicated top-arrival nosing present
+- stepped Side Board upper rise / cap / rear closure visually accepted
+- sloped Side Board top termination remained visually accepted
+- a temporary plane placed at `Z=2800 mm` aligned exactly with the top-arrival nosing top
+- therefore `floor_to_floor=2800 mm` means finished top = `2800 mm`
+
+30 / 40 mm linkage:
+
+```text
+TREAD_T=40.0
+CAP_Z=(2.76,2.8)
+FINAL_RISER_Z=(2.625,2.76)
+H=2.8
+```
+
+Changing tread thickness changed the top-arrival nosing thickness while keeping the finished top fixed at `H`.
+
+### Test 2 — schema-2 / prior schema-3 zero-nosing compatibility — PASS
+
+Existing 07-B schema-2 fixture before / after ordinary Regenerate:
+
+```text
+SCHEMA=2
+NOSE=0.0
+EDGE=SQUARE
+V=620
+F=732
 ISSUES=()
 ```
 
-The stored value changed while the visible analytical P0/P1/P2 reference line remained unchanged.
-
-### Test 12 — Existing 07-B schema-2 compatibility — PASS
-
-Using the UI action `階段を再生成`:
+Existing Stage-2 schema-3 zero-nosing fixture before / after Regenerate:
 
 ```text
-AFTER_SCHEMA=2
-MODE=STANDARD_RESIDENTIAL
-UNDERSIDE=STEPPED_CLOSED
-BOARD_MODE=STEPPED
-VERTS=620
-FACES=732
+SCHEMA=3
+NOSE=0.0
+EDGE=SQUARE
+UNDERSIDE=SLOPED_CLOSED
+BOARD=SLOPED
+V=346
+F=321
 ISSUES=()
 ```
 
-Path and Stair ID were preserved. No migration or sloped activation occurred.
+No silent 5 mm migration, top-arrival cap, or positive-nosing STEPPED-board rise was introduced into legacy zero-nosing files.
 
-### Test 13 — BASIC schema-1 compatibility — PASS
+### Test 3 — board states + body / board matrix — PASS
 
-Using the UI action `階段を再生成`:
+BOTH, LEFT, RIGHT, and OFF/OFF all passed visually.
+
+All four combinations passed:
+
+- STEPPED_CLOSED + STEPPED
+- STEPPED_CLOSED + SLOPED
+- SLOPED_CLOSED + STEPPED
+- SLOPED_CLOSED + SLOPED
+
+Representative final state:
 
 ```text
-BEFORE_SCHEMA=1
-AFTER_SCHEMA=1
-MODE=BASIC_TREAD_RISER
-VERTS=248
-FACES=186
+UNDERSIDE=SLOPED_CLOSED
+BOARD=SLOPED
+LEFT=True
+RIGHT=True
+NOSE=5.0
+V=354
+F=327
 ISSUES=()
 ```
 
-Path and Stair ID were preserved.
+No cavity, z-fighting, giant triangle, profile break, or top-arrival regression was observed.
 
-### Test 14 — Material preservation / role mapping — PASS
+### Test 4 — atomic invalid-value rejection — PASS
 
-Distinct role mapping:
+The following were rejected atomically:
+
+- nose `70 mm` with Side Board reveal `40 mm`
+- BEVEL q=`0`
+- BEVEL q=`15 mm` with tread thickness `30 mm`
+- ROUND q=`6 mm` with nose `5 mm`
+
+Final evidence:
 
 ```text
-SLOTS=['JHM_Base','JHM_Underside','JHM_SideBoard']
-ROLE_INDICES={'TREAD':0,'RISER':0,'UNDERSIDE':1,'SIDE_BOARD':2}
-ROLE_COUNTS={'TREAD':90,'RISER':96,'UNDERSIDE':95,'SIDE_BOARD':40}
+ATOMIC_OK=True
+```
+
+Mesh, Stair ID, Path, Material assignment, transform, and Stage-3 fields remained unchanged after rejected submissions.
+
+### Test 5 — BEVEL + ROUND — PASS
+
+BEVEL:
+
+```text
+MODE=BEVEL
+FIRST=(12,14)
+CAP=(12,14)
+FIRST_OK=True
+CAP_OK=True
+ZEROAREA=0
+```
+
+ROUND:
+
+```text
+MODE=ROUND
+PROFILE_POINTS=12
+FIRST=(24,32)
+CAP=(24,32)
+FIRST_OK=True
+CAP_OK=True
+ZEROAREA=0
+```
+
+Both ordinary Treads and the top-arrival cap use the same profile family. ROUND retains the deterministic four-chord-per-quarter-arc construction.
+
+### Test 6 — Reverse / Undo-Redo / oblique Path / nonzero base Z — PASS
+
+Mandatory UI Reverse -> Ctrl+Z -> Ctrl+Shift+Z -> Console discipline passed.
+
+Final combined evidence:
+
+```text
+ASCENT=REVERSE
+PATH=[(1.0,2.0),(4.0,6.0)]
+OBLIQUE=True
+ORTHO=0.0
+BASE_Z=375.0
+MESH_MIN_Z=0.375
+CAP_Z=(3.145,3.175)
+H=3.175
+TRANSFORM=((0,0,0),(0,0,0),(1,1,1))
+ISSUES=()
+```
+
+The complete Stair, ordinary noses, top-arrival cap, and Side Boards followed the oblique two-point Path and nonzero base elevation without transform drift.
+
+### Test 7 — Material + BASIC compatibility — PASS
+
+ROUND geometry with a distinct Tread override:
+
+```text
+SLOTS=['JHM_Tread','JHM_Base']
+ROLES={'TREAD':0,'RISER':1,'UNDERSIDE':1,'SIDE_BOARD':1}
+COUNTS={'TREAD':512,'RISER':96,'UNDERSIDE':95,'SIDE_BOARD':40}
+TREAD_INDEX=0
+CAP_ROLE=TREAD
 INDEX_MATCH=True
 ISSUES=()
 ```
 
-Base fallback:
+The detailed ROUND front faces and top-arrival cap remained in the existing `TREAD` role. No `NOSING` role was introduced.
+
+BASIC ordinary Regenerate remained:
 
 ```text
-SLOTS=['JHM_Base']
-ROLE_INDICES={'TREAD':0,'RISER':0,'UNDERSIDE':0,'SIDE_BOARD':0}
-MESH_INDICES=[0]
+MODE=BASIC_TREAD_RISER
+SCHEMA=1
+NOSE=0.0
+V=248
+F=186
 ISSUES=()
 ```
 
-True UNASSIGNED:
+No Residential nosing / body / Side Board behavior leaked into BASIC.
+
+## 10. Stage 3 accepted contracts
+
+Stage 3 adds production acceptance of:
+
+- explicit new-Residential creation default `tread_front_overhang_mm = 5.0`
+- persistent / legacy semantic default `0.0` for existing files
+- no silent nosing migration on ordinary Regenerate
+- SQUARE rectangular tread-front geometry
+- BEVEL symmetric 45-degree front treatment
+- ROUND deterministic four-chord-per-quarter-arc treatment
+- `0 <= n < going`
+- BEVEL / ROUND q validation
+- Side Board-enabled `n <= reveal`
+- positive-nosing top-arrival cap with top exactly at `H`
+- floor-to-floor height interpreted as the finished top of the top-arrival cap
+- tread-thickness linkage for the top-arrival cap
+- positive-nosing Final Riser top at `H - t`
+- no extra ordinary full-depth arrival Tread and no extra stair step
+- positive-nosing STEPPED Side Board upper termination:
 
 ```text
-DATA_SLOTS=[]
-PLAN_SLOTS=[]
-ROLE_INDICES={'TREAD':0,'RISER':0,'UNDERSIDE':0,'SIDE_BOARD':0}
-MESH_INDICES=[0]
-ISSUES=()
+C = (L - reveal, H + reveal)
+D = (L + r,      H + reveal)
+E = (L + r,      H)
 ```
 
-Identity-deduplicated slot case:
+- accepted Stage-2 SLOPED Side Board five-point profile unchanged
+- all new detail faces remain `TREAD`; Material roles remain exactly:
+  - TREAD
+  - RISER
+  - UNDERSIDE
+  - SIDE_BOARD
+- FORWARD / REVERSE, oblique Path, nonzero base Z, Material, schema-2, prior schema-3 zero-nosing, and BASIC compatibility for Stage-3 geometry
 
-```text
-DATA_SLOTS=['JHM_Base','JHM_Underside']
-PLAN_SLOTS=['JHM_Base','JHM_Underside']
-ROLE_INDICES={'TREAD':0,'RISER':0,'UNDERSIDE':1,'SIDE_BOARD':1}
-SLOT_COUNT=2
-UNDERSIDE_SIDEBOARD_SAME=True
-ISSUES=()
-```
+## 11. Deferred to Stage 4 / later scope
 
-## 8. Stage 1 accepted contracts
+Stage 3 acceptance does not imply final acceptance of:
 
-Stage 1 accepts the following as production foundation for later 07-C stages:
-
-- add-on identity `(0, 7, 2)` / Build 07-C description
-- current Residential schema 3 for explicit 07-C creation/state
-- strict load compatibility for existing schema-2 07-B Stair
-- existing `side_board_band_width_mm` retained as persistent storage authority
-- user-facing `階段本体厚み (mm)` editing
-- `side_board_mode`, `tread_front_overhang_mm`, `tread_front_edge_mode`, and `tread_front_edge_size_mm` persistence foundation
-- future identifiers `SLOPED_CLOSED`, `SLOPED`, `BEVEL`, `ROUND` may exist in data definitions but unsupported Stage 1 production states are rejected before geometry mutation
-- BASIC schema-1 isolation remains intact
-- Material / lifecycle / Wall / Finish isolation remain intact
-
-## 9. Stage 2 accepted contracts
-
-Stage 2 adds production acceptance of:
-
-- corrected `SLOPED_CLOSED` full-width closed body geometry
-- visible soffit main slope parallel to canonical `actual_riser / going`
-- `SLOPED` Side Board upper profile with five-point front/main/top/rear termination
-- independent upper/lower Side Board profile responsibilities:
-  - `side_board_mode` -> upper profile family
-  - `underside_mode` -> lower profile family
-- all four visible upper/lower combinations:
-  - STEPPED / STEPPED
-  - SLOPED / STEPPED
-  - STEPPED / SLOPED
-  - SLOPED / SLOPED
-- FORWARD / REVERSE and oblique two-point Path behavior for Stage-2 geometry
-- nonzero base Z behavior
-- existing schema-2 and BASIC schema-1 compatibility
-- UNDERSIDE / SIDE_BOARD Material role mapping, fallback, UNASSIGNED, and identity dedup behavior
-
-## 10. Not yet accepted / deferred to later 07-C stages
-
-Stage 1 / Stage 2 acceptance does not imply production acceptance of:
-
-- 5.0 mm nosing geometry
-- BEVEL tread-front geometry
-- ROUND tread-front geometry
+- Build 07-C full lifecycle / practical-placement behavior
+- broader save / reopen lifecycle coverage for all new Stage-3 profile combinations
+- full final regression / integration acceptance across the complete 07-C feature set
 - multi-point Path / landings
 - winders
 - open stairs / supports
 - handrails / attachments
-- final 07-C practical placement / full lifecycle acceptance
 
-These remain later-stage work under `BUILD_07_C_SPECIFICATION.md`.
+These remain outside Stage 3 or are explicitly deferred to Stage 4 / later builds under `BUILD_07_C_SPECIFICATION.md`.
 
-## 11. Acceptance conclusion
+## 12. Acceptance conclusion
 
 **Build 07-C Stage 1 is ACCEPTED.**
 
 **Build 07-C Stage 2 is ACCEPTED.**
 
-Build 07-C overall remains **IN PROGRESS**. The next implementation stage is Stage 3: 5 mm nosing + SQUARE / BEVEL / ROUND.
+**Build 07-C Stage 3 is ACCEPTED.**
 
-The exact Stage 2 runtime-tested add-on artifact is `Japanese_House_Modeler_Build_07_C_Stage2_Candidate_r3.zip` with the SHA256 recorded above. Documentation-only acceptance commits made after the runtime test do not supersede the runtime-tested production revision `63b498a3391ced44a8e6e88468ce4aea3f0425ae` / tree `4e77af7f5c71727e006465d1d108e1d9cadd966c`.
+Build 07-C overall remains **IN PROGRESS**. The next implementation stage is Stage 4: lifecycle / full regression / practical-placement acceptance.
+
+The exact Stage 3 runtime-tested add-on artifact is `Japanese_House_Modeler_Build_07_C_Stage3_Candidate_r2.zip` with SHA256 `3796163958cd72e39566b8fe96fefbf7ad69d75687426b1ae23ead5093518822`.
+
+Documentation-only acceptance commits made after the runtime test do not supersede the runtime-tested production revision `82e00898ef28068c676693d2f8f8b36d26265d5a` / tree `8ffa50464797cfb2398335a2b8b7a62225205416`.
