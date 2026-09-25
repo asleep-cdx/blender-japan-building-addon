@@ -5,7 +5,8 @@ from dataclasses import dataclass
 from .stair_geometry import resolve_stair_layout
 from .stair_residential import (
     BASIC_TREAD_RISER, STANDARD_RESIDENTIAL, ResidentialFields,
-    validate_mode_data, validate_stepped_closure_depth,
+    validate_mode_data, validate_nosing_board_compatibility,
+    validate_stepped_closure_depth,
     validate_side_board_reveal, validate_stepped_underbody_thickness,
 )
 
@@ -96,6 +97,9 @@ def diagnose_stair(state, duplicate_ids=()):
                 layout.tread_thickness, layout.riser_thickness)
             validate_stepped_closure_depth(
                 state.residential, layout.actual_riser, layout.going)
+            validate_nosing_board_compatibility(
+                state.residential, layout.going, layout.tread_thickness,
+                layout.actual_riser)
             if (state.residential.left_side_board_enabled
                     or state.residential.right_side_board_enabled):
                 validate_side_board_reveal(

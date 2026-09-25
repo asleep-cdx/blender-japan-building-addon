@@ -20,6 +20,8 @@ TREAD_FRONT_EDGE_MODES = frozenset({SQUARE, BEVEL, ROUND})
 # keeps an ordinary edit of legacy 07-B settings from becoming a migration.
 STAGE2_SCHEMA_3_EDIT_FIELDS = (
     "side_board_band_width_mm", "underside_mode", "side_board_mode",
+    "tread_front_overhang_mm", "tread_front_edge_mode",
+    "tread_front_edge_size_mm",
 )
 ASSEMBLY_MODES = frozenset({BASIC_TREAD_RISER, STANDARD_RESIDENTIAL})
 MATERIAL_ROLES = ("TREAD", "RISER", "UNDERSIDE", "SIDE_BOARD")
@@ -77,6 +79,11 @@ def residential_fields(record=None):
     })
 
 
+def new_residential_fields():
+    """Return fields for the explicit final-07-C Stair creation path only."""
+    return replace(ResidentialFields(), tread_front_overhang_mm=5.0)
+
+
 def schema_version_after_residential_edit(schema_version, before, after):
     """Return the schema committed by a Residential settings edit.
 
@@ -114,7 +121,7 @@ def validate_mode_data(assembly_mode, schema_version, fields=None):
             or not isinstance(values.right_side_board_enabled, bool):
         raise ValueError("Side Board enabled値はboolである必要があります。")
     for name in ("underside_thickness_mm", "side_board_thickness_mm",
-                 "side_board_band_width_mm", "tread_front_edge_size_mm"):
+                 "side_board_band_width_mm"):
         value = getattr(values, name)
         if isinstance(value, bool):
             raise ValueError(f"{name}は正の有限値である必要があります。")
@@ -130,9 +137,37 @@ def validate_mode_data(assembly_mode, schema_version, fields=None):
         raise ValueError("踏板前端出は0以上の有限値である必要があります。") from exc
     if not math.isfinite(overhang) or overhang < 0.0:
         raise ValueError("踏板前端出は0以上の有限値である必要があります。")
-    if overhang != 0.0 or values.tread_front_edge_mode != SQUARE:
-        raise ValueError("踏板前端形状はBuild 07-C Stage 2では生成できません。")
     return True
+
+
+def validate_tread_front(fields, going, tread_thickness):
+    """Validate dimensional nosing rules and return ``(n, q)`` in metres."""
+    values = fields if isinstance(fields, ResidentialFields) else residential_fields(fields)
+    try:
+        n = float(values.tread_front_overhang_mm) / 1000.0
+        q = float(values.tread_front_edge_size_mm) / 1000.0
+        going, tread_thickness = float(going), float(tread_thickness)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("踏板前縁寸法は有限値である必要があります。") from exc
+    if not all(math.isfinite(value) for value in (n, q, going, tread_thickness)) \
+            or n < 0.0 or n >= going:
+        raise ValueError("段鼻突出量は0以上、踏面ピッチ未満にしてください。")
+    if values.tread_front_edge_mode != SQUARE:
+        if n <= 0.0 or q <= 0.0 or q >= tread_thickness / 2.0 or q > n:
+            raise ValueError("面取り/丸の前縁サイズは0より大きく、踏板厚の半分未満かつ段鼻突出量以下にしてください。")
+    return n, q
+
+
+def validate_nosing_board_compatibility(fields, going, tread_thickness,
+                                         actual_riser):
+    """Validate front geometry and the fixed Stage-2 board reveal."""
+    values = fields if isinstance(fields, ResidentialFields) else residential_fields(fields)
+    n, q = validate_tread_front(values, going, tread_thickness)
+    if values.left_side_board_enabled or values.right_side_board_enabled:
+        reveal = validate_side_board_reveal(values, actual_riser, going)
+        if n > reveal:
+            raise ValueError("段鼻突出量は有効な側板突出量以下にしてください。")
+    return n, q
 
 
 def validate_stepped_underbody_thickness(fields, actual_riser,

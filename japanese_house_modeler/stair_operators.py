@@ -19,7 +19,7 @@ from .stair_state import (
 )
 from .stair_residential import (
     BASIC_TREAD_RISER, STANDARD_RESIDENTIAL, ResidentialFields,
-    assemble_material_slot_plan, residential_fields, semantic_assembly_mode,
+    assemble_material_slot_plan, new_residential_fields, residential_fields, semantic_assembly_mode,
     semantic_schema_version, schema_version_after_residential_edit,
 )
 from .stair_residential_geometry import prepare_residential_geometry
@@ -302,7 +302,7 @@ class JHM_OT_create_stair(bpy.types.Operator):
                     return {"RUNNING_MODAL"}
                 try:
                     path = canonical_path((self._start_point, point))
-                    fields = ResidentialFields()
+                    fields = new_residential_fields()
                     _layout, _fragments, mesh_data = prepare_residential_geometry(
                         path,
                         self._stair_defaults["ascent_direction"],
@@ -317,7 +317,7 @@ class JHM_OT_create_stair(bpy.types.Operator):
                 except ValueError as exc:
                     self.report({"WARNING"}, str(exc))
                     return {"RUNNING_MODAL"}
-                return self._commit(context, path, mesh_data)
+                return self._commit(context, path, mesh_data, fields)
             return {"RUNNING_MODAL"}
         except Exception:
             self._finish({"CANCELLED"})
@@ -342,7 +342,7 @@ class JHM_OT_create_stair(bpy.types.Operator):
             return None, "基準平面との交点が数値的に不安定です。"
         return Vector((point.x, point.y, self._base_z_m)), None
 
-    def _commit(self, context, path, mesh_data):
+    def _commit(self, context, path, mesh_data, residential):
         """The sole Scene-mutating path: create exactly one Mesh Object."""
         previous_selected = tuple(context.selected_objects)
         previous_active = context.view_layer.objects.active
@@ -366,6 +366,8 @@ class JHM_OT_create_stair(bpy.types.Operator):
                 setattr(stair, name, value)
             stair.assembly_mode = STANDARD_RESIDENTIAL
             stair.stair_schema_version = 3
+            for name, value in vars(residential).items():
+                setattr(stair, name, value)
             for selected in context.selected_objects:
                 selected.select_set(False)
             stair_object.select_set(True)
@@ -611,12 +613,20 @@ class JHM_OT_edit_residential_stair(_StairOperationMixin, bpy.types.Operator):
     side_board_mode: bpy.props.EnumProperty(
         name="Side Board形状", items=(("STEPPED", "段々", ""),
                                    ("SLOPED", "勾配", "")))
+    tread_front_overhang_mm: bpy.props.FloatProperty(name="段鼻突出量 (mm)")
+    tread_front_edge_mode: bpy.props.EnumProperty(
+        name="踏板前縁", items=(("SQUARE", "角", ""),
+                              ("BEVEL", "面取り", ""),
+                              ("ROUND", "丸", "")))
+    tread_front_edge_size_mm: bpy.props.FloatProperty(name="前縁サイズ (mm)")
 
     def draw(self, _context):
         for name in ("underside_mode", "side_board_mode",
                      "side_board_band_width_mm", "underside_thickness_mm",
                      "left_side_board_enabled", "right_side_board_enabled",
-                     "side_board_thickness_mm", "side_board_reveal_mm"):
+                     "side_board_thickness_mm", "side_board_reveal_mm",
+                     "tread_front_overhang_mm", "tread_front_edge_mode",
+                     "tread_front_edge_size_mm"):
             self.layout.prop(self, name)
 
     def invoke(self, context, _event):
@@ -626,7 +636,9 @@ class JHM_OT_edit_residential_stair(_StairOperationMixin, bpy.types.Operator):
         for name in ("underside_mode", "side_board_mode",
                      "underside_thickness_mm", "left_side_board_enabled",
                      "right_side_board_enabled", "side_board_thickness_mm",
-                     "side_board_reveal_mm", "side_board_band_width_mm"):
+                     "side_board_reveal_mm", "side_board_band_width_mm",
+                     "tread_front_overhang_mm", "tread_front_edge_mode",
+                     "tread_front_edge_size_mm"):
             setattr(self, name, getattr(values, name))
         return context.window_manager.invoke_props_dialog(self)
 
@@ -638,7 +650,9 @@ class JHM_OT_edit_residential_stair(_StairOperationMixin, bpy.types.Operator):
         for name in ("underside_mode", "side_board_mode",
                      "underside_thickness_mm", "left_side_board_enabled",
                      "right_side_board_enabled", "side_board_thickness_mm",
-                     "side_board_reveal_mm", "side_board_band_width_mm"):
+                     "side_board_reveal_mm", "side_board_band_width_mm",
+                     "tread_front_overhang_mm", "tread_front_edge_mode",
+                     "tread_front_edge_size_mm"):
             values[name] = getattr(self, name)
         before = candidate["residential"]
         after = ResidentialFields(**values)

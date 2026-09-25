@@ -152,9 +152,9 @@ class MigrationAndRegressionTests(unittest.TestCase):
             self.assertEqual(schema_version_after_residential_edit(2,before,after),3)
     def test_legacy_and_noop_stay_schema_two(self):
         before=ResidentialFields(); self.assertEqual(schema_version_after_residential_edit(2,before,replace(before)),2); self.assertEqual(schema_version_after_residential_edit(2,before,replace(before,side_board_thickness_mm=22)),2)
-    def test_stage3_geometry_rejected(self):
+    def test_stage3_geometry_identifiers_are_semantically_valid(self):
         for value in (ResidentialFields(tread_front_overhang_mm=5),ResidentialFields(tread_front_edge_mode=BEVEL),ResidentialFields(tread_front_edge_mode=ROUND)):
-            with self.assertRaises(ValueError): validate_mode_data('STANDARD_RESIDENTIAL',3,value)
+            self.assertTrue(validate_mode_data('STANDARD_RESIDENTIAL',3,value))
     def test_default_and_basic_counts(self):
         residential=prepare_residential_geometry(*ARGS)[2]; basic=prepare_stair_geometry(*ARGS)[2]
         self.assertEqual((len(residential.vertices),len(residential.faces)),(620,732)); self.assertEqual((len(basic.vertices),len(basic.faces)),(248,186))

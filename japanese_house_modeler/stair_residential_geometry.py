@@ -1,4 +1,6 @@
-"""Pure closed-underbody and side-board geometry preparation."""
+"""Pure closed-underbody, tread-front, and side-board geometry preparation."""
+
+import math
 
 from dataclasses import dataclass
 
@@ -11,7 +13,7 @@ from .stair_residential import (
     SLOPED, SLOPED_CLOSED, STANDARD_RESIDENTIAL, STEPPED_CLOSED,
     ResidentialFields,
     residential_fields, validate_mode_data,
-    validate_side_board_reveal,
+    validate_nosing_board_compatibility, validate_side_board_reveal,
     validate_stepped_closure_depth,
     validate_stepped_underbody_thickness,
 )
@@ -78,16 +80,62 @@ def stepped_underbody_inner_profile(layout):
     return _without_consecutive_duplicates(points)
 
 
-def build_residential_tread_fragments(layout):
-    """Build Residential Treads extended uphill through the next Riser."""
+def tread_front_xz_profile(x_front, x_rear, z0, z1, mode, edge_size=0.0):
+    """Return the deterministic closed Tread XZ profile (CCW)."""
+    if mode == "SQUARE":
+        return ((x_front, z0), (x_rear, z0),
+                (x_rear, z1), (x_front, z1))
+    q = edge_size
+    if mode == "BEVEL":
+        return ((x_front + q, z0), (x_rear, z0), (x_rear, z1),
+                (x_front + q, z1), (x_front, z1 - q),
+                (x_front, z0 + q))
+    if mode == "ROUND":
+        points = [(x_front + q, z0), (x_rear, z0), (x_rear, z1),
+                  (x_front + q, z1)]
+        # Exactly four chords on each quarter circle.
+        upper_center = (x_front + q, z1 - q)
+        points.extend((upper_center[0] + q * math.cos(math.pi / 2 + i * math.pi / 8),
+                       upper_center[1] + q * math.sin(math.pi / 2 + i * math.pi / 8))
+                      for i in range(1, 5))
+        lower_center = (x_front + q, z0 + q)
+        points.append((x_front, z0 + q))
+        points.extend((lower_center[0] + q * math.cos(math.pi + i * math.pi / 8),
+                       lower_center[1] + q * math.sin(math.pi + i * math.pi / 8))
+                      for i in range(1, 4))
+        return tuple(points)
+    raise ValueError("不明な踏板前端modeです。")
+
+
+def build_residential_tread_fragments(layout, fields=ResidentialFields()):
+    """Build Residential Treads with independently profiled front edges."""
+    values = fields if isinstance(fields, ResidentialFields) else residential_fields(fields)
+    n, q = validate_nosing_board_compatibility(
+        values, layout.going, layout.tread_thickness, layout.actual_riser)
     fragments = []
     for ordinal in range(1, layout.independent_tread_count + 1):
         top = layout.base_z + ordinal * layout.actual_riser
-        fragments.append(_box_fragment(
-            layout, "TREAD", ordinal,
-            (ordinal - 1) * layout.going,
-            ordinal * layout.going + layout.riser_thickness,
-            top - layout.tread_thickness, top))
+        x_front = (ordinal - 1) * layout.going - n
+        x_rear = ordinal * layout.going + layout.riser_thickness
+        z0 = top - layout.tread_thickness
+        if values.tread_front_edge_mode == "SQUARE":
+            # Preserve the accepted n=0 topology as well as its dimensions.
+            fragments.append(_box_fragment(
+                layout, "TREAD", ordinal, x_front, x_rear, z0, top))
+            continue
+        profile = tread_front_xz_profile(
+            x_front, x_rear, z0, top,
+            values.tread_front_edge_mode, q)
+        local = extrude_xz_profile(profile, -layout.width / 2.0,
+                                   layout.width / 2.0,
+                                   part_type="TREAD", ordinal=ordinal)
+        forward, left = layout.axes.forward, layout.axes.left
+        vertices = tuple((layout.lower_xy[0] + forward[0] * x + left[0] * y,
+                          layout.lower_xy[1] + forward[1] * x + left[1] * y, z)
+                         for x, y, z in local.vertices)
+        fragment = MeshFragment("TREAD", ordinal, vertices, local.faces)
+        validate_mesh_fragments((fragment,))
+        fragments.append(fragment)
     return tuple(fragments)
 
 
@@ -289,7 +337,7 @@ def prepare_residential_geometry(
     layout = resolve_stair_layout(
         points, ascent_direction, base_z_mm, floor_to_floor_mm, riser_count,
         stair_width_mm, tread_thickness_mm, riser_thickness_mm)
-    fragments = list(build_residential_tread_fragments(layout))
+    fragments = list(build_residential_tread_fragments(layout, values))
     fragments.extend(build_riser_fragments(layout))
     fragments.append(build_underbody_fragment(layout, values))
     if values.left_side_board_enabled:
@@ -320,7 +368,7 @@ def prepare_stage2_residential_geometry(
     layout = resolve_stair_layout(
         points, ascent_direction, base_z_mm, floor_to_floor_mm, riser_count,
         stair_width_mm, tread_thickness_mm, riser_thickness_mm)
-    fragments = (build_residential_tread_fragments(layout)
+    fragments = (build_residential_tread_fragments(layout, values)
                  + build_riser_fragments(layout)
                  + (build_underbody_fragment(layout, values),))
     return layout, fragments, assemble_stair_mesh(fragments)
