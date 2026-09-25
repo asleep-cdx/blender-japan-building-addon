@@ -1,4 +1,4 @@
-"""Pure Build 07-B Stage 2 stepped-underbody geometry preparation."""
+"""Pure closed-underbody and side-board geometry preparation."""
 
 from dataclasses import dataclass
 
@@ -8,7 +8,8 @@ from .stair_geometry import (
     validate_mesh_fragments, validate_simple_polygon,
 )
 from .stair_residential import (
-    STANDARD_RESIDENTIAL, STEPPED_CLOSED, ResidentialFields,
+    SLOPED, SLOPED_CLOSED, STANDARD_RESIDENTIAL, STEPPED_CLOSED,
+    ResidentialFields,
     residential_fields, validate_mode_data,
     validate_side_board_reveal,
     validate_stepped_closure_depth,
@@ -31,6 +32,25 @@ class SideBoardProfile:
     outer: tuple
     lower: tuple
     polygon: tuple
+
+
+def C_sloped(layout, closure_depth):
+    """Return the corrected visible soffit: lower flat then walking-line slope.
+
+    Candidate r1 located P2 by subtracting a vertical ``closure_depth`` from
+    the penultimate rise.  Since P1 is also shifted uphill, that made P1-P2
+    steeper than the Stair pitch.  The corrected line is parallel to the
+    canonical going/rise line, starting exactly at P1.
+    """
+    upper_x = layout.run_length + layout.riser_thickness
+    slope_start_x = layout.going + closure_depth
+    if not slope_start_x < upper_x:
+        raise ValueError("SLOPED_CLOSEDの勾配runは正である必要があります。")
+    slope = layout.actual_riser / layout.going
+    return ((layout.riser_thickness, layout.base_z),
+            (slope_start_x, layout.base_z),
+            (upper_x, layout.base_z
+             + (upper_x - slope_start_x) * slope))
 
 
 def _without_consecutive_duplicates(points):
@@ -132,9 +152,25 @@ def stepped_underbody_profile(layout, fields=ResidentialFields()):
     return SteppedUnderbodyProfile(inner, outer, polygon)
 
 
+def sloped_underbody_profile(layout, fields=ResidentialFields()):
+    """Create a validated closed body using the accepted contact profile."""
+    validate_stepped_underbody_thickness(
+        fields, layout.actual_riser, layout.tread_thickness,
+        layout.riser_thickness)
+    depth = validate_stepped_closure_depth(fields, layout.actual_riser,
+                                            layout.going)
+    inner = stepped_underbody_inner_profile(layout)
+    outer = C_sloped(layout, depth)
+    polygon = validate_simple_polygon(inner + tuple(reversed(outer)))
+    return SteppedUnderbodyProfile(inner, outer, polygon)
+
+
 def build_underbody_fragment(layout, fields=ResidentialFields()):
     """Build one closed underbody fragment, independent of Side Boards."""
-    profile = stepped_underbody_profile(layout, fields)
+    values = fields if isinstance(fields, ResidentialFields) else residential_fields(fields)
+    profile = (sloped_underbody_profile(layout, values)
+               if values.underside_mode == SLOPED_CLOSED
+               else stepped_underbody_profile(layout, values))
     local = extrude_xz_profile(profile.polygon, -layout.width / 2.0,
                                layout.width / 2.0,
                                part_type="UNDERBODY")
@@ -178,18 +214,50 @@ def side_board_profile(layout, fields=ResidentialFields()):
     # produces a vertical rear edge instead of the rejected diagonal plate.
     upper.append((layout.run_length + layout.riser_thickness,
                   layout.upper_arrival_z))
-    closure_depth = validate_stepped_closure_depth(
-        fields, layout.actual_riser, layout.going)
-    lower = stepped_closure_visible_profile(layout, closure_depth)
+    lower = side_board_lower_profile(layout, fields)
     polygon = validate_simple_polygon(list(upper) + list(reversed(lower)))
     return SideBoardProfile(reference, _without_consecutive_duplicates(upper),
                             lower, polygon)
 
 
+def side_board_lower_profile(layout, fields=ResidentialFields()):
+    """Select only the board bottom family from ``underside_mode``."""
+    values = (fields if isinstance(fields, ResidentialFields)
+              else residential_fields(fields))
+    depth = validate_stepped_closure_depth(values, layout.actual_riser,
+                                            layout.going)
+    if values.underside_mode == SLOPED_CLOSED:
+        return C_sloped(layout, depth)
+    return stepped_closure_visible_profile(layout, depth)
+
+
+def sloped_side_board_profile(layout, fields=ResidentialFields()):
+    """Build a front closure, straight upper run, cap, and rear closure."""
+    reveal = validate_side_board_reveal(fields, layout.actual_riser,
+                                        layout.going)
+    reference = side_board_reference_profile(layout)
+    rear = layout.run_length + layout.riser_thickness
+    # Preserve the accepted first-step front: rise vertically from B to the
+    # reveal-offset first tread corner.  Only then begin the one straight
+    # visible run.  Candidate r1 incorrectly ran from B directly to H, making
+    # the board a large triangular plate rather than the confirmed silhouette.
+    elevated_top = layout.upper_arrival_z + reveal
+    upper = ((-reveal, layout.base_z),
+             (-reveal, layout.base_z + layout.actual_riser + reveal),
+             (layout.run_length - reveal, elevated_top),
+             (rear, elevated_top),
+             (rear, layout.upper_arrival_z))
+    lower = side_board_lower_profile(layout, fields)
+    polygon = validate_simple_polygon(upper + tuple(reversed(lower)))
+    return SideBoardProfile(reference, upper, lower, polygon)
+
+
 def build_side_board_fragment(layout, side, fields=ResidentialFields()):
     values = fields if isinstance(fields, ResidentialFields) else residential_fields(fields)
     thickness = float(values.side_board_thickness_mm) / 1000.0
-    profile = side_board_profile(layout, values)
+    profile = (sloped_side_board_profile(layout, values)
+               if values.side_board_mode == SLOPED
+               else side_board_profile(layout, values))
     half = layout.width / 2.0
     if side == "LEFT":
         y_min, y_max, ordinal = half, half + thickness, 1
@@ -216,7 +284,7 @@ def prepare_residential_geometry(
     """Prepare the complete Stage 3 candidate without Scene mutation."""
     values = fields if isinstance(fields, ResidentialFields) else residential_fields(fields)
     validate_mode_data(assembly_mode, stair_schema_version, values)
-    if assembly_mode != STANDARD_RESIDENTIAL or values.underside_mode != STEPPED_CLOSED:
+    if assembly_mode != STANDARD_RESIDENTIAL:
         raise ValueError("Residential geometry configurationではありません。")
     layout = resolve_stair_layout(
         points, ascent_direction, base_z_mm, floor_to_floor_mm, riser_count,

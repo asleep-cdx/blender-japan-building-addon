@@ -599,18 +599,32 @@ class JHM_OT_edit_residential_stair(_StairOperationMixin, bpy.types.Operator):
     bl_label = "住宅階段仕様を変更"
     bl_options = {"REGISTER", "UNDO"}
     operation = "EDIT_RESIDENTIAL"
+    underside_mode: bpy.props.EnumProperty(
+        name="下面形式", items=(("STEPPED_CLOSED", "段々閉じ", ""),
+                              ("SLOPED_CLOSED", "勾配閉じ", "")))
     underside_thickness_mm: bpy.props.FloatProperty(name="下面シェル厚 (mm)")
     left_side_board_enabled: bpy.props.BoolProperty(name="左Side Board")
     right_side_board_enabled: bpy.props.BoolProperty(name="右Side Board")
     side_board_thickness_mm: bpy.props.FloatProperty(name="Side Board厚 (mm)")
     side_board_reveal_mm: bpy.props.FloatProperty(name="側板突出量 (mm)")
     side_board_band_width_mm: bpy.props.FloatProperty(name="階段本体厚み (mm)")
+    side_board_mode: bpy.props.EnumProperty(
+        name="Side Board形状", items=(("STEPPED", "段々", ""),
+                                   ("SLOPED", "勾配", "")))
+
+    def draw(self, _context):
+        for name in ("underside_mode", "side_board_mode",
+                     "side_board_band_width_mm", "underside_thickness_mm",
+                     "left_side_board_enabled", "right_side_board_enabled",
+                     "side_board_thickness_mm", "side_board_reveal_mm"):
+            self.layout.prop(self, name)
 
     def invoke(self, context, _event):
         obj = self._require_mode(context, STANDARD_RESIDENTIAL)
         if obj is None: return {"CANCELLED"}
         values = residential_fields(obj.jhm_stair)
-        for name in ("underside_thickness_mm", "left_side_board_enabled",
+        for name in ("underside_mode", "side_board_mode",
+                     "underside_thickness_mm", "left_side_board_enabled",
                      "right_side_board_enabled", "side_board_thickness_mm",
                      "side_board_reveal_mm", "side_board_band_width_mm"):
             setattr(self, name, getattr(values, name))
@@ -621,7 +635,8 @@ class JHM_OT_edit_residential_stair(_StairOperationMixin, bpy.types.Operator):
         if obj is None: return {"CANCELLED"}
         candidate = _canonical_snapshot(obj.jhm_stair)
         values = vars(candidate["residential"]).copy()
-        for name in ("underside_thickness_mm", "left_side_board_enabled",
+        for name in ("underside_mode", "side_board_mode",
+                     "underside_thickness_mm", "left_side_board_enabled",
                      "right_side_board_enabled", "side_board_thickness_mm",
                      "side_board_reveal_mm", "side_board_band_width_mm"):
             values[name] = getattr(self, name)

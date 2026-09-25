@@ -426,10 +426,35 @@ P0 = (r, B)
 P1 = (g + d, B)
 ```
 
-Main sloped soffit endpoint:
+### Stage 2 Blender runtime visual correction (2026-09-24)
+
+Candidate r1 originally used the following endpoint:
 
 ```text
 P2 = (L + r, B + (N - 1)h - d)
+```
+
+This formula is **superseded**. Blender runtime visual review showed that it
+made the visible soffit progressively too steep toward the upper end.
+
+The accepted corrected analytical contract uses the canonical Stair pitch:
+
+```text
+m = h / g
+
+P0 = (r, B)
+P1 = (g + d, B)
+
+P2 = (
+    L + r,
+    B + m * ((L + r) - (g + d))
+)
+```
+
+Required slope invariant:
+
+```text
+(P2.z - P1.z) / (P2.x - P1.x) ≈ h / g
 ```
 
 Visible lower path:
@@ -462,6 +487,14 @@ BOTH / LEFT / RIGHT / OFF-OFF board states must all remain visually CLOSED.
 
 Side Boardは外付けfinish componentでありbody closure mechanismではない。
 
+Side Boardの上下silhouetteは独立した二つのmodeで決定する。
+
+- `side_board_mode` controls the upper / visible Side Board profile.
+- `underside_mode` controls the Side Board lower profile.
+
+Therefore, `SLOPED_CLOSED` では `side_board_mode == STEPPED` の場合も
+Side Boardの下端はSection 15の修正済みsloped body undersideに従う。
+
 Extrusion remains external:
 
 ```text
@@ -487,19 +520,23 @@ SLOPED Side Boardのtargetは、2026-09-24に人間確認した参照画像3を�
 - lower endは必要なvertical/front closure + horizontal bottom capで閉じ、最下段周辺にmicro-notchを作らない。
 - upper terminationは参照画像3の形を再現し、`X=L+r`を越えない。
 - upper sideではstraight sloped runを終えた後、**vertical rear closure と短いhorizontal top cap**で閉じる。
+- **2026-09-24 Blender runtime visual correction:** main slopeの終点は
+  top landing `H`より上に位置し、短いhorizontal top capも`H`より上に保つ。
+  rear plane `X=L+r`上に明示的なvertical closureを設け、capから`H`まで下ろす。
 - r6型のspike / giant triangle / diagonal rear plateを作らない。
 - LEFT / RIGHT semanticsはuphill-relative。
 - Side Board inner faceとbodyの間からinterior cavityを見せない。
 
 `side_board_reveal_mm` はSLOPED boardでもvisible projection controlとして保持する。ただしSLOPED modeでは、revealを理由にsawtooth upper edgeを再導入しない。exact offset/intersection helperはStage 2でpure geometryとして定義し、上記visual/end-condition contractを満たすこと。
 
-`side_board_mode` と `underside_mode` は独立。以下の組み合わせをvalidationの範囲で許可する。
+`side_board_mode` と `underside_mode` は独立。以下の全組み合わせを
+validationの範囲で許可し、上端/下端profileを次のとおり生成する。
 
 ```text
-STEPPED_CLOSED + STEPPED board
-STEPPED_CLOSED + SLOPED board
-SLOPED_CLOSED  + STEPPED board
-SLOPED_CLOSED  + SLOPED board
+STEPPED_CLOSED + STEPPED board = upper stepped / lower stepped
+STEPPED_CLOSED + SLOPED board  = upper sloped  / lower stepped
+SLOPED_CLOSED  + STEPPED board = upper stepped / lower sloped
+SLOPED_CLOSED  + SLOPED board  = upper sloped  / lower sloped
 ```
 
 ---

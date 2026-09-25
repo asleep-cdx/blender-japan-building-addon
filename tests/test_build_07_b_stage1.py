@@ -81,8 +81,7 @@ class CompatibilityAndDataTests(unittest.TestCase):
         self.assertTrue(validate_mode_data(STANDARD_RESIDENTIAL, 2, fields))
         for change in (dict(underside_thickness_mm=0),
                        dict(side_board_band_width_mm=math.inf),
-                       dict(left_side_board_enabled=1),
-                       dict(underside_mode="SLOPED_CLOSED")):
+                       dict(left_side_board_enabled=1)):
             with self.subTest(change=change), self.assertRaises(ValueError):
                 validate_mode_data(STANDARD_RESIDENTIAL, 2,
                                    ResidentialFields(**change))
