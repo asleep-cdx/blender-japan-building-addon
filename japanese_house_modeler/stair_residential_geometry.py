@@ -14,6 +14,7 @@ from .stair_residential import (
     ResidentialFields,
     residential_fields, validate_mode_data,
     validate_nosing_board_compatibility, validate_side_board_reveal,
+    validate_tread_front,
     validate_stepped_closure_depth,
     validate_stepped_underbody_thickness,
 )
@@ -107,6 +108,26 @@ def tread_front_xz_profile(x_front, x_rear, z0, z1, mode, edge_size=0.0):
     raise ValueError("不明な踏板前端modeです。")
 
 
+def _tread_profile_fragment(layout, ordinal, x_front, x_rear, z0, z1,
+                            mode, edge_size):
+    """Extrude one canonical TREAD profile into world coordinates."""
+    if mode == "SQUARE":
+        return _box_fragment(
+            layout, "TREAD", ordinal, x_front, x_rear, z0, z1)
+    profile = tread_front_xz_profile(
+        x_front, x_rear, z0, z1, mode, edge_size)
+    local = extrude_xz_profile(profile, -layout.width / 2.0,
+                               layout.width / 2.0,
+                               part_type="TREAD", ordinal=ordinal)
+    forward, left = layout.axes.forward, layout.axes.left
+    vertices = tuple((layout.lower_xy[0] + forward[0] * x + left[0] * y,
+                      layout.lower_xy[1] + forward[1] * x + left[1] * y, z)
+                     for x, y, z in local.vertices)
+    fragment = MeshFragment("TREAD", ordinal, vertices, local.faces)
+    validate_mesh_fragments((fragment,))
+    return fragment
+
+
 def build_residential_tread_fragments(layout, fields=ResidentialFields()):
     """Build Residential Treads with independently profiled front edges."""
     values = fields if isinstance(fields, ResidentialFields) else residential_fields(fields)
@@ -118,24 +139,41 @@ def build_residential_tread_fragments(layout, fields=ResidentialFields()):
         x_front = (ordinal - 1) * layout.going - n
         x_rear = ordinal * layout.going + layout.riser_thickness
         z0 = top - layout.tread_thickness
-        if values.tread_front_edge_mode == "SQUARE":
-            # Preserve the accepted n=0 topology as well as its dimensions.
-            fragments.append(_box_fragment(
-                layout, "TREAD", ordinal, x_front, x_rear, z0, top))
-            continue
-        profile = tread_front_xz_profile(
-            x_front, x_rear, z0, top,
-            values.tread_front_edge_mode, q)
-        local = extrude_xz_profile(profile, -layout.width / 2.0,
-                                   layout.width / 2.0,
-                                   part_type="TREAD", ordinal=ordinal)
-        forward, left = layout.axes.forward, layout.axes.left
-        vertices = tuple((layout.lower_xy[0] + forward[0] * x + left[0] * y,
-                          layout.lower_xy[1] + forward[1] * x + left[1] * y, z)
-                         for x, y, z in local.vertices)
-        fragment = MeshFragment("TREAD", ordinal, vertices, local.faces)
-        validate_mesh_fragments((fragment,))
-        fragments.append(fragment)
+        # SQUARE deliberately uses _box_fragment so n=0 retains the accepted
+        # topology as well as the accepted dimensions.
+        fragments.append(_tread_profile_fragment(
+            layout, ordinal, x_front, x_rear, z0, top,
+            values.tread_front_edge_mode, q))
+    return tuple(fragments)
+
+
+def build_top_arrival_nosing_fragment(layout, fields=ResidentialFields()):
+    """Build the positive-n dedicated arrival cap; return ``None`` for n=0."""
+    values = fields if isinstance(fields, ResidentialFields) else residential_fields(fields)
+    n, q = validate_nosing_board_compatibility(
+        values, layout.going, layout.tread_thickness, layout.actual_riser)
+    if n == 0.0:
+        return None
+    return _tread_profile_fragment(
+        layout, layout.riser_count,
+        layout.run_length - n, layout.run_length + layout.riser_thickness,
+        layout.upper_arrival_z - layout.tread_thickness,
+        layout.upper_arrival_z, values.tread_front_edge_mode, q)
+
+
+def build_residential_riser_fragments(layout, fields=ResidentialFields()):
+    """Build Risers, shortening only the Final Riser under a positive cap."""
+    values = fields if isinstance(fields, ResidentialFields) else residential_fields(fields)
+    n, _q = validate_nosing_board_compatibility(
+        values, layout.going, layout.tread_thickness, layout.actual_riser)
+    if n == 0.0:
+        return build_riser_fragments(layout)
+    fragments = list(build_riser_fragments(layout)[:-1])
+    bottom = layout.base_z + (layout.riser_count - 1) * layout.actual_riser
+    fragments.append(_box_fragment(
+        layout, "RISER", layout.riser_count, layout.run_length,
+        layout.run_length + layout.riser_thickness, bottom,
+        layout.upper_arrival_z - layout.tread_thickness))
     return tuple(fragments)
 
 
@@ -248,20 +286,32 @@ def side_board_profile(layout, fields=ResidentialFields()):
 
     Horizontal reference lines are translated by ``+Z*b`` and vertical
     reference lines by ``-X*b``.  Their intersections therefore lie at
-    ``(x-b, z+b)``.  The vertical first/last segments terminate directly at
-    ``Z=B`` and ``Z=H``; no body-soffit clipping is involved.
+    ``(x-b, z+b)``.  The front terminates at ``Z=B``.  Positive nosing uses
+    the runtime-corrected cap above H; zero nosing retains the legacy H end.
+    No body-soffit clipping is involved.
     """
-    reveal = validate_side_board_reveal(fields, layout.actual_riser,
+    values = fields if isinstance(fields, ResidentialFields) else residential_fields(fields)
+    reveal = validate_side_board_reveal(values, layout.actual_riser,
                                         layout.going)
     reference = side_board_reference_profile(layout)
     upper = [(reference[0][0] - reveal, reference[0][1])]
     upper.extend((x - reveal, z + reveal) for x, z in reference[1:-1])
-    upper.append((reference[-1][0] - reveal, reference[-1][1]))
-    # Close the full-depth board on the accepted Final Riser rear plane.
-    # This horizontal terminal followed by the lower profile's matching X
-    # produces a vertical rear edge instead of the rejected diagonal plate.
-    upper.append((layout.run_length + layout.riser_thickness,
-                  layout.upper_arrival_z))
+    n, _q = validate_tread_front(values, layout.going,
+                                  layout.tread_thickness)
+    if n > 0.0:
+        # Candidate-r2 runtime correction: rise above the finished arrival,
+        # cap horizontally, then close vertically on the Final Riser rear.
+        upper.extend(((layout.run_length - reveal,
+                       layout.upper_arrival_z + reveal),
+                      (layout.run_length + layout.riser_thickness,
+                       layout.upper_arrival_z + reveal),
+                      (layout.run_length + layout.riser_thickness,
+                       layout.upper_arrival_z)))
+    else:
+        # Exact accepted Stage-2 termination for legacy zero-nosing stairs.
+        upper.append((reference[-1][0] - reveal, reference[-1][1]))
+        upper.append((layout.run_length + layout.riser_thickness,
+                      layout.upper_arrival_z))
     lower = side_board_lower_profile(layout, fields)
     polygon = validate_simple_polygon(list(upper) + list(reversed(lower)))
     return SideBoardProfile(reference, _without_consecutive_duplicates(upper),
@@ -338,7 +388,10 @@ def prepare_residential_geometry(
         points, ascent_direction, base_z_mm, floor_to_floor_mm, riser_count,
         stair_width_mm, tread_thickness_mm, riser_thickness_mm)
     fragments = list(build_residential_tread_fragments(layout, values))
-    fragments.extend(build_riser_fragments(layout))
+    top_nosing = build_top_arrival_nosing_fragment(layout, values)
+    if top_nosing is not None:
+        fragments.append(top_nosing)
+    fragments.extend(build_residential_riser_fragments(layout, values))
     fragments.append(build_underbody_fragment(layout, values))
     if values.left_side_board_enabled:
         fragments.append(build_side_board_fragment(layout, "LEFT", values))
@@ -368,7 +421,9 @@ def prepare_stage2_residential_geometry(
     layout = resolve_stair_layout(
         points, ascent_direction, base_z_mm, floor_to_floor_mm, riser_count,
         stair_width_mm, tread_thickness_mm, riser_thickness_mm)
+    top_nosing = build_top_arrival_nosing_fragment(layout, values)
     fragments = (build_residential_tread_fragments(layout, values)
-                 + build_riser_fragments(layout)
+                 + (() if top_nosing is None else (top_nosing,))
+                 + build_residential_riser_fragments(layout, values)
                  + (build_underbody_fragment(layout, values),))
     return layout, fragments, assemble_stair_mesh(fragments)

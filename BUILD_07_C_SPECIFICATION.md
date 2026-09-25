@@ -581,6 +581,50 @@ x_rear  = jg + r
 
 Only downhill/front extent changes。Tread top/bottom Z、rear plane `jg+r`、Riser geometry、Final Riserは変えない。上階到達面に追加Treadを作らない。
 
+### Blender 5.2 LTS runtime correction — top-arrival nosing
+
+上記の「Final Riserは変えない／上階到達面に追加Treadを作らない」という
+Stage-3当初解釈は、Candidate r1のBlender runtime reviewによって**一部
+superseded**となった。`N-1`個のordinary independent Treadsとその式は変更
+しないが、`n > 0`の場合だけ、Final Riser位置に独立したfinish fragmentで
+あるtop-arrival nosing/capを追加する。これは追加stepでもordinary full-depth
+arrival Treadでもなく、`riser_count`と`independent_tread_count = N-1`を変更
+しない。
+
+```text
+top-arrival cap:
+x_front  = L - n
+x_rear   = L + r
+z_bottom = H - t
+z_top    = H
+Y        = [-w/2, +w/2]
+```
+
+`floor_to_floor_mm`が定義する`H`はfinished cap topである。したがって
+`t=30 mm`ではcapは`H-30 mm .. H`、`t=40 mm`では`H-40 mm .. H`となり、
+いずれもtopは`H`を越えない。positive nosing時だけFinal Riser topを`H-t`へ
+短縮し、capが`H-t .. H`を占める。Final Riser bottom、lower ordinary Treads、
+actual riser、Path、runは変更しない。capのSQUARE / BEVEL / ROUND形状はordinary
+Treadと同じpure XZ-profile authorityを使用し、全faceのMaterial roleは`TREAD`
+とする。
+
+`n = 0`ではcapを生成せず、Final Riser topは`H`のままであり、schema-2 07-B
+および既存schema-3のaccepted legacy geometryをexactに維持する。
+
+positive nosing時の`STEPPED` Side Board upper terminationもruntime確認結果に
+従い、accepted lower profileを変えず次の3点で終了する。
+
+```text
+C = (L - reveal, H + reveal)
+D = (L + r,      H + reveal)
+E = (L + r,      H)
+```
+
+これによりfinal vertical rise、`C -> D`のhorizontal top cap、`D -> E`の
+vertical rear closureを形成する。`SLOPED` Side Boardのaccepted five-point
+upper profile A/B/C/D/Eは変更しない。`n = 0`のSTEPPED boardはlegacy profile
+を維持する。
+
 Side Board enabled時は基本supported relation:
 
 ```text
@@ -815,8 +859,10 @@ Minimum:
 - new 07-C Stair final default overhang 5.0 mm
 - positive overhang shifts front only by `-n`
 - rear remains `jg+r`
-- Riser unchanged
-- no extra upper Tread
+- positive nosing top-arrival cap exact bounds `L-n .. L+r`, `H-t .. H`
+- positive nosing Final Riser top `H-t`; zero-nosing Final Riser top `H`
+- no extra ordinary full-depth upper Tread or extra step
+- STEPPED Side Board corrected positive-nosing C/D/E termination
 - `0 <= n < g`
 - board-enabled `n <= reveal`
 - SQUARE exact rectangular front

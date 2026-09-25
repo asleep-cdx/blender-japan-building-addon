@@ -20,7 +20,8 @@ from japanese_house_modeler.stair_residential import (
     validate_nosing_board_compatibility, validate_tread_front,
 )
 from japanese_house_modeler.stair_residential_geometry import (
-    build_residential_tread_fragments, prepare_residential_geometry,
+    build_residential_riser_fragments, build_residential_tread_fragments,
+    build_top_arrival_nosing_fragment, prepare_residential_geometry,
     side_board_profile, sloped_side_board_profile, sloped_underbody_profile,
     tread_front_xz_profile,
 )
@@ -161,8 +162,103 @@ class GeometryTests(unittest.TestCase):
         nose = replace(zero, tread_front_overhang_mm=5)
         self.assertEqual(sloped_underbody_profile(l, zero), sloped_underbody_profile(l, nose))
         self.assertEqual(sloped_side_board_profile(l, zero), sloped_side_board_profile(l, nose))
-        self.assertEqual(side_board_profile(l, replace(zero, side_board_mode=STEPPED)),
-                         side_board_profile(l, replace(nose, side_board_mode=STEPPED)))
+        old_stepped = side_board_profile(l, replace(zero, side_board_mode=STEPPED))
+        new_stepped = side_board_profile(l, replace(nose, side_board_mode=STEPPED))
+        self.assertEqual(old_stepped.lower, new_stepped.lower)
+        self.assertNotEqual(old_stepped.outer, new_stepped.outer)
+
+    def test_square_top_arrival_cap_has_exact_bounds_and_full_width(self):
+        l = layout(base=0)
+        cap = build_top_arrival_nosing_fragment(
+            l, self.fields(tread_front_overhang_mm=5))
+        self.assertIsNotNone(cap)
+        self.assertEqual(cap.part_type, "TREAD")
+        self.assertEqual(cap.ordinal, l.riser_count)
+        self.assertEqual((min(v[0] for v in cap.vertices),
+                          max(v[0] for v in cap.vertices)),
+                         (l.run_length - .005,
+                          l.run_length + l.riser_thickness))
+        self.assertEqual((min(v[1] for v in cap.vertices),
+                          max(v[1] for v in cap.vertices)),
+                         (-l.width / 2, l.width / 2))
+        self.assertEqual((min(v[2] for v in cap.vertices),
+                          max(v[2] for v in cap.vertices)), (2.77, 2.8))
+        self.assertTrue(validate_mesh_fragments((cap,)))
+
+    def test_top_arrival_thickness_linkage_and_finished_height(self):
+        for thickness, expected_bottom in ((30, 2.77), (40, 2.76)):
+            l = resolve_stair_layout(ARGS[0], ARGS[1], 0, 2800, 16, 900,
+                                     thickness, 12)
+            cap = build_top_arrival_nosing_fragment(
+                l, self.fields(tread_front_overhang_mm=5))
+            self.assertAlmostEqual(min(v[2] for v in cap.vertices),
+                                   expected_bottom)
+            self.assertAlmostEqual(max(v[2] for v in cap.vertices), 2.8)
+
+    def test_final_riser_top_depends_only_on_positive_nosing(self):
+        l = layout(base=0)
+        legacy = build_residential_riser_fragments(l, self.fields())
+        corrected = build_residential_riser_fragments(
+            l, self.fields(tread_front_overhang_mm=5))
+        self.assertEqual(len(legacy), l.riser_count)
+        self.assertEqual(len(corrected), l.riser_count)
+        self.assertEqual(max(v[2] for v in legacy[-1].vertices), 2.8)
+        self.assertEqual(max(v[2] for v in corrected[-1].vertices), 2.77)
+        self.assertEqual(min(v[2] for v in legacy[-1].vertices),
+                         min(v[2] for v in corrected[-1].vertices))
+
+    def test_zero_nosing_has_no_cap_and_keeps_exact_legacy_risers(self):
+        l = layout()
+        self.assertIsNone(build_top_arrival_nosing_fragment(l, self.fields()))
+        self.assertEqual(build_residential_riser_fragments(l, self.fields()),
+                         build_riser_fragments(l))
+        self.assertEqual(l.independent_tread_count, l.riser_count - 1)
+
+    def test_top_cap_uses_every_front_profile_and_tread_role(self):
+        l = layout()
+        for mode, counts in ((SQUARE, (8, 6)), (BEVEL, (12, 14)),
+                             (ROUND, (24, 32))):
+            fields = self.fields(tread_front_overhang_mm=5,
+                                 tread_front_edge_mode=mode)
+            cap = build_top_arrival_nosing_fragment(l, fields)
+            self.assertEqual((len(cap.vertices), len(cap.faces)), counts)
+            self.assertTrue(validate_mesh_fragments((cap,)))
+            _layout, _fragments, mesh = prepare_residential_geometry(
+                *ARGS, fields=fields)
+            self.assertEqual(mesh.face_roles.count("TREAD"),
+                             sum(len(f.faces) for f in _fragments
+                                 if f.part_type == "TREAD"))
+
+    def test_top_cap_is_not_an_ordinary_full_depth_tread(self):
+        l = layout()
+        ordinary = build_residential_tread_fragments(
+            l, self.fields(tread_front_overhang_mm=5))
+        cap = build_top_arrival_nosing_fragment(
+            l, self.fields(tread_front_overhang_mm=5))
+        self.assertEqual(len(ordinary), l.independent_tread_count)
+        self.assertAlmostEqual(max(v[0] for v in cap.vertices)
+                               - min(v[0] for v in cap.vertices),
+                               .005 + l.riser_thickness)
+
+    def test_stepped_board_corrected_top_and_sloped_profile_unchanged(self):
+        l = layout()
+        fields = self.fields(tread_front_overhang_mm=5)
+        reveal = fields.side_board_reveal_mm / 1000
+        stepped = side_board_profile(l, fields)
+        expected = ((l.run_length - reveal, l.upper_arrival_z + reveal),
+                    (l.run_length + l.riser_thickness,
+                     l.upper_arrival_z + reveal),
+                    (l.run_length + l.riser_thickness, l.upper_arrival_z))
+        self.assertEqual(stepped.outer[-3:], expected)
+        self.assertEqual(stepped.outer[-3][1], stepped.outer[-2][1])
+        self.assertEqual(stepped.outer[-2][0], stepped.outer[-1][0])
+        sloped = sloped_side_board_profile(l, fields)
+        self.assertEqual(sloped.outer, (
+            (-reveal, l.base_z),
+            (-reveal, l.base_z + l.actual_riser + reveal),
+            (l.run_length - reveal, l.upper_arrival_z + reveal),
+            (l.run_length + l.riser_thickness, l.upper_arrival_z + reveal),
+            (l.run_length + l.riser_thickness, l.upper_arrival_z)))
 
     def test_all_body_board_combinations_with_square_nosing(self):
         for underside in (STEPPED_CLOSED, SLOPED_CLOSED):
