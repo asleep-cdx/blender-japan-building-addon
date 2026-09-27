@@ -1,6 +1,6 @@
 # Japanese House Modeler — Development Roadmap
 
-最終更新: 2026-09-24
+最終更新: 2026-09-27
 
 この文書は、Blender 5.2 LTS 向け **Japanese House Modeler / 日本住宅モデラー** の今後の開発順序と、各Buildをまたいで維持する設計方針をまとめたロードマップである。
 
@@ -57,16 +57,18 @@
 - **Build 07-A overall — ACCEPTED**
 - **Build 07-B — ACCEPTED**
 - **Build 07-B overall — ACCEPTED**
-- **Build 07-C — NEXT**
-- Current accepted add-on version: **0.7.1**
-- Build 07-B final identification: `Build 07-B: Standard Residential Straight Stair`
+- **Build 07-C — ACCEPTED**
+- **Build 07-C overall — ACCEPTED**
+- **Build 07-D — NEXT / SPECIFICATION FINAL**
+- Current accepted add-on version: **0.7.2**
+- Build 07-C final identification: `Build 07-C: Sloped Closed Underside + Straight Stair Finish Variants`
 
-現時点で、Wall System、Finish Attachment Foundation、Baseboard、Crown Moulding、standalone Managed Stair Core、およびStandard Residential Straight Stairまでの基盤が成立している。
+現時点で、Wall System、Finish Attachment Foundation、Baseboard、Crown Moulding、standalone Managed Stair Core、Standard Residential Straight Stair、および07-C Straight Stair Finish Variantsまでの基盤が成立している。
 
-次の主要開発は **Build 07-C — Sloped Closed Underside + Straight Stair Finish Variants** とする。
+07-C完了後のpractical checkpointで直線住宅階段としての実用性を確認し、次の主要開発は **Build 07-D — Multi-point Path + L / U + Landing** とすることを決定した。
 
 Build 07では、07-A〜07-Fを階段システムの主要本線として段階的に開発する。
-ただし開発順は固定ではなく、**07-Cおよび07-E完了時点で実用性・残作業・他機能との優先順位を再評価し、必要に応じて08/09との順序を見直せる**。
+ただし開発順は固定ではなく、**07-E完了時点で実用性・残作業・他機能との優先順位を再評価し、必要に応じて08/09との順序を見直せる**。
 
 07-Gは任意のディテール拡張であり、Build 07本体の必須完了条件には含めない。
 
@@ -83,8 +85,8 @@ Build 07では、07-A〜07-Fを階段システムの主要本線として段階�
 | **06-C** | Crown Moulding / 廻り縁 + Profile Thumbnail UI | **DONE / ACCEPTED** |
 | **07-A** | Stair Core + Top-view 2-point Straight Stair | **DONE / ACCEPTED** |
 | **07-B** | Standard Residential Straight Stair + Stepped Closed Underside + Side Boards | **DONE / ACCEPTED** |
-| **07-C** | Sloped Closed Underside + Straight Stair Finish Variants | **NEXT / PLANNED** |
-| **07-D** | Multi-point Path + L/U + Landing | Planned |
+| **07-C** | Sloped Closed Underside + Straight Stair Finish Variants | **DONE / ACCEPTED** |
+| **07-D** | Multi-point Path + L/U + Landing | **NEXT / SPECIFICATION FINAL** |
 | **07-E** | Winder / 廻り段 | Planned |
 | **07-F** | Open / Support Variants | Planned |
 | **07-G** | Optional Stair Detail Expansion | Optional / Backlog |
@@ -159,7 +161,7 @@ Build 07の進行中も、以下のチェックポイントで順序を再評価
 ↓
 直線住宅階段としての実用性確認
 ↓
-必要なら 08 / 09 との優先順位を再評価
+07-Dへ進むことを決定済み
 
 07-E 完了
 ↓
@@ -953,9 +955,9 @@ Open / support / ささら・力桁系の露出構成は 07-F の別系統とす
 
 ## 12.10 Build 07-C — Sloped Closed Underside + Straight Stair Finish Variants
 
-**Status: NEXT / SPECIFICATION FINAL**
+**Status: ACCEPTED**
 
-実装authorityは `BUILD_07_C_SPECIFICATION.md` とする。
+実装仕様は `BUILD_07_C_SPECIFICATION.md`、runtime-tested revision / acceptance結果は `BUILD_07_C_ACCEPTANCE_RECORD.md` を正とする。
 
 主要機能：
 
@@ -970,7 +972,7 @@ Open / support / ささら・力桁系の露出構成は 07-F の別系統とす
 
 ### Sloped Side Board variant
 
-07-Cの `SLOPED` Side Boardは、07-Bのanalytical `STEPPED` Side Boardとは別variantとして実装する。human-confirmed visual targetは、直線勾配のvisible finish、first-step aligned lower termination、upper short horizontal cap + vertical rear closureとする。
+07-Cの `SLOPED` Side Boardは、07-Bのanalytical `STEPPED` Side Boardとは別variantとして実装した。human-confirmed visual targetは、直線勾配のvisible finish、first-step aligned lower termination、upper short horizontal cap + vertical rear closureである。
 
 ### Sloped closed underside
 
@@ -982,23 +984,31 @@ Open / support / ささら・力桁系の露出構成は 07-F の別系統とす
 
 ### Practical checkpoint after 07-C
 
-07-C Acceptanceでは、手作業で用意した簡易Wall / Floor相当シーンへ配置し、住宅パース用途としてplacement、visible proportion、side-board appearance、stepped / sloped underside usability、Material、Mesh conversionを確認する。
+07-C Acceptanceで、手作業で用意した簡易Wall / Floor相当シーンへの配置、placement、visible proportion、side-board appearance、stepped / sloped underside usability、Material、Mesh conversionを確認した。
 
-この結果を見て、07-Dへ進むか、08 / 09の優先度を上げるかを再評価できる。
+このcheckpointの結果、08 / 09へ切り替えず、**07-D Multi-point Path + L / U + Landingへ進む**ことを決定した。
 
 ## 12.11 Build 07-D — Multi-point Path + L / U + Landing
+
+**Status: NEXT / SPECIFICATION FINAL**
+
+Implementation authorityは `BUILD_07_D_SPECIFICATION.md` とする。
 
 主要機能：
 
 - start + intermediate turn points + end
 - L-shaped path
-- U-shaped path
+- U-shaped path / コの字 foundation
 - multiple straight flights
-- landing segments
+- Landing turn
 - whole Stair = one Managed Stair
 - consistent total floor-to-floor
-- riser distribution across flights
+- Riser Distribution `AUTO / MANUAL`
 - path edit / regeneration
+- START / END / every intermediate TURN mouse relocation
+- Shift **15°** angle constraint
+- X/Y / extension / 90° / parallel alignment guides
+- 07-E Winderへ拡張可能な Turn foundation
 
 ### Multi-point Path interaction contract
 
@@ -1007,23 +1017,37 @@ Open / support / ささら・力桁系の露出構成は 07-F の別系統とす
 作成時：
 
 - P0 = START、必要なintermediate turn points、Pn = ENDを順番にクリックして1つのcanonical Pathを作る。
-- 次のPath segmentを指定するとき、**Shiftによる角度拘束**を提供する。
-- Shift角度拘束の操作感は既存Wallの角度拘束と整合させる。具体的な拘束角度・スナップ規則は07-D Specificationで固定する。
-- 07-B / 07-Cで2点Stair専用の一時的な角度拘束を別実装せず、Multi-point化する07-Dで共通Path interactionとして実装する。
+- 次のPath segmentを指定するとき、**Shiftで15°刻みの角度拘束**を提供する。
+- Shift角度拘束は既存Wallの `constrained_direction(..., step_degrees=15.0)` と同じ数学的意味を使用し、Stair専用の別丸め規則を作らない。
+- 一般住宅のL/Uを作りやすくするため、world X/Yだけでなく既存segmentに対する90° / parallel / extension guideを提供する。
 
 作成後：
 
 - **START / ENDだけでなく、すべてのintermediate Path pointを個別にマウスで再配置できることを07-Dの必須要件とする。**
-- U字Pathが P0=START, P1/P2=turn, P3=END の場合、P0〜P3をそれぞれ移動して形状を修正できること。
-- point移動はObject Transformではなくcanonical `path_points[]` のXYを更新し、影響するflight / Landing / derived geometryをtransactionalに再計算・再生成する。
+- U字Pathが P0=START, P1/P2=TURN, P3=END の場合、P0〜P3をそれぞれ移動して形状を修正できること。
+- point移動はObject Transformではなくcanonical `path_points[]` のXYを更新し、影響するFlight / Landing / derived geometryをtransactionalに再計算・再生成する。
+- Shift 15°拘束とalignment guideはpoint移動でも使用する。
 - invalid / too-short segment等を生む移動はpartial commitせず拒否またはrollbackする。
 - 数値によるPath座標編集は精密入力手段として維持し、マウス編集と同じcanonical Pathを更新する。
-- 07-EのWinder / 廻り段もこのPath-point editing foundationを再利用し、曲がり点移動後にturn geometryを再解決できる設計とする。
+
+### Riser Distribution
+
+Defaultは `AUTO`。
+
+- overall riser countを維持する。
+- 各Flightのeffective runを基準にdeterministicに整数配分する。
+- Path変更時はAUTO再配分する。
+
+`MANUAL`ではユーザーがFlightごとのriser countを指定する。
+
+- 合計はoverall riser countと一致必須。
+- Path変更でも指定値を保持する。
+- invalidになった場合は勝手に補正せずcommitを拒否する。
+- AUTO→MANUAL時は現在のAUTO配分を初期値として引き継ぐ。
 
 複数点Pathを単なる複数の独立直階段として実装しない。
 
-07-Dではturnを自動的にWinderへしない。
-折れ点の位置だけでLanding dimensionsを一意に決められない場合は、必要なturn parameterをSpecificationで定義する。
+07-DのturnはLanding。07-Eでは同じPath / Turn foundationへWinderを追加する。既存07-D Landingを07-E導入時に勝手にWinderへ変更しない。
 
 ## 12.12 Build 07-E — Winder / 廻り段
 
@@ -1053,6 +1077,8 @@ straight flight
 ```
 
 を1つのManaged Stairとして扱えること。
+
+新規住宅階段のturn UXは、07-E完成後に **Winderをdefault、LandingをUI選択可能** とする方向を基本案とする。ただし07-Dで保存済みのLandingは互換性のため保持する。
 
 **07-E完了時点を、一般的な直線＋折れ曲がり住宅階段の主要ゴールとする。**
 
@@ -1279,10 +1305,8 @@ Build 07はstandalone Stairとして成立させるが、Integration 1では住�
 
 再評価ポイント：
 
-- **07-C完了時**：直線住宅階段の実用性、斜め下面、側板、Mesh workflowを確認
-- **07-E完了時**：L/U、Landing、Winderを含む一般住宅階段としての実用性を確認
-
-各checkpointの結果により、必要なら08 / 09を先に進めることができる。
+- **07-C完了時**：checkpoint完了。直線住宅階段の実用性を確認し、**07-Dへ進むことを決定済み**。
+- **07-E完了時**：L/U、Landing、Winderを含む一般住宅階段としての実用性を確認し、08 / 09との優先順位を再評価する。
 
 07-GはOptional Backlogであり、07-F完了後ただちに実装する必要はない。
 
@@ -1383,25 +1407,27 @@ Roadmap変更は許可するが、Accepted historyは消さない。
 06-C  ACCEPTED
 07-A  ACCEPTED
 07-B  ACCEPTED
+07-C  ACCEPTED
 ```
 
 次：
 
 ```text
-07-C Sloped Closed Underside
-     + Straight Stair Finish Variants
+07-D Multi-point Path
+     + L / U
+     + Landing
 ```
 
 状態遷移：
 
 ```text
-07-B ACCEPTED → 07-C NEXT
+07-C ACCEPTED → 07-D NEXT
 ```
 
-07-C implementation authority:
+07-D implementation authority:
 
 ```text
-BUILD_07_C_SPECIFICATION.md
+BUILD_07_D_SPECIFICATION.md
 ```
 
 ---
@@ -1425,7 +1451,7 @@ Crown
     ↓
 07-C Sloped Underside / Straight Finish Variants
     ↓
-[practical checkpoint / order review]
+[07-C practical checkpoint completed → proceed 07-D]
     ↓
 07-D Multi-point L/U + Landing
     ↓
