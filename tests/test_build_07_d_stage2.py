@@ -23,6 +23,7 @@ from japanese_house_modeler.stair_multiflight import (RISER_DISTRIBUTION_AUTO,
 from japanese_house_modeler.stair_residential import ResidentialFields
 from japanese_house_modeler.stair_residential_geometry import (
     build_underbody_fragment, side_board_lower_profile, side_board_profile,
+    sloped_side_board_profile,
 )
 
 POINTS=((0,0),(3,0),(3,3)); IDS=("p0","p1","p2")
@@ -307,7 +308,8 @@ class ResidentialGeometryTests(unittest.TestCase):
             _flight_stair_layout(layout.flights[0],layout),fields)[-1][1]
         baseline=_upper_section_baseline(layout,outgoing_local,fields,soffit)
         self.assertEqual(len(baseline),2)
-        self.assertEqual(baseline[0],(0.0,soffit))
+        self.assertLess(baseline[0][0],0)
+        self.assertEqual(baseline[0][1],soffit)
         self.assertGreater(baseline[1][0],0)
         self.assertGreater(baseline[1][1],baseline[0][1])
         self.assertEqual(transition.part_type,"UNDERBODY")
@@ -347,30 +349,61 @@ class ResidentialGeometryTests(unittest.TestCase):
         self.assertAlmostEqual(max(local_y(board)),-layout.width/2)
         self.assertGreater(max(local_y(transition)),min(local_y(transition)))
     def test_side_board_and_body_use_identical_straight_baseline(self):
-        fields=ResidentialFields(underside_mode="SLOPED_CLOSED",
-                                 side_board_mode="SLOPED")
-        layout=resolve_multiflight_layout(POINTS,"FORWARD",0,2800,16,900,30,12,point_ids=IDS)
-        lower=_flight_stair_layout(layout.flights[0],layout)
-        upper=_flight_stair_layout(layout.flights[1],layout)
-        soffit=side_board_lower_profile(lower,fields)[-1][1]
-        baseline=_upper_section_baseline(layout,upper,fields,soffit)
-        board=_build_l_flight_board_fragment(
-            upper,"RIGHT",fields,1,True,baseline)
-        local=[((v[0]-upper.lower_xy[0])*upper.axes.forward[0]
-                +(v[1]-upper.lower_xy[1])*upper.axes.forward[1],v[2])
-               for v in board.vertices]
-        for x in (0.0,baseline[1][0]):
-            zs=[z for px,z in local if math.isclose(px,x,abs_tol=1e-8)]
-            self.assertTrue(zs);self.assertAlmostEqual(min(zs),_baseline_z(baseline,x))
-        self.assertEqual(len(baseline),2)
+        for mode in ("STEPPED","SLOPED"):
+            with self.subTest(mode=mode):
+                fields=ResidentialFields(underside_mode="SLOPED_CLOSED",
+                                         side_board_mode=mode)
+                layout=resolve_multiflight_layout(POINTS,"FORWARD",0,2800,16,900,30,12,point_ids=IDS)
+                lower=_flight_stair_layout(layout.flights[0],layout)
+                upper=_flight_stair_layout(layout.flights[1],layout)
+                soffit=side_board_lower_profile(lower,fields)[-1][1]
+                baseline=_upper_section_baseline(layout,upper,fields,soffit)
+                board=_build_l_flight_board_fragment(
+                    upper,"RIGHT",fields,1,True,baseline)
+                local=[((v[0]-upper.lower_xy[0])*upper.axes.forward[0]
+                        +(v[1]-upper.lower_xy[1])*upper.axes.forward[1],v[2])
+                       for v in board.vertices]
+                # The outer reveal clips the board after the shared corner
+                # loop; its endpoint and B remain on the body authority.
+                reveal=-fields.side_board_reveal_mm/1000
+                for x in (reveal,baseline[1][0]):
+                    zs=[z for px,z in local if math.isclose(px,x,abs_tol=1e-8)]
+                    self.assertTrue(zs)
+                    self.assertAlmostEqual(min(zs),_baseline_z(baseline,x))
+                self.assertEqual(len(baseline),2)
     def test_sloped_baseline_has_only_a_and_accepted_b(self):
         fields=ResidentialFields(underside_mode="SLOPED_CLOSED")
         layout=resolve_multiflight_layout(POINTS,"FORWARD",0,2800,16,900,30,12,point_ids=IDS)
         lower,upper=(_flight_stair_layout(flight,layout) for flight in layout.flights)
         soffit=side_board_lower_profile(lower,fields)[-1][1]
         baseline=_upper_section_baseline(layout,upper,fields,soffit)
-        self.assertEqual(baseline,((0.0,soffit),side_board_lower_profile(upper,fields)[-1]))
+        accepted=side_board_lower_profile(upper,fields)
+        self.assertEqual(baseline[1],accepted[-1])
+        self.assertEqual(baseline[0][1],soffit)
+        accepted_slope=((accepted[-1][1]-accepted[-2][1])
+                        /(accepted[-1][0]-accepted[-2][0]))
+        baseline_slope=((baseline[1][1]-baseline[0][1])
+                        /(baseline[1][0]-baseline[0][0]))
+        self.assertAlmostEqual(baseline_slope,accepted_slope)
+        self.assertLess(baseline[0][0],0)
         self.assertEqual(len(baseline),2)
+    def test_upper_local_board_thickness_is_constant(self):
+        fields=ResidentialFields(underside_mode="SLOPED_CLOSED",
+                                 side_board_mode="SLOPED")
+        layout=resolve_multiflight_layout(POINTS,"FORWARD",0,2800,16,900,30,12,point_ids=IDS)
+        lower,upper=(_flight_stair_layout(flight,layout) for flight in layout.flights)
+        baseline=_upper_section_baseline(
+            layout,upper,fields,side_board_lower_profile(lower,fields)[-1][1])
+        profile=sloped_side_board_profile(upper,fields)
+        # The ordinary upper run and the local underbody have the same pitch,
+        # so their vertical separation cannot taper toward the arrival.
+        x0=profile.outer[1][0]
+        x1=profile.outer[2][0]
+        def upper_z(x):
+            p0,p1=profile.outer[1],profile.outer[2]
+            return p0[1]+(p1[1]-p0[1])*(x-p0[0])/(p1[0]-p0[0])
+        self.assertAlmostEqual(upper_z(x0)-_baseline_z(baseline,x0),
+                               upper_z(x1)-_baseline_z(baseline,x1))
     def test_upper_body_bottom_samples_are_collinear_and_full_width(self):
         fields=ResidentialFields(underside_mode="SLOPED_CLOSED")
         for points in (POINTS,((0,0),(3,0),(3,-3))):
@@ -398,6 +431,11 @@ class ResidentialGeometryTests(unittest.TestCase):
                                  min((v for v in body.vertices if math.isclose(v[2],a[1])),
                                      key=lambda v:(v[0]-upper.lower_xy[0])*upper.axes.left[0]
                                      +(v[1]-upper.lower_xy[1])*upper.axes.left[1]))
+                # The body is trimmed below the visible first-step plane at
+                # x=0; it does not place an UNDERSIDE face on the Riser top.
+                at_zero=[z for x,_y,z in local if math.isclose(x,0,abs_tol=1e-8)]
+                self.assertTrue(at_zero)
+                self.assertEqual(max(at_zero),layout.landing.top_z-layout.tread_thickness)
     def test_true_corner_and_upper_share_exact_world_boundary(self):
         fields=ResidentialFields(underside_mode="SLOPED_CLOSED")
         for points in (POINTS,((0,0),(3,0),(3,-3))):
@@ -418,6 +456,12 @@ class ResidentialGeometryTests(unittest.TestCase):
                 self.assertEqual(len(merged.faces),len(landing.faces)+len(upper_body.faces)-2)
                 self.assertEqual(merged.part_type,"UNDERBODY")
                 self.assertTrue(all(math.isfinite(value) for vertex in merged.vertices for value in vertex))
+                # No many-to-one apex: every vertex participates in a bounded
+                # local face fan rather than collecting the whole corner.
+                incidence=[0]*len(merged.vertices)
+                for face in merged.faces:
+                    for index in face: incidence[index]+=1
+                self.assertLessEqual(max(incidence),5)
     def test_sloped_production_uses_one_welded_corner_upper_fragment(self):
         _layout,fragments,_mesh=self.prepare(underside="SLOPED_CLOSED",left=False,right=False)
         underbodies=[fragment for fragment in fragments if fragment.part_type=="UNDERBODY"]

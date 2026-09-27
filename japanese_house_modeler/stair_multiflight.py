@@ -482,16 +482,27 @@ def _clip_profile_x(profile, boundary, keep_greater):
 
 
 def _upper_section_baseline(layout, outgoing_local, fields, landing_soffit):
-    """Resolve the two-point authority for the outgoing SLOPED body.
+    """Resolve the accepted local-flight slope and its Landing intersection.
 
-    A is the Landing outgoing edge at local x=0 and the resolved Landing
-    soffit.  B is *exactly* the accepted 07-C upper soffit termination.  The
-    line is deliberately not extended into the Landing and is never adjusted
-    with intermediate clearance/control points.
+    The upper Flight retains the 07-C SLOPED_CLOSED pitch and termination.
+    Its lower line is extended only far enough to meet the horizontal Landing
+    soffit.  This keeps thickness local to the Flight instead of forcing a
+    global Landing-to-arrival line that tapers the body.
     """
     from .stair_residential_geometry import side_board_lower_profile
-    accepted_end = side_board_lower_profile(outgoing_local, fields)[-1]
-    return ((0.0, float(landing_soffit)),
+    accepted = side_board_lower_profile(outgoing_local, fields)
+    slope_start, accepted_end = accepted[-2:]
+    dx = accepted_end[0] - slope_start[0]
+    if dx <= _EPSILON:
+        raise ValueError("Upper Flight soffit勾配runが不足しています。")
+    slope = (accepted_end[1] - slope_start[1]) / dx
+    if slope <= _EPSILON:
+        raise ValueError("Upper Flight soffit勾配が不正です。")
+    contact_x = accepted_end[0] + (
+        float(landing_soffit) - accepted_end[1]) / slope
+    if not -layout.width < contact_x < 0.0:
+        raise ValueError("Landing内にUpper Flight soffit接点を解決できません。")
+    return ((float(contact_x), float(landing_soffit)),
             (float(accepted_end[0]), float(accepted_end[1])))
 
 
@@ -511,6 +522,7 @@ def _build_l_flight_board_fragment(local, side, fields, position,
                if fields.side_board_mode == "SLOPED"
                else side_board_profile(local, fields))
     source_polygon = profile.polygon
+    lower = profile.lower
     if lower_baseline is not None:
         # The first-step reveal belongs to the upper outline only.  Extending
         # the board's lower outline into x<0 previously created a second local
@@ -526,7 +538,7 @@ def _build_l_flight_board_fragment(local, side, fields, position,
         outer = profile.outer[:-1] + ((rear, profile.outer[-2][1]),
                                       profile.outer[-1])
         source_polygon = validate_simple_polygon(
-            outer + tuple(reversed(profile.lower)))
+            outer + tuple(reversed(lower)))
     reveal = (max(0.0, float(fields.side_board_reveal_mm) / _MM_PER_METRE)
               if preserve_outgoing_reveal else 0.0)
     polygon = _clip_profile_x(
@@ -598,12 +610,16 @@ def _build_l_flight_underbody_fragment(local, fields, position):
 
 
 def _resolve_landing_upper_boundary(layout, outgoing_local, baseline):
-    bottom = _baseline_z(baseline, 0.0)
+    contact_x, bottom = baseline[0]
     top = layout.landing.top_z - layout.landing.thickness
     y_min, y_max = -layout.width / 2.0, layout.width / 2.0
     def world(y, z):
-        return (outgoing_local.lower_xy[0] + outgoing_local.axes.left[0] * y,
-                outgoing_local.lower_xy[1] + outgoing_local.axes.left[1] * y, z)
+        return (outgoing_local.lower_xy[0]
+                + outgoing_local.axes.forward[0] * contact_x
+                + outgoing_local.axes.left[0] * y,
+                outgoing_local.lower_xy[1]
+                + outgoing_local.axes.forward[1] * contact_x
+                + outgoing_local.axes.left[1] * y, z)
     return LandingUpperBoundary(
         world(y_min, bottom), world(y_max, bottom),
         world(y_min, top), world(y_max, top))
@@ -611,9 +627,8 @@ def _resolve_landing_upper_boundary(layout, outgoing_local, baseline):
 
 def _build_landing_turn_body(layout, outgoing_local, baseline, boundary, ordinal):
     """Build the dedicated 90-degree Landing corner region from world vertices."""
-    # The Landing is horizontal through its outgoing edge A.  Its incoming
-    # extent is a separate 90-degree corner region; the A-B slope begins only
-    # at x=0 and must not be projected backwards through the Landing.
+    # The Landing stays horizontal up to the explicit shared loop.  The upper
+    # Flight's local constant-pitch soffit begins on the other side of it.
     start_x, start_z = -layout.width, baseline[0][1]
     forward, left = outgoing_local.axes.forward, outgoing_local.axes.left
     y_values = []
@@ -634,19 +649,34 @@ def _build_landing_turn_body(layout, outgoing_local, baseline, boundary, ordinal
 def _build_sloped_upper_body(layout, outgoing_local, fields, baseline,
                              boundary, ordinal):
     """Build the straight upper region beginning at the authoritative quad."""
-    from .stair_geometry import extrude_xz_profile, validate_simple_polygon
+    from .stair_geometry import validate_simple_polygon
     from .stair_residential_geometry import stepped_underbody_inner_profile
     tread_bottom = layout.landing.top_z - layout.landing.thickness
-    inner = ((0.0, tread_bottom),) + stepped_underbody_inner_profile(outgoing_local)
-    upper_baseline = ((0.0, _baseline_z(baseline, 0.0)), baseline[1])
-    polygon = validate_simple_polygon(inner + tuple(reversed(upper_baseline)))
+    contact_x = baseline[0][0]
+    accepted_inner = stepped_underbody_inner_profile(outgoing_local)
+    first_inner_x = accepted_inner[0][0]
+    # Stay below the Landing tread through x=0, then meet the accepted inner
+    # profile at the Riser rear.  The extra orthogonal corner prevents the
+    # former diagonal body side from crossing a visible first-step face.
+    inner = ((contact_x, tread_bottom), (0.0, tread_bottom),
+             (first_inner_x, tread_bottom)) + accepted_inner
+    polygon = validate_simple_polygon(inner + tuple(reversed(baseline)))
     left = outgoing_local.axes.left
     y_min = ((boundary.left_bottom[0] - outgoing_local.lower_xy[0]) * left[0]
              + (boundary.left_bottom[1] - outgoing_local.lower_xy[1]) * left[1])
     y_max = ((boundary.right_bottom[0] - outgoing_local.lower_xy[0]) * left[0]
              + (boundary.right_bottom[1] - outgoing_local.lower_xy[1]) * left[1])
-    local = extrude_xz_profile(
-        polygon, y_min, y_max, part_type="UNDERBODY", ordinal=ordinal)
+    # Keep the two side profiles as n-gons.  Generic ear clipping is valid for
+    # rendering, but exposed every diagonal in wire view and concentrated a
+    # large triangle fan at the Landing corner.  The perimeter quads below are
+    # the complete, manifold extrusion topology and need no repair triangles.
+    count = len(polygon)
+    vertices = tuple((x, y, z) for y in (y_min, y_max) for x, z in polygon)
+    faces = (tuple(range(count)), tuple(reversed(range(count, count * 2))))
+    faces += tuple(((index + 1) % count, index, index + count,
+                    (index + 1) % count + count) for index in range(count))
+    local = MeshFragment("UNDERBODY", ordinal, vertices, faces)
+    validate_mesh_fragments((local,))
     forward, left = outgoing_local.axes.forward, outgoing_local.axes.left
     vertices = tuple((outgoing_local.lower_xy[0] + forward[0] * x + left[0] * y,
                       outgoing_local.lower_xy[1] + forward[1] * x + left[1] * y,
