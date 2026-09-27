@@ -13,6 +13,7 @@ from japanese_house_modeler.stair_multiflight import (RISER_DISTRIBUTION_AUTO,
     FlightAllocation, allocation_counts, build_landing_side_board_fragments,
     _build_l_flight_board_fragment, _build_l_flight_underbody_fragment,
     _build_landing_underbody_transition, _flight_stair_layout,
+    _baseline_z, _build_sloped_upper_section_fragment, _upper_section_baseline,
     canonical_multi_path, distribution_edit_initial_allocation,
     prepare_multiflight_residential_geometry,
     resolve_multiflight_layout, segment_allocations, switch_distribution_mode,
@@ -296,24 +297,15 @@ class ResidentialGeometryTests(unittest.TestCase):
         layout,fragments,_mesh=self.prepare(underside="SLOPED_CLOSED",left=False,right=False)
         transition=fragments[-1]
         outgoing=layout.flights[1];origin=outgoing.start_xy
-        local=sorted({(round((v[0]-origin[0])*outgoing.forward[0]
-                                  +(v[1]-origin[1])*outgoing.forward[1],9),
-                             round(v[2],9)) for v in transition.vertices})
-        xs=sorted({x for x,z in local});self.assertEqual(len(xs),3)
-        lower=[min(z for x,z in local if x==value) for value in xs]
-        self.assertAlmostEqual(lower[0],lower[1])
-        self.assertGreater(lower[2],lower[1])
         outgoing_local=_flight_stair_layout(outgoing,layout)
-        accepted_contact=side_board_lower_profile(
-            outgoing_local,ResidentialFields(underside_mode="SLOPED_CLOSED"))[1]
-        self.assertAlmostEqual(xs[2],accepted_contact[0])
-        self.assertAlmostEqual(lower[2],accepted_contact[1])
-        # The transition portion contains only its start and end: no kink.
-        transition_lower=[(x,z) for x,z in zip(xs,lower) if x>=-1e-9]
-        self.assertEqual(len(transition_lower),2)
+        fields=ResidentialFields(underside_mode="SLOPED_CLOSED")
+        soffit=side_board_lower_profile(
+            _flight_stair_layout(layout.flights[0],layout),fields)[-1][1]
+        baseline=_upper_section_baseline(layout,outgoing_local,fields,soffit)
+        self.assertEqual(len(baseline),2)
+        self.assertLess(baseline[0][0],0);self.assertGreater(baseline[1][0],0)
+        self.assertGreater(baseline[1][1],baseline[0][1])
         self.assertEqual(transition.part_type,"UNDERBODY")
-        self.assertLessEqual(max(v[2] for v in transition.vertices),
-                             layout.landing.top_z+layout.actual_riser-layout.tread_thickness)
     def test_sloped_upper_body_starts_on_visible_slope_contact(self):
         fields=ResidentialFields(underside_mode="SLOPED_CLOSED")
         layout=resolve_multiflight_layout(POINTS,"FORWARD",0,2800,16,900,30,12,point_ids=IDS)
@@ -340,7 +332,7 @@ class ResidentialGeometryTests(unittest.TestCase):
         layout=resolve_multiflight_layout(POINTS,"FORWARD",0,2800,16,900,30,12,point_ids=IDS)
         local=_flight_stair_layout(layout.flights[1],layout)
         soffit=side_board_lower_profile(_flight_stair_layout(layout.flights[0],layout),fields)[-1][1]
-        transition=_build_landing_underbody_transition(layout,local,fields,soffit,1)
+        transition=_build_sloped_upper_section_fragment(layout,local,fields,soffit,1)
         board=_build_l_flight_board_fragment(local,"RIGHT",fields,1,True)
         def local_y(fragment):
             return [(v[0]-local.lower_xy[0])*local.axes.left[0]
@@ -349,5 +341,22 @@ class ResidentialGeometryTests(unittest.TestCase):
         self.assertAlmostEqual(min(local_y(transition)),-layout.width/2)
         self.assertAlmostEqual(max(local_y(board)),-layout.width/2)
         self.assertGreater(max(local_y(transition)),min(local_y(transition)))
+    def test_side_board_and_body_use_identical_straight_baseline(self):
+        fields=ResidentialFields(underside_mode="SLOPED_CLOSED",
+                                 side_board_mode="SLOPED")
+        layout=resolve_multiflight_layout(POINTS,"FORWARD",0,2800,16,900,30,12,point_ids=IDS)
+        lower=_flight_stair_layout(layout.flights[0],layout)
+        upper=_flight_stair_layout(layout.flights[1],layout)
+        soffit=side_board_lower_profile(lower,fields)[-1][1]
+        baseline=_upper_section_baseline(layout,upper,fields,soffit)
+        board=_build_l_flight_board_fragment(
+            upper,"RIGHT",fields,1,True,baseline)
+        local=[((v[0]-upper.lower_xy[0])*upper.axes.forward[0]
+                +(v[1]-upper.lower_xy[1])*upper.axes.forward[1],v[2])
+               for v in board.vertices]
+        for x in (-fields.side_board_reveal_mm/1000,baseline[1][0]):
+            zs=[z for px,z in local if math.isclose(px,x,abs_tol=1e-8)]
+            self.assertTrue(zs);self.assertAlmostEqual(min(zs),_baseline_z(baseline,x))
+        self.assertEqual(len(baseline),2)
 
 if __name__ == '__main__': unittest.main()

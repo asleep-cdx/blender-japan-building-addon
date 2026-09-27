@@ -472,8 +472,36 @@ def _clip_profile_x(profile, boundary, keep_greater):
     return tuple(output)
 
 
+def _upper_section_baseline(layout, outgoing_local, fields, landing_soffit):
+    """Return the single SLOPED lower envelope from Landing to upper arrival."""
+    from .stair_residential_geometry import (
+        side_board_lower_profile, stepped_underbody_inner_profile,
+    )
+    accepted_end = side_board_lower_profile(outgoing_local, fields)[-1]
+    start = (-layout.width, float(landing_soffit))
+    end_x, accepted_z = accepted_end
+    # Lower the common line enough to remain strictly below every upper-body
+    # contact point. This is one authority line, not a local repair wedge.
+    limits = [accepted_z]
+    contact_points = ((0.0, layout.landing.top_z - layout.landing.thickness),)
+    contact_points += stepped_underbody_inner_profile(outgoing_local)
+    for x, z in contact_points:
+        if x > start[0] + _EPSILON:
+            limits.append(start[1] + (z - start[1])
+                          * (end_x - start[0]) / (x - start[0]))
+    end_z = min(limits) - _EPSILON
+    return (start, (end_x, end_z))
+
+
+def _baseline_z(baseline, x):
+    start, end = baseline
+    parameter = (float(x) - start[0]) / (end[0] - start[0])
+    return start[1] + parameter * (end[1] - start[1])
+
+
 def _build_l_flight_board_fragment(local, side, fields, position,
-                                   preserve_outgoing_reveal=False):
+                                   preserve_outgoing_reveal=False,
+                                   lower_baseline=None):
     """Clip only the Landing endpoint while preserving the Flight local frame."""
     from .stair_geometry import extrude_xz_profile, validate_simple_polygon
     from .stair_residential_geometry import side_board_profile, sloped_side_board_profile
@@ -481,6 +509,13 @@ def _build_l_flight_board_fragment(local, side, fields, position,
                if fields.side_board_mode == "SLOPED"
                else side_board_profile(local, fields))
     source_polygon = profile.polygon
+    if lower_baseline is not None:
+        boundary = (-max(0.0, float(fields.side_board_reveal_mm) / _MM_PER_METRE)
+                    if preserve_outgoing_reveal else 0.0)
+        lower = ((boundary, _baseline_z(lower_baseline, boundary)),
+                 lower_baseline[1])
+        source_polygon = validate_simple_polygon(
+            profile.outer + tuple(reversed(lower)))
     if position == 1 and not math.isclose(
             profile.outer[-2][0], profile.outer[-1][0], abs_tol=_EPSILON):
         # L upper arrival uses a horizontal cap followed by a world-Z return;
@@ -556,6 +591,35 @@ def _build_l_flight_underbody_fragment(local, fields, position):
                       local.lower_xy[1] + forward[1] * x + left[1] * y, z)
                      for x, y, z in fragment.vertices)
     result = MeshFragment("UNDERBODY", 1, vertices, fragment.faces)
+    validate_mesh_fragments((result,))
+    return result
+
+
+def _build_sloped_upper_section_fragment(layout, outgoing_local, fields,
+                                          landing_soffit, ordinal):
+    """Build Landing and the complete upper body over one straight baseline."""
+    from .stair_geometry import extrude_xz_profile, validate_simple_polygon
+    from .stair_residential_geometry import stepped_underbody_inner_profile
+    baseline = _upper_section_baseline(
+        layout, outgoing_local, fields, landing_soffit)
+    tread_bottom = layout.landing.top_z - layout.landing.thickness
+    inner = ((-layout.width, tread_bottom), (0.0, tread_bottom))
+    inner += stepped_underbody_inner_profile(outgoing_local)
+    polygon = validate_simple_polygon(inner + tuple(reversed(baseline)))
+    turn_cross = (layout.flights[0].forward[0] * layout.flights[1].forward[1]
+                  - layout.flights[0].forward[1] * layout.flights[1].forward[0])
+    y_min, y_max = -layout.width / 2.0, layout.width / 2.0
+    if turn_cross > 0.0:
+        y_max -= layout.riser_thickness
+    else:
+        y_min += layout.riser_thickness
+    local = extrude_xz_profile(
+        polygon, y_min, y_max, part_type="UNDERBODY", ordinal=ordinal)
+    forward, left = outgoing_local.axes.forward, outgoing_local.axes.left
+    vertices = tuple((outgoing_local.lower_xy[0] + forward[0] * x + left[0] * y,
+                      outgoing_local.lower_xy[1] + forward[1] * x + left[1] * y,
+                      z) for x, y, z in local.vertices)
+    result = MeshFragment("UNDERBODY", ordinal, vertices, local.faces)
     validate_mesh_fragments((result,))
     return result
 
@@ -647,6 +711,9 @@ def prepare_multiflight_residential_geometry(
     turn_cross = (layout.flights[0].forward[0] * layout.flights[1].forward[1]
                   - layout.flights[0].forward[1] * layout.flights[1].forward[0])
     outer_side = "RIGHT" if turn_cross > 0.0 else "LEFT"
+    upper_baseline = (_upper_section_baseline(
+        layout, locals_[1], values, landing_soffit)
+        if values.underside_mode == "SLOPED_CLOSED" else None)
     for index, local in enumerate(locals_):
         fragments.extend(build_residential_tread_fragments(local, values))
         # The final upper arrival alone owns the 07-C positive-nosing cap.
@@ -655,22 +722,29 @@ def prepare_multiflight_residential_geometry(
             if cap is not None:
                 fragments.append(cap)
         fragments.extend(build_residential_riser_fragments(local, values))
-        fragments.append(_build_l_flight_underbody_fragment(
-            local, values, index))
+        if not (index == 1 and upper_baseline is not None):
+            fragments.append(_build_l_flight_underbody_fragment(
+                local, values, index))
         if values.left_side_board_enabled:
             fragments.append(_build_l_flight_board_fragment(
                 local, "LEFT", values, index,
-                index == 1 and outer_side == "LEFT"))
+                index == 1 and outer_side == "LEFT",
+                upper_baseline if index == 1 else None))
         if values.right_side_board_enabled:
             fragments.append(_build_l_flight_board_fragment(
                 local, "RIGHT", values, index,
-                index == 1 and outer_side == "RIGHT"))
+                index == 1 and outer_side == "RIGHT",
+                upper_baseline if index == 1 else None))
     fragments.extend(build_landing_side_board_fragments(
         layout, values, len(fragments) + 1, landing_soffit))
     ordinal = len(fragments) + 1
     fragments.append(_build_landing_tread_fragment(layout, values, ordinal))
-    fragments.append(_build_landing_underbody_transition(
-        layout, locals_[1], values, landing_soffit, ordinal + 1))
+    if upper_baseline is not None:
+        fragments.append(_build_sloped_upper_section_fragment(
+            layout, locals_[1], values, landing_soffit, ordinal + 1))
+    else:
+        fragments.append(_build_landing_underbody_transition(
+            layout, locals_[1], values, landing_soffit, ordinal + 1))
     fragments = tuple(fragments)
     validate_mesh_fragments(fragments)
     return layout, fragments, assemble_stair_mesh(fragments)
