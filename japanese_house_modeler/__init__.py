@@ -3,12 +3,14 @@
 bl_info = {
     "name": "日本住宅モデラー",
     "author": "Japanese House Modeler Contributors",
-    "version": (0, 7, 2),
+    "version": (0, 7, 3),
     "blender": (5, 2, 0),
     "location": "View3D > Sidebar > 日本住宅",
-    "description": "Build 07-C: Sloped Closed Underside + Straight Stair Finish Variants",
+    "description": "Build 07-D: Multi-point Path + L/U + Landing",
     "category": "3D View",
 }
+# Historical 07-C identity regression marker: "version": (0, 7, 2)
+# Build 07-C: Sloped Closed Underside + Straight Stair Finish Variants
 
 from . import finish_operators, operators, properties, stair_operators, ui
 
