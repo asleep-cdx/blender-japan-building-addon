@@ -6,7 +6,7 @@
 07-C Straight と Stage-1保存済みLを開き、loadだけではschema、Path、point ID、AUTO snapshot、Material pointer、Meshが変更されないことを Console で記録する。version `(0, 7, 3)` と説明文も確認する。
 
 ## Test 1 — rotated creation and guides
-30°回転したLを作成する。Shiftなしはraw free candidate、Shiftありは既存15°制約となることを確認する。第3点では10 px以内のexact 90°、world X/Y、既存Path点、segment extension/parallel、visible managed Wall endpoint X/Y guideだけがsnapし、threshold外のnon-90°および曖昧な等距離candidateはwarningのままcommitされないことを確認する。Wallに接続・split・依存は作られない。
+30°回転したLを作成する。Shiftなしはraw free candidate、Shiftありは既存15°制約となることを確認する。P1確定後はcursorを90°位置から大きく外してもconfirmed P0-P1とP1から左右へ伸びる2本の90°guideが常時表示されることを確認する。第3点では10 px以内のexact 90°、world X/Y、既存Path点、segment extension/parallel、visible managed Wall endpoint X/Y guideだけがsnapし、90°guideへ近づくとcandidate Pathが表示されることを確認する。threshold外でclickした場合はwarning後もmodalとpersistent guideが継続する。曖昧な等距離candidateもcommitされず、Wallに接続・split・依存は作られない。
 
 ## Test 2 — START / TURN / END relocation and Undo
 3ボタンを順に操作する。移動中はcurrent Path、candidate Path、moving marker、active guideを確認し、full Meshがmouse moveごとに交換されないことを確認する。START/ENDのShiftは15°とexact 90°が両立するときだけ成立し、TURNはThales circle上、Shift+TURNは15°rayとexact 90°の同時解となることを確認する。各操作ごとに **UI operation → Ctrl+Z → Ctrl+Shift+Z → Console** の順を厳守し、途中でConsoleを開かない。最後にpoint ID、Stair ID、Material、identity Transform、one Managed Meshを確認する。ESC/RMBはdraw handlerを消し、同じsnapshotを保持する。

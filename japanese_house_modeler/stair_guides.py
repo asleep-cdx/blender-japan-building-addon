@@ -22,6 +22,28 @@ class MoveCandidate:
     guide: str
 
 
+@dataclass(frozen=True)
+class RightAngleGuideRays:
+    """Persistent visual state for the two valid L-creation directions."""
+    origin: tuple
+    left_direction: tuple
+    right_direction: tuple
+
+
+def creation_right_angle_guide_rays(p0, p1):
+    """Return the two opposite unit rays perpendicular to confirmed P0->P1."""
+    start = tuple(map(float, p0[:2]))
+    turn = tuple(map(float, p1[:2]))
+    incoming = turn[0] - start[0], turn[1] - start[1]
+    length = math.hypot(*incoming)
+    if length <= 1.0e-6 or not all(math.isfinite(value)
+                                   for value in start + turn):
+        raise ValueError("90度creation guideのconfirmed Pathが不正です。")
+    unit = incoming[0] / length, incoming[1] / length
+    left = -unit[1], unit[0]
+    return RightAngleGuideRays(turn, left, (-left[0], -left[1]))
+
+
 def move_anchor_index(point_count, moved_index):
     """Return the canonical anchor; ascent direction intentionally is irrelevant."""
     if not 0 <= moved_index < point_count or point_count < 2:

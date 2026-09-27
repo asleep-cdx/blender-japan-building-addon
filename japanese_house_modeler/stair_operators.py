@@ -18,7 +18,8 @@ from .stair_geometry import (
 from . import stair_multiflight as multiflight
 from .stair_guides import (
     GUIDE_THRESHOLD_PX, aligned_candidates, endpoint_right_angle_candidate,
-    project_to_line, resolve_creation_candidate, resolve_move_candidate,
+    creation_right_angle_guide_rays, project_to_line,
+    resolve_creation_candidate, resolve_move_candidate,
     turn_right_angle_candidate,
 )
 
@@ -373,6 +374,7 @@ class JHM_OT_create_stair(bpy.types.Operator):
         self._path_shape = defaults.path_shape
         self._start_point = None
         self._candidate = None
+        self._raw_creation_point = None
         self._draw_handle = bpy.types.SpaceView3D.draw_handler_add(
             self._draw_preview, (), "WINDOW", "POST_PIXEL")
         context.window_manager.modal_handler_add(self)
@@ -385,6 +387,7 @@ class JHM_OT_create_stair(bpy.types.Operator):
                 return self._finish({"CANCELLED"})
             if event.type == "MOUSEMOVE":
                 raw_candidate, _error = self._plane_point(event)
+                self._raw_creation_point = raw_candidate
                 self._candidate = self._resolve_creation_candidate(
                     context, event, raw_candidate)
                 self._tag_redraw()
@@ -394,6 +397,7 @@ class JHM_OT_create_stair(bpy.types.Operator):
                 if point is None:
                     self.report({"WARNING"}, error or "基準平面との交点を取得できません。")
                     return {"RUNNING_MODAL"}
+                self._raw_creation_point = point
                 point = self._resolve_creation_candidate(context, event, point)
                 if point is None:
                     self.report({"WARNING"}, "90度L candidateを解決できません。")
@@ -603,13 +607,15 @@ class JHM_OT_create_stair(bpy.types.Operator):
 
     def _draw_preview(self):
         try:
-            if self._start_point is None or self._candidate is None:
+            if self._start_point is None:
                 return
-            world_points = tuple(self._points) + (
-                () if self._candidate is self._points[-1] else (self._candidate,))
+            world_points = tuple(self._points)
+            if self._candidate is not None and (
+                    not world_points or self._candidate is not world_points[-1]):
+                world_points += (self._candidate,)
             screen_points = tuple(view3d_utils.location_3d_to_region_2d(
                 self._region, self._region_data, point) for point in world_points)
-            if len(screen_points) < 2 or any(point is None for point in screen_points):
+            if not screen_points or any(point is None for point in screen_points):
                 return
             start, end = screen_points[0], screen_points[-1]
             shader = gpu.shader.from_builtin("UNIFORM_COLOR")
@@ -628,11 +634,47 @@ class JHM_OT_create_stair(bpy.types.Operator):
                 arrow = [tip, tip - direction * 12 + left * 6,
                          tip, tip - direction * 12 - left * 6]
             gpu.state.line_width_set(2.0)
+            # Confirmed P0/P1 remains visible even while the raw P2 is invalid.
             shader.uniform_float("color", (0.2, 0.8, 1.0, 1.0))
             path_lines = tuple(value for pair in zip(screen_points, screen_points[1:])
                                for value in pair)
             vertices = (*path_lines, *arrow)
-            batch_for_shader(shader, "LINES", {"pos": vertices}).draw(shader)
+            if vertices:
+                batch_for_shader(shader, "LINES", {"pos": vertices}).draw(shader)
+            if (self._path_shape == "L" and len(self._points) == 2
+                    and self._candidate is not None and len(screen_points) == 3):
+                shader.uniform_float("color", (1.0, 0.75, 0.1, 1.0))
+                gpu.state.line_width_set(3.0)
+                batch_for_shader(shader, "LINES", {"pos": (
+                    screen_points[1], screen_points[2])}).draw(shader)
+                gpu.state.line_width_set(2.0)
+            if self._path_shape == "L" and len(self._points) == 2:
+                rays = creation_right_angle_guide_rays(
+                    self._points[0], self._points[1])
+                incoming_length = math.hypot(
+                    self._points[1].x - self._points[0].x,
+                    self._points[1].y - self._points[0].y)
+                raw_distance = (0.0 if self._raw_creation_point is None else
+                    math.hypot(self._raw_creation_point.x - rays.origin[0],
+                               self._raw_creation_point.y - rays.origin[1]))
+                ray_length = max(1.0, incoming_length, raw_distance)
+                guide_world = tuple(Vector((
+                    rays.origin[0] + direction[0] * ray_length,
+                    rays.origin[1] + direction[1] * ray_length,
+                    self._base_z_m)) for direction in (
+                        rays.left_direction, rays.right_direction))
+                origin_screen = view3d_utils.location_3d_to_region_2d(
+                    self._region, self._region_data,
+                    Vector((*rays.origin, self._base_z_m)))
+                guide_screen = tuple(view3d_utils.location_3d_to_region_2d(
+                    self._region, self._region_data, point)
+                                     for point in guide_world)
+                if origin_screen is not None and all(
+                        point is not None for point in guide_screen):
+                    shader.uniform_float("color", (0.2, 0.8, 1.0, 0.55))
+                    batch_for_shader(shader, "LINES", {"pos": (
+                        origin_screen, guide_screen[0],
+                        origin_screen, guide_screen[1])}).draw(shader)
             gpu.state.point_size_set(8.0)
             batch_for_shader(shader, "POINTS", {"pos": screen_points}).draw(shader)
             blf.position(0, start.x + 6, start.y + 6, 0)

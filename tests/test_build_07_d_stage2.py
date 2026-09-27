@@ -6,7 +6,8 @@ package.__path__ = [str(ROOT / "japanese_house_modeler")]
 sys.modules.setdefault("japanese_house_modeler", package)
 from japanese_house_modeler.drawing_alignment import constrained_direction, select_unambiguous_candidate
 from japanese_house_modeler.stair_guides import (aligned_candidates, endpoint_right_angle_candidate,
-    endpoint_shift_candidate, move_anchor_index, resolve_creation_candidate,
+    creation_right_angle_guide_rays, endpoint_shift_candidate, move_anchor_index,
+    resolve_creation_candidate,
     resolve_move_candidate, turn_right_angle_candidate)
 from japanese_house_modeler.stair_multiflight import (RISER_DISTRIBUTION_AUTO,
     FlightAllocation, allocation_counts, build_landing_side_board_fragments,
@@ -46,6 +47,24 @@ class GuideTests(unittest.TestCase):
         point=endpoint_shift_candidate(POINTS,2,(3,2));self.assertAlmostEqual(dot_at((POINTS[0],POINTS[1],point)),0)
     def test_endpoint_shift_incompatible(self):
         with self.assertRaises(ValueError): endpoint_shift_candidate(POINTS,2,(4,2))
+    def test_creation_has_two_persistent_perpendicular_rays(self):
+        rays=creation_right_angle_guide_rays(POINTS[0],POINTS[1])
+        incoming=(POINTS[1][0]-POINTS[0][0],POINTS[1][1]-POINTS[0][1])
+        self.assertEqual(rays.origin,POINTS[1])
+        for direction in (rays.left_direction,rays.right_direction):
+            self.assertAlmostEqual(incoming[0]*direction[0]+incoming[1]*direction[1],0)
+        self.assertAlmostEqual(rays.left_direction[0]+rays.right_direction[0],0)
+        self.assertAlmostEqual(rays.left_direction[1]+rays.right_direction[1],0)
+    def test_invalid_candidate_does_not_remove_visual_guide_foundation(self):
+        rays=creation_right_angle_guide_rays(POINTS[0],POINTS[1])
+        with self.assertRaises(ValueError):
+            resolve_creation_candidate(POINTS[:2],IDS,(2.5,2),guide_candidates=((3,2),),distances=(20,))
+        self.assertEqual(rays.origin,POINTS[1])
+        with self.assertRaises(ValueError): endpoint_shift_candidate(POINTS,2,(4,2))
+        self.assertEqual(creation_right_angle_guide_rays(POINTS[0],POINTS[1]),rays)
+    def test_creation_threshold_snap_is_exact_90(self):
+        result=resolve_creation_candidate(POINTS[:2],IDS,(2.95,2),guide_candidates=((3,2),),distances=(6,),guide_names=("RIGHT_ANGLE",))
+        self.assertAlmostEqual(dot_at(result.points),0)
 
 class AllocationTests(unittest.TestCase):
     def layout(self, **kw): return resolve_multiflight_layout(POINTS,"FORWARD",0,2800,16,900,30,12,point_ids=IDS,**kw)
@@ -106,6 +125,8 @@ class ResidentialGeometryTests(unittest.TestCase):
         self.assertIn('_visible_wall_endpoint_coordinates(context)',source)
         self.assertIn('guide_candidates=guides',source);self.assertIn('draw_handler_add(',source);self.assertIn('draw_handler_remove(',source)
         self.assertNotIn('wall.connections.add',source);self.assertNotIn('split_wall',source)
+        self.assertIn('creation_right_angle_guide_rays(',source)
+        self.assertNotIn('if self._start_point is None or self._candidate is None:',source)
     def test_fragments_closed_nonzero_and_turn_join_finite(self):
         _layout,fragments,mesh=self.prepare("SLOPED_CLOSED","SLOPED","ROUND")
         for fragment in fragments:
