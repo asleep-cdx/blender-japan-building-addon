@@ -36,6 +36,8 @@ _CLASSES = (
     stair_operators.JHM_OT_create_stair,
     stair_operators.JHM_OT_edit_stair_dimensions,
     stair_operators.JHM_OT_edit_stair_path,
+    stair_operators.JHM_OT_edit_stair_distribution,
+    stair_operators.JHM_OT_move_stair_path_point,
     stair_operators.JHM_OT_reverse_stair_ascent,
     stair_operators.JHM_OT_regenerate_stair,
     stair_operators.JHM_OT_apply_residential_stair,

@@ -14,9 +14,11 @@ from .stair_geometry import (
     canonical_path, generate_stair_id, prepare_stair_geometry,
 )
 from . import stair_multiflight as multiflight
+from .stair_guides import resolve_move_candidate
 
 MULTIPOINT_SCHEMA_VERSION = multiflight.MULTIPOINT_SCHEMA_VERSION
 RISER_DISTRIBUTION_AUTO = multiflight.RISER_DISTRIBUTION_AUTO
+RISER_DISTRIBUTION_MANUAL = multiflight.RISER_DISTRIBUTION_MANUAL
 TURN_MODE = getattr(multiflight, "TURN_" + "LAND" + "ING")
 from .stair_state import (
     ID_CONFLICT, ID_MISSING, StairState, diagnose_stair,
@@ -67,7 +69,9 @@ def _canonical_snapshot(stair):
             turn_mode=stair.turn_mode,
             riser_distribution_mode=stair.riser_distribution_mode,
             auto_riser_allocation=tuple(
-                int(value) for value in stair.auto_riser_allocation.split(",") if value))
+                int(value) for value in stair.auto_riser_allocation.split(",") if value),
+            manual_riser_allocation=tuple(
+                int(value) for value in stair.manual_riser_allocation.split(",") if value))
     return values
 
 
@@ -96,6 +100,7 @@ def stair_issues(stair_object, scene):
         tuple(point.point_id for point in stair.path_points),
         stair.turn_mode, stair.riser_distribution_mode,
         tuple(stair.auto_riser_allocation.split(",")),
+        tuple(stair.manual_riser_allocation.split(",")),
     )
     duplicates = duplicate_stair_ids(_managed_records(scene))
     return diagnose_stair(state, duplicates)
@@ -135,18 +140,31 @@ def _set_canonical(stair, values):
             "riser_distribution_mode", RISER_DISTRIBUTION_AUTO)
         stair.auto_riser_allocation = ",".join(
             str(value) for value in values.get("auto_riser_allocation", ()))
+        stair.manual_riser_allocation = ",".join(
+            str(value) for value in values.get("manual_riser_allocation", ()))
 
 
 def _prepare_candidate(values):
     if values.get("stair_schema_version") == MULTIPOINT_SCHEMA_VERSION:
-        layout, _fragments, mesh_data = multiflight.prepare_multiflight_geometry(
-            values["path_points"], values["ascent_direction"],
-            values["base_z_mm"], values["floor_to_floor_mm"],
-            values["riser_count"], values["stair_width_mm"],
-            values["tread_thickness_mm"], values["riser_thickness_mm"],
-            point_ids=values.get("point_ids"),
-            allocation=values.get("auto_riser_allocation"))
-        values["auto_riser_allocation"] = layout.allocation
+        allocation = (values.get("manual_riser_allocation")
+                      if values.get("riser_distribution_mode") == RISER_DISTRIBUTION_MANUAL
+                      else values.get("auto_riser_allocation"))
+        keywords = dict(point_ids=values.get("point_ids"), allocation=allocation)
+        arguments = (values["path_points"], values["ascent_direction"],
+                     values["base_z_mm"], values["floor_to_floor_mm"],
+                     values["riser_count"], values["stair_width_mm"],
+                     values["tread_thickness_mm"], values["riser_thickness_mm"])
+        if values.get("assembly_mode") == STANDARD_RESIDENTIAL:
+            layout, _fragments, mesh_data = (
+                multiflight.prepare_multiflight_residential_geometry(
+                    *arguments, fields=values["residential"], **keywords))
+        else:
+            layout, _fragments, mesh_data = multiflight.prepare_multiflight_geometry(
+                *arguments, **keywords)
+        if values.get("riser_distribution_mode") == RISER_DISTRIBUTION_MANUAL:
+            values["manual_riser_allocation"] = layout.allocation
+        else:
+            values["auto_riser_allocation"] = layout.allocation
         return mesh_data
     if values.get("assembly_mode") == STANDARD_RESIDENTIAL:
         return prepare_residential_geometry(
@@ -353,8 +371,10 @@ class JHM_OT_create_stair(bpy.types.Operator):
                         layout, _fragments, mesh_data = prepare_residential_geometry(
                             path, **self._prepare_keywords(), fields=fields)
                     else:
-                        layout, _fragments, mesh_data = multiflight.prepare_multiflight_geometry(
-                            tuple(self._points), **self._prepare_keywords())
+                        layout, _fragments, mesh_data = (
+                            multiflight.prepare_multiflight_residential_geometry(
+                                tuple(self._points), **self._prepare_keywords(),
+                                fields=fields))
                         path = tuple(point.xy for point in layout.canonical_path)
                 except ValueError as exc:
                     self._points.pop()
@@ -578,7 +598,8 @@ class JHM_OT_edit_stair_dimensions(_StairOperationMixin, bpy.types.Operator):
         for name in _CANONICAL_NAMES:
             if name != "ascent_direction":
                 candidate[name] = getattr(self, name)
-        if candidate.get("stair_schema_version") == MULTIPOINT_SCHEMA_VERSION:
+        if (candidate.get("stair_schema_version") == MULTIPOINT_SCHEMA_VERSION
+                and candidate.get("riser_distribution_mode") == RISER_DISTRIBUTION_AUTO):
             candidate["auto_riser_allocation"] = None
         return self._run_candidate(context, candidate)
 
@@ -593,6 +614,15 @@ class JHM_OT_edit_stair_path(_StairOperationMixin, bpy.types.Operator):
     p0_y_mm: bpy.props.FloatProperty(name="P0 Y (mm)")
     p1_x_mm: bpy.props.FloatProperty(name="P1 X (mm)")
     p1_y_mm: bpy.props.FloatProperty(name="P1 Y (mm)")
+    p2_x_mm: bpy.props.FloatProperty(name="P2 X (mm)")
+    p2_y_mm: bpy.props.FloatProperty(name="P2 Y (mm)")
+
+    def draw(self, _context):
+        count = getattr(self, "_point_count", 2)
+        for index in range(count):
+            row = self.layout.row(align=True)
+            row.prop(self, f"p{index}_x_mm")
+            row.prop(self, f"p{index}_y_mm")
 
     def invoke(self, context, _event):
         obj = self._require_allowed(context)
@@ -601,6 +631,9 @@ class JHM_OT_edit_stair_path(_StairOperationMixin, bpy.types.Operator):
         points = tuple(tuple(point.xy) for point in obj.jhm_stair.path_points)
         self.p0_x_mm, self.p0_y_mm = (value * 1000.0 for value in points[0])
         self.p1_x_mm, self.p1_y_mm = (value * 1000.0 for value in points[1])
+        self._point_count = len(points)
+        if len(points) > 2:
+            self.p2_x_mm, self.p2_y_mm = (value * 1000.0 for value in points[2])
         return context.window_manager.invoke_props_dialog(self)
 
     def execute(self, context):
@@ -608,11 +641,128 @@ class JHM_OT_edit_stair_path(_StairOperationMixin, bpy.types.Operator):
         if obj is None:
             return {"CANCELLED"}
         candidate = _canonical_snapshot(obj.jhm_stair)
-        candidate["path_points"] = (
+        points = [
             (self.p0_x_mm / 1000.0, self.p0_y_mm / 1000.0),
             (self.p1_x_mm / 1000.0, self.p1_y_mm / 1000.0),
-        )
+        ]
+        if candidate.get("stair_schema_version") == MULTIPOINT_SCHEMA_VERSION:
+            points.append((self.p2_x_mm / 1000.0, self.p2_y_mm / 1000.0))
+            if candidate.get("riser_distribution_mode") == RISER_DISTRIBUTION_AUTO:
+                candidate["auto_riser_allocation"] = None
+        candidate["path_points"] = tuple(points)
         return self._run_candidate(context, candidate)
+
+
+class JHM_OT_edit_stair_distribution(_StairOperationMixin, bpy.types.Operator):
+    bl_idname = "jhm.edit_stair_distribution"
+    bl_label = "Riser Distributionを変更"
+    bl_options = {"REGISTER", "UNDO"}
+    operation = "EDIT_DIMENSIONS"
+
+    mode: bpy.props.EnumProperty(name="Riser Distribution", items=(
+        ("AUTO", "AUTO", "Pathから自動配分"),
+        ("MANUAL", "MANUAL", "physical Flightごとの固定配分")))
+    flight_1: bpy.props.IntProperty(name="Flight 1 Risers", min=2)
+    flight_2: bpy.props.IntProperty(name="Flight 2 Risers", min=2)
+
+    def draw(self, _context):
+        self.layout.prop(self, "mode")
+        column = self.layout.column()
+        column.enabled = self.mode == RISER_DISTRIBUTION_MANUAL
+        column.prop(self, "flight_1")
+        column.prop(self, "flight_2")
+        column.label(text=f"Total = {self.flight_1 + self.flight_2} / {self._overall}")
+
+    def invoke(self, context, _event):
+        obj = self._require_allowed(context)
+        if obj is None or obj.jhm_stair.stair_schema_version != 4:
+            return {"CANCELLED"}
+        candidate = _canonical_snapshot(obj.jhm_stair)
+        self.mode = candidate["riser_distribution_mode"]
+        values = (candidate.get("manual_riser_allocation") or
+                  candidate.get("auto_riser_allocation"))
+        self.flight_1, self.flight_2 = values
+        self._overall = candidate["riser_count"]
+        return context.window_manager.invoke_props_dialog(self)
+
+    def execute(self, context):
+        obj = self._require_allowed(context)
+        if obj is None:
+            return {"CANCELLED"}
+        candidate = _canonical_snapshot(obj.jhm_stair)
+        old_mode = candidate["riser_distribution_mode"]
+        if self.mode == RISER_DISTRIBUTION_MANUAL:
+            values = multiflight.validate_manual_allocation(
+                (self.flight_1, self.flight_2), candidate["riser_count"])
+            candidate["manual_riser_allocation"] = values
+        elif old_mode == RISER_DISTRIBUTION_MANUAL:
+            candidate["auto_riser_allocation"] = None
+        candidate["riser_distribution_mode"] = self.mode
+        return self._run_candidate(context, candidate)
+
+
+class JHM_OT_move_stair_path_point(_StairOperationMixin, bpy.types.Operator):
+    """Relocate any schema-4 Path point without touching Object Transform."""
+    bl_idname = "jhm.move_stair_path_point"
+    bl_label = "階段Path点を移動"
+    bl_options = {"REGISTER", "UNDO"}
+    operation = "EDIT_PATH"
+    point_index: bpy.props.IntProperty(options={"HIDDEN"})
+
+    def invoke(self, context, _event):
+        obj = self._require_allowed(context)
+        if (obj is None or obj.jhm_stair.stair_schema_version != 4
+                or not 0 <= self.point_index < len(obj.jhm_stair.path_points)):
+            return {"CANCELLED"}
+        self._object = obj
+        self._snapshot = _canonical_snapshot(obj.jhm_stair)
+        self._area = context.area
+        self._region = next((r for r in context.area.regions if r.type == "WINDOW"), None)
+        self._region_data = context.space_data.region_3d
+        self._candidate = None
+        context.window_manager.modal_handler_add(self)
+        return {"RUNNING_MODAL"}
+
+    def _point(self, event):
+        coordinate = (event.mouse_x - self._region.x, event.mouse_y - self._region.y)
+        origin = view3d_utils.region_2d_to_origin_3d(
+            self._region, self._region_data, coordinate)
+        direction = view3d_utils.region_2d_to_vector_3d(
+            self._region, self._region_data, coordinate)
+        if abs(direction.z) <= _PLANE_EPSILON:
+            return None
+        distance = (self._snapshot["base_z_mm"] / 1000.0 - origin.z) / direction.z
+        if distance < 0.0:
+            return None
+        point = origin + direction * distance
+        return point.x, point.y
+
+    def modal(self, context, event):
+        if event.type in {"ESC", "RIGHTMOUSE"}:
+            return {"CANCELLED"}
+        if event.type in {"MOUSEMOVE", "LEFTMOUSE"}:
+            raw = self._point(event)
+            if raw is None:
+                return {"RUNNING_MODAL"}
+            try:
+                self._candidate = resolve_move_candidate(
+                    self._snapshot["path_points"], self._snapshot["point_ids"],
+                    self.point_index, raw, shift=event.shift)
+            except ValueError as exc:
+                self._candidate = None
+                if event.type == "LEFTMOUSE":
+                    self.report({"WARNING"}, str(exc))
+                return {"RUNNING_MODAL"}
+            if event.type == "MOUSEMOVE":
+                self._area.tag_redraw()
+                return {"RUNNING_MODAL"}
+            if event.value == "PRESS":
+                candidate = dict(self._snapshot)
+                candidate["path_points"] = self._candidate.points
+                if candidate["riser_distribution_mode"] == RISER_DISTRIBUTION_AUTO:
+                    candidate["auto_riser_allocation"] = None
+                return self._run_candidate(context, candidate)
+        return {"RUNNING_MODAL"}
 
 
 class JHM_OT_reverse_stair_ascent(_StairOperationMixin, bpy.types.Operator):

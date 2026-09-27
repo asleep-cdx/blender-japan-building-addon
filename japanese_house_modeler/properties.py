@@ -67,6 +67,7 @@ class JHM_StairProperties(bpy.types.PropertyGroup):
     turn_mode: bpy.props.StringProperty(default="", options={"HIDDEN"})
     riser_distribution_mode: bpy.props.StringProperty(default="", options={"HIDDEN"})
     auto_riser_allocation: bpy.props.StringProperty(default="", options={"HIDDEN"})
+    manual_riser_allocation: bpy.props.StringProperty(default="", options={"HIDDEN"})
     ascent_direction: bpy.props.EnumProperty(
         name="上り方向", items=_ASCENT_DIRECTION_ITEMS, default="FORWARD")
     base_z_mm: bpy.props.FloatProperty(name="下端基準高さ", default=0.0)

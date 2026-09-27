@@ -4,7 +4,8 @@ from dataclasses import dataclass
 
 from .stair_geometry import resolve_stair_layout
 from .stair_multiflight import (
-    MULTIPOINT_SCHEMA_VERSION, RISER_DISTRIBUTION_AUTO, TURN_LANDING,
+    MULTIPOINT_SCHEMA_VERSION, RISER_DISTRIBUTION_AUTO,
+    RISER_DISTRIBUTION_MANUAL, TURN_LANDING,
     resolve_multiflight_layout,
 )
 from .stair_residential import (
@@ -59,6 +60,7 @@ class StairState:
     turn_mode: str = ""
     riser_distribution_mode: str = ""
     auto_riser_allocation: tuple = ()
+    manual_riser_allocation: tuple = ()
 
 
 def duplicate_stair_ids(records):
@@ -93,14 +95,18 @@ def diagnose_stair(state, duplicate_ids=()):
         if state.stair_schema_version == MULTIPOINT_SCHEMA_VERSION:
             if state.turn_mode != TURN_LANDING:
                 raise ValueError("schema 4 Turn modeが不正です。")
-            if state.riser_distribution_mode != RISER_DISTRIBUTION_AUTO:
+            if state.riser_distribution_mode not in (
+                    RISER_DISTRIBUTION_AUTO, RISER_DISTRIBUTION_MANUAL):
                 raise ValueError("schema 4 Riser Distribution modeが不正です。")
+            allocation = (state.manual_riser_allocation
+                          if state.riser_distribution_mode == RISER_DISTRIBUTION_MANUAL
+                          else state.auto_riser_allocation)
             layout = resolve_multiflight_layout(
                 state.path_points, state.ascent_direction, state.base_z_mm,
                 state.floor_to_floor_mm, state.riser_count,
                 state.stair_width_mm, state.tread_thickness_mm,
                 state.riser_thickness_mm, point_ids=state.point_ids,
-                allocation=state.auto_riser_allocation)
+                allocation=allocation)
         else:
             layout = resolve_stair_layout(
                 state.path_points, state.ascent_direction, state.base_z_mm,
@@ -113,19 +119,22 @@ def diagnose_stair(state, duplicate_ids=()):
         validate_mode_data(state.assembly_mode, state.stair_schema_version,
                            state.residential)
         if (state.assembly_mode == STANDARD_RESIDENTIAL and layout is not None
-                and state.stair_schema_version < MULTIPOINT_SCHEMA_VERSION):
-            validate_stepped_underbody_thickness(
-                state.residential, layout.actual_riser,
-                layout.tread_thickness, layout.riser_thickness)
-            validate_stepped_closure_depth(
-                state.residential, layout.actual_riser, layout.going)
-            validate_nosing_board_compatibility(
-                state.residential, layout.going, layout.tread_thickness,
-                layout.actual_riser)
-            if (state.residential.left_side_board_enabled
-                    or state.residential.right_side_board_enabled):
-                validate_side_board_reveal(
-                    state.residential, layout.actual_riser, layout.going)
+                and state.stair_schema_version <= MULTIPOINT_SCHEMA_VERSION):
+            goings = ([layout.going] if state.stair_schema_version < 4
+                      else [flight.going for flight in layout.flights])
+            for going in goings:
+                validate_stepped_underbody_thickness(
+                    state.residential, layout.actual_riser,
+                    layout.tread_thickness, layout.riser_thickness)
+                validate_stepped_closure_depth(
+                    state.residential, layout.actual_riser, going)
+                validate_nosing_board_compatibility(
+                    state.residential, going, layout.tread_thickness,
+                    layout.actual_riser)
+                if (state.residential.left_side_board_enabled
+                        or state.residential.right_side_board_enabled):
+                    validate_side_board_reveal(
+                        state.residential, layout.actual_riser, going)
     except (TypeError, ValueError, OverflowError):
         if INVALID_CANONICAL not in issues:
             issues.append(INVALID_CANONICAL)
