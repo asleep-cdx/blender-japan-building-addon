@@ -9,7 +9,8 @@ from japanese_house_modeler.stair_guides import (aligned_candidates, endpoint_ri
     endpoint_shift_candidate, move_anchor_index, resolve_creation_candidate,
     resolve_move_candidate, turn_right_angle_candidate)
 from japanese_house_modeler.stair_multiflight import (RISER_DISTRIBUTION_AUTO,
-    FlightAllocation, allocation_counts, canonical_multi_path, prepare_multiflight_residential_geometry,
+    FlightAllocation, allocation_counts, build_landing_side_board_fragments,
+    canonical_multi_path, prepare_multiflight_residential_geometry,
     resolve_multiflight_layout, segment_allocations, switch_distribution_mode,
     validate_manual_allocation)
 from japanese_house_modeler.stair_residential import ResidentialFields
@@ -63,19 +64,19 @@ class AllocationTests(unittest.TestCase):
         a=self.layout().allocation;b=resolve_multiflight_layout(((0,0),(5,0),(5,2)),"FORWARD",0,2800,16,900,30,12,point_ids=IDS).allocation;self.assertNotEqual(a,b)
 
 class ResidentialGeometryTests(unittest.TestCase):
-    def prepare(self, underside="STEPPED_CLOSED", board="STEPPED", edge="SQUARE", left=True,right=True):
+    def prepare(self, underside="STEPPED_CLOSED", board="STEPPED", edge="SQUARE", left=True,right=True,points=POINTS):
         f=ResidentialFields(underside_mode=underside,side_board_mode=board,tread_front_edge_mode=edge,
           tread_front_overhang_mm=10,tread_front_edge_size_mm=3,left_side_board_enabled=left,right_side_board_enabled=right)
-        return prepare_multiflight_residential_geometry(POINTS,"FORWARD",0,2800,16,900,30,12,point_ids=IDS,fields=f)
+        return prepare_multiflight_residential_geometry(points,"FORWARD",0,2800,16,900,30,12,point_ids=IDS,fields=f)
     def test_representative_matrix(self):
         for combo in (("STEPPED_CLOSED","STEPPED","SQUARE"),("STEPPED_CLOSED","SLOPED","BEVEL"),("SLOPED_CLOSED","STEPPED","ROUND"),("SLOPED_CLOSED","SLOPED","SQUARE")):
             with self.subTest(combo=combo):
                 l,fr,m=self.prepare(*combo);self.assertTrue(all(math.isfinite(x) for v in m.vertices for x in v));self.assertAlmostEqual(l.upper_arrival_z,2.8);self.assertGreaterEqual(min(v[2] for v in m.vertices),l.base_z)
                 self.assertEqual(set(m.face_roles),{"TREAD","RISER","UNDERSIDE","SIDE_BOARD"});self.assertNotIn("LANDING",m.face_roles)
     def test_landing_tread_and_underbody(self):
-        l,fr,m=self.prepare(); self.assertEqual(fr[-2].part_type,"TREAD");self.assertEqual(fr[-1].part_type,"UNDERBODY");self.assertIn("UNDERSIDE",m.face_roles)
+        l,fr,m=self.prepare(); self.assertEqual(fr[-3].part_type,"TREAD");self.assertEqual(fr[-2].part_type,"UNDERBODY");self.assertEqual(fr[-1].part_type,"UNDERBODY");self.assertIn("UNDERSIDE",m.face_roles)
     def test_board_sides(self):
-        for left,right,count in ((True,True,8),(True,False,4),(False,True,4),(False,False,0)):
+        for left,right,count in ((True,True,6),(True,False,2),(False,True,4),(False,False,0)):
             _,fr,_=self.prepare(left=left,right=right); self.assertEqual(sum(f.part_type=="SIDE_BOARD" for f in fr),count)
     def test_per_flight_nosing_rejected(self):
         f=ResidentialFields(tread_front_overhang_mm=1000)
@@ -102,13 +103,40 @@ class ResidentialGeometryTests(unittest.TestCase):
     def test_flight_underbodies_contact_landing_foundation(self):
         layout,fragments,_mesh=self.prepare(left=False,right=False)
         bodies=[fragment for fragment in fragments if fragment.part_type=="UNDERBODY"]
-        self.assertEqual(len(bodies),3)
+        self.assertEqual(len(bodies),4)
         def bounds(fragment):
             return tuple((min(vertex[axis] for vertex in fragment.vertices),max(vertex[axis] for vertex in fragment.vertices)) for axis in range(3))
-        landing=bounds(bodies[-1])
-        for flight in bodies[:-1]:
-            flight_bounds=bounds(flight)
-            self.assertTrue(all(max(a[0],b[0])<=min(a[1],b[1])+1e-9 for a,b in zip(flight_bounds,landing)))
+        ordered=[bodies[0],bodies[-2],bodies[-1],bodies[1]]
+        for first,second in zip(ordered,ordered[1:]):
+            self.assertTrue(all(max(a[0],b[0])<=min(a[1],b[1])+1e-9 for a,b in zip(bounds(first),bounds(second))))
         self.assertGreaterEqual(min(vertex[2] for fragment in bodies for vertex in fragment.vertices),layout.base_z)
+    def test_landing_tread_underbody_do_not_overlap(self):
+        layout,fragments,mesh=self.prepare(left=False,right=False)
+        tread,body=fragments[-3],fragments[-2]
+        tread_bottom=min(vertex[2] for vertex in tread.vertices)
+        body_top=max(vertex[2] for vertex in body.vertices)
+        self.assertAlmostEqual(tread_bottom,body_top)
+        self.assertAlmostEqual(max(vertex[2] for vertex in tread.vertices),layout.landing.top_z)
+        self.assertLess(body_top,layout.landing.top_z)
+        self.assertTrue(all(role=="TREAD" for role in mesh.face_roles[-18:-12]))
+    def test_landing_board_turn_mapping_and_openings(self):
+        for points,outer in ((POINTS,"RIGHT"),(((0,0),(3,0),(3,-3)),"LEFT")):
+            for mode in ("STEPPED","SLOPED"):
+                for left,right in ((True,False),(False,True),(True,True),(False,False)):
+                    with self.subTest(points=points,mode=mode,left=left,right=right):
+                        layout,fragments,_mesh=self.prepare(board=mode,left=left,right=right,points=points)
+                        fields=ResidentialFields(side_board_mode=mode,left_side_board_enabled=left,right_side_board_enabled=right)
+                        joins=build_landing_side_board_fragments(layout,fields)
+                        expected=2 if ((outer=="LEFT" and left) or (outer=="RIGHT" and right)) else 0
+                        self.assertEqual(len(joins),expected)
+                        center=layout.landing.center_xy; half=layout.width/2
+                        portals=((layout.flights[0],-half),(layout.flights[1],half))
+                        for fragment in (item for item in fragments if item.part_type=="SIDE_BOARD"):
+                            for flight,plane in portals:
+                                local=[((v[0]-center[0])*flight.forward[0]+(v[1]-center[1])*flight.forward[1],
+                                        (v[0]-center[0])*flight.left[0]+(v[1]-center[1])*flight.left[1]) for v in fragment.vertices]
+                                along=(min(p[0] for p in local),max(p[0] for p in local)); lateral=(min(p[1] for p in local),max(p[1] for p in local))
+                                if along[0]-1e-9<=plane<=along[1]+1e-9:
+                                    self.assertFalse(lateral[0]<half-1e-9 and lateral[1]>-half+1e-9)
 
 if __name__ == '__main__': unittest.main()

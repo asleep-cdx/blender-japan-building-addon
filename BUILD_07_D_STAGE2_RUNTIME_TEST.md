@@ -18,7 +18,7 @@ P0/P1/P2を数値編集し、strict 90°だけが成功すること、AUTOがPat
 AUTO allocationを記録してMANUALへ切替え、同じ値が初期値になることを確認する。合計一致かつ各Flight 2以上のmanual edit、Path move後のphysical segment count保持、MANUAL→AUTO再計算を確認する。合計不一致、1以下、geometry不成立はatomic rollbackする。
 
 ## Test 5 — Residential L visual review
-代表4組（STEPPED_CLOSED/STEPPED/SQUARE、STEPPED_CLOSED/SLOPED/BEVEL、SLOPED_CLOSED/STEPPED/ROUND、SLOPED_CLOSED/SLOPED/SQUARE）をまとめて確認する。LEFT/RIGHT/BOTH/OFFも切替え、下面のcavity・backside・boundary gap・spike・base未満、Landing join、各Flight local left/rightを目視する。
+代表4組（STEPPED_CLOSED/STEPPED/SQUARE、STEPPED_CLOSED/SLOPED/BEVEL、SLOPED_CLOSED/STEPPED/ROUND、SLOPED_CLOSED/SLOPED/SQUARE）をまとめて確認する。LEFT/RIGHT/BOTH/OFFも切替え、下面のcavity・backside・boundary gap・spike・base未満、Landing join、各Flight local left/rightを目視する。Landing TREADとUNDERBODYは踏板下面で接するだけで体積が重ならず、左Turn・右TurnともSide Boardがincoming/outgoing openingを横切らないことを確認する。
 
 ## Test 6 — Material and lifecycle
 Landing=TREAD、body=UNDERSIDE、board=SIDE_BOARDでLANDING roleがないことをConsoleで確認する。Material pointerを設定し、Reverse、Regenerate、Repair、Save、Blender完全終了、再open後もslot/pointer、canonical Path順、physical allocationが保持されることを確認する。

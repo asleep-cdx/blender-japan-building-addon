@@ -4,7 +4,7 @@ This module deliberately lives beside :mod:`stair_geometry`: the accepted
 two-point resolver remains the compatibility authority for schema 1--3.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import math
 import uuid
 
@@ -377,7 +377,11 @@ def _flight_stair_layout(flight, layout):
 
 
 def build_landing_side_board_fragments(layout, fields, start_ordinal=1):
-    """Continue each enabled local uphill side deterministically around the turn."""
+    """Continue only the outer board around exposed Landing perimeter edges.
+
+    The inner Flight boards already meet at the inside corner.  Adding strips
+    for every Flight/side would fence the incoming and outgoing openings.
+    """
     thickness = float(fields.side_board_thickness_mm) / _MM_PER_METRE
     reveal = float(fields.side_board_reveal_mm) / _MM_PER_METRE
     band = float(fields.side_board_band_width_mm) / _MM_PER_METRE
@@ -387,26 +391,48 @@ def build_landing_side_board_fragments(layout, fields, start_ordinal=1):
     bottom = max(layout.base_z, top - band)
     if top - bottom <= _EPSILON:
         raise ValueError("Landing Side Board高さが不足しています。")
+    incoming, outgoing = layout.flights
+    turn_cross = (incoming.forward[0] * outgoing.forward[1]
+                  - incoming.forward[1] * outgoing.forward[0])
+    if abs(turn_cross) <= _EPSILON:
+        raise ValueError("Landing Side Boardには非退化90度Turnが必要です。")
+    # Left turn: local RIGHT is outside. Right turn: local LEFT is outside.
+    outer_side = "RIGHT" if turn_cross > 0.0 else "LEFT"
+    enabled = (fields.right_side_board_enabled if outer_side == "RIGHT"
+               else fields.left_side_board_enabled)
+    if not enabled:
+        return ()
+    sign = -1.0 if outer_side == "RIGHT" else 1.0
     fragments = []
-    ordinal = int(start_ordinal)
-    for flight in layout.flights:
-        for side, enabled, sign in (
-                ("LEFT", fields.left_side_board_enabled, 1.0),
-                ("RIGHT", fields.right_side_board_enabled, -1.0)):
-            if not enabled:
-                continue
-            # LEFT/RIGHT is reevaluated in each Flight's uphill local frame.
-            center = (layout.landing.center_xy[0]
-                      + flight.left[0] * sign * (layout.width + thickness) / 2.0,
-                      layout.landing.center_xy[1]
-                      + flight.left[1] * sign * (layout.width + thickness) / 2.0)
-            fragments.append(_oriented_box(
-                center, flight.forward, flight.left, thickness,
-                -layout.width / 2.0, layout.width / 2.0,
-                bottom, top, "SIDE_BOARD", ordinal))
-            ordinal += 1
+    for offset, flight in enumerate((incoming, outgoing)):
+        # Each strip follows that Flight's own uphill-local outer side.  The
+        # pair occupies only the two exposed edges and meets at their corner;
+        # neither strip crosses an opening edge.
+        center = (layout.landing.center_xy[0]
+                  + flight.left[0] * sign * (layout.width + thickness) / 2.0,
+                  layout.landing.center_xy[1]
+                  + flight.left[1] * sign * (layout.width + thickness) / 2.0)
+        fragments.append(_oriented_box(
+            center, flight.forward, flight.left, thickness,
+            -layout.width / 2.0, layout.width / 2.0,
+            bottom, top, "SIDE_BOARD", int(start_ordinal) + offset))
     validate_mesh_fragments(tuple(fragments))
     return tuple(fragments)
+
+
+def _trimmed_flight_board_layout(local, position, fields):
+    """Stop Flight boards at, rather than across, each Landing opening."""
+    if position == 0:
+        trim = local.riser_thickness
+        if local.run_length - trim <= _EPSILON:
+            raise ValueError("Landing incoming Side Board trim後の長さが不足します。")
+        return replace(local, run_length=local.run_length - trim)
+    reveal = max(0.0, float(fields.side_board_reveal_mm) / _MM_PER_METRE)
+    if local.run_length - reveal <= _EPSILON:
+        raise ValueError("Landing outgoing Side Board trim後の長さが不足します。")
+    shifted = (local.lower_xy[0] + local.axes.forward[0] * reveal,
+               local.lower_xy[1] + local.axes.forward[1] * reveal)
+    return replace(local, lower_xy=shifted, run_length=local.run_length - reveal)
 
 
 def prepare_multiflight_residential_geometry(
@@ -454,10 +480,11 @@ def prepare_multiflight_residential_geometry(
                 fragments.append(cap)
         fragments.extend(build_residential_riser_fragments(local, values))
         fragments.append(build_underbody_fragment(local, values))
+        board_local = _trimmed_flight_board_layout(local, index, values)
         if values.left_side_board_enabled:
-            fragments.append(build_side_board_fragment(local, "LEFT", values))
+            fragments.append(build_side_board_fragment(board_local, "LEFT", values))
         if values.right_side_board_enabled:
-            fragments.append(build_side_board_fragment(local, "RIGHT", values))
+            fragments.append(build_side_board_fragment(board_local, "RIGHT", values))
     fragments.extend(build_landing_side_board_fragments(
         layout, values, len(fragments) + 1))
     ordinal = len(fragments) + 1
@@ -474,8 +501,18 @@ def prepare_multiflight_residential_geometry(
         -layout.width / 2.0 - layout.riser_thickness,
         layout.width / 2.0 + layout.riser_thickness,
         max(layout.base_z, layout.landing.top_z - layout.width),
-        layout.landing.top_z,
+        layout.landing.top_z - layout.landing.thickness,
         "UNDERBODY", ordinal + 1))
+    # The outgoing local body begins at Landing top and x=r.  This small
+    # opening-side transition bridges from the Landing body/tread-bottom plane
+    # without intruding into the Landing TREAD volume.
+    outgoing = layout.flights[1]
+    fragments.append(_oriented_box(
+        outgoing.start_xy, outgoing.forward, outgoing.left, layout.width,
+        0.0, layout.riser_thickness,
+        layout.landing.top_z - layout.landing.thickness,
+        layout.landing.top_z,
+        "UNDERBODY", ordinal + 2))
     fragments = tuple(fragments)
     validate_mesh_fragments(fragments)
     return layout, fragments, assemble_stair_mesh(fragments)
