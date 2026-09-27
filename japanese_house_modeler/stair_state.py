@@ -3,7 +3,10 @@
 from dataclasses import dataclass
 
 from .stair_geometry import resolve_stair_layout
-from .stair_multiflight import MULTIPOINT_SCHEMA_VERSION, resolve_multiflight_layout
+from .stair_multiflight import (
+    MULTIPOINT_SCHEMA_VERSION, RISER_DISTRIBUTION_AUTO, TURN_LANDING,
+    resolve_multiflight_layout,
+)
 from .stair_residential import (
     BASIC_TREAD_RISER, STANDARD_RESIDENTIAL, ResidentialFields,
     validate_mode_data, validate_nosing_board_compatibility,
@@ -52,6 +55,10 @@ class StairState:
     assembly_mode: str = BASIC_TREAD_RISER
     stair_schema_version: int = 1
     residential: ResidentialFields = ResidentialFields()
+    point_ids: tuple = ()
+    turn_mode: str = ""
+    riser_distribution_mode: str = ""
+    auto_riser_allocation: tuple = ()
 
 
 def duplicate_stair_ids(records):
@@ -83,13 +90,23 @@ def diagnose_stair(state, duplicate_ids=()):
         issues.append(ID_CONFLICT)
     layout = None
     try:
-        resolver = (resolve_multiflight_layout
-                    if state.stair_schema_version == MULTIPOINT_SCHEMA_VERSION
-                    else resolve_stair_layout)
-        layout = resolver(state.path_points, state.ascent_direction, state.base_z_mm,
-                          state.floor_to_floor_mm, state.riser_count,
-                          state.stair_width_mm, state.tread_thickness_mm,
-                          state.riser_thickness_mm)
+        if state.stair_schema_version == MULTIPOINT_SCHEMA_VERSION:
+            if state.turn_mode != TURN_LANDING:
+                raise ValueError("schema 4 Turn modeが不正です。")
+            if state.riser_distribution_mode != RISER_DISTRIBUTION_AUTO:
+                raise ValueError("schema 4 Riser Distribution modeが不正です。")
+            layout = resolve_multiflight_layout(
+                state.path_points, state.ascent_direction, state.base_z_mm,
+                state.floor_to_floor_mm, state.riser_count,
+                state.stair_width_mm, state.tread_thickness_mm,
+                state.riser_thickness_mm, point_ids=state.point_ids,
+                allocation=state.auto_riser_allocation)
+        else:
+            layout = resolve_stair_layout(
+                state.path_points, state.ascent_direction, state.base_z_mm,
+                state.floor_to_floor_mm, state.riser_count,
+                state.stair_width_mm, state.tread_thickness_mm,
+                state.riser_thickness_mm)
     except (TypeError, ValueError, OverflowError):
         issues.append(INVALID_CANONICAL)
     try:

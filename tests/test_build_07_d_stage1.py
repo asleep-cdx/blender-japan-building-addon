@@ -14,7 +14,10 @@ from japanese_house_modeler.stair_geometry import canonical_path, prepare_stair_
 from japanese_house_modeler.stair_multiflight import (
     MULTIPOINT_SCHEMA_VERSION, PathPoint, auto_distribute_risers,
     canonical_multi_path, prepare_multiflight_geometry,
-    resolve_multiflight_layout,
+    project_l_creation_candidate, resolve_multiflight_layout,
+)
+from japanese_house_modeler.stair_state import (
+    INVALID_CANONICAL, StairState, diagnose_stair,
 )
 
 
@@ -45,6 +48,15 @@ class IdentityAndCompatibilityTests(unittest.TestCase):
 
 
 class CanonicalAndValidationTests(unittest.TestCase):
+    def test_creation_projection_makes_slightly_skewed_click_exactly_90_degrees(self):
+        p0, p1, raw = (1, 1), (4, 2), (3.15, 5.1)
+        p2 = project_l_creation_candidate(p0, p1, raw)
+        incoming = (p1[0] - p0[0], p1[1] - p0[1])
+        outgoing = (p2[0] - p1[0], p2[1] - p1[1])
+        self.assertAlmostEqual(sum(a * b for a, b in zip(incoming, outgoing)), 0.0)
+        self.assertEqual(tuple(p.xy for p in canonical_multi_path((p0, p1, p2)))[-1],
+                         p2)
+
     def test_valid_rotated_left_and_right_l(self):
         for points in (((0, 0), (2, 2), (0, 4)),
                        ((0, 0), (2, 2), (4, 0))):
@@ -107,6 +119,71 @@ class ResolutionTests(unittest.TestCase):
         expected = tuple(point.xy for point in forward.canonical_path)
         self.assertEqual(tuple(point.xy for point in reverse.canonical_path), expected)
         self.assertEqual(reverse.traversal_point_ids, tuple(reversed(ids)))
+        self.assertEqual(reverse.allocation, forward.allocation)
+
+    def test_auto_riser_edit_recalculates_and_produces_storable_snapshot(self):
+        old = resolve_multiflight_layout(*ARGS)
+        edited = resolve_multiflight_layout(
+            ARGS[0], ARGS[1], ARGS[2], ARGS[3], 17, *ARGS[5:], allocation=None)
+        self.assertEqual(old.allocation, (8, 8))
+        self.assertEqual(sum(edited.allocation), 17)
+        restored = resolve_multiflight_layout(
+            ARGS[0], ARGS[1], ARGS[2], ARGS[3], 17, *ARGS[5:],
+            allocation=edited.allocation)
+        self.assertEqual(restored.allocation, edited.allocation)
+
+    def test_width_edit_recalculates_using_new_effective_runs(self):
+        points = ((0, 0), (5, 0), (5, 2))
+        narrow = resolve_multiflight_layout(
+            points, "FORWARD", 0, 2800, 10, 900, 30, 12)
+        wide = resolve_multiflight_layout(
+            points, "FORWARD", 0, 2800, 10, 3000, 30, 12)
+        self.assertNotEqual(narrow.allocation, wide.allocation)
+        self.assertEqual(sum(wide.allocation), 10)
+
+    def test_ordinary_regenerate_preserves_valid_saved_allocation(self):
+        saved = (7, 9)
+        regenerated = resolve_multiflight_layout(*ARGS, allocation=saved)
+        self.assertEqual(regenerated.allocation, saved)
+
+
+class SchemaFourDiagnosisTests(unittest.TestCase):
+    def state(self, **changes):
+        values = dict(
+            stair_id="managed", path_points=ARGS[0], ascent_direction=ARGS[1],
+            base_z_mm=ARGS[2], floor_to_floor_mm=ARGS[3], riser_count=ARGS[4],
+            stair_width_mm=ARGS[5], tread_thickness_mm=ARGS[6],
+            riser_thickness_mm=ARGS[7], stair_schema_version=4,
+            point_ids=("p0", "p1", "p2"), turn_mode="LANDING",
+            riser_distribution_mode="AUTO", auto_riser_allocation=(8, 8))
+        values.update(changes)
+        return StairState(**values)
+
+    def test_invalid_saved_allocation_is_invalid_canonical(self):
+        for allocation in ((8,), (1, 15), (8, 7), ("bad", "8")):
+            with self.subTest(allocation=allocation):
+                self.assertIn(INVALID_CANONICAL, diagnose_stair(
+                    self.state(auto_riser_allocation=allocation)))
+
+    def test_empty_duplicate_or_wrong_count_point_ids_are_invalid(self):
+        for ids in (("p0", "", "p2"), ("same", "same", "p2"), ("p0", "p1")):
+            with self.subTest(ids=ids):
+                self.assertIn(INVALID_CANONICAL,
+                              diagnose_stair(self.state(point_ids=ids)))
+
+    def test_turn_and_distribution_modes_are_validated(self):
+        self.assertIn(INVALID_CANONICAL,
+                      diagnose_stair(self.state(turn_mode="WINDER")))
+        self.assertIn(INVALID_CANONICAL,
+                      diagnose_stair(self.state(riser_distribution_mode="MANUAL")))
+
+    def test_schema_1_2_3_diagnosis_remains_non_schema4(self):
+        for schema in (1, 2, 3):
+            state = StairState(
+                "legacy", ((0, 0), (3.6, 0)), "FORWARD", 0, 2800, 16,
+                900, 30, 12, stair_schema_version=schema)
+            with self.subTest(schema=schema):
+                self.assertNotIn(INVALID_CANONICAL, diagnose_stair(state))
 
 
 class GeometryAndTransactionBoundaryTests(unittest.TestCase):
@@ -131,6 +208,19 @@ class GeometryAndTransactionBoundaryTests(unittest.TestCase):
         prepare = source.index("prepare_multiflight_geometry(")
         mutation = source.index('bpy.data.meshes.new("JHM Stair")')
         self.assertLess(prepare, mutation)
+
+    def test_operator_separates_auto_edit_from_regenerate_preservation(self):
+        source = (ROOT / "japanese_house_modeler/stair_operators.py").read_text()
+        self.assertIn('candidate["auto_riser_allocation"] = None', source)
+        self.assertIn('values["auto_riser_allocation"] = layout.allocation', source)
+        self.assertIn(
+            'return self._run_candidate(context, _canonical_snapshot(obj.jhm_stair))',
+            source)
+
+    def test_modal_preview_and_commit_share_creation_projection(self):
+        source = (ROOT / "japanese_house_modeler/stair_operators.py").read_text()
+        self.assertIn("self._candidate = self._resolve_creation_candidate", source)
+        self.assertIn("point = self._resolve_creation_candidate(point)", source)
 
 
 if __name__ == "__main__":

@@ -93,6 +93,9 @@ def stair_issues(stair_object, scene):
         len(mesh.polygons) if mesh is not None and hasattr(mesh, "polygons") else 0,
         semantic_assembly_mode(stair), semantic_schema_version(stair),
         residential_fields(stair),
+        tuple(point.point_id for point in stair.path_points),
+        stair.turn_mode, stair.riser_distribution_mode,
+        tuple(stair.auto_riser_allocation.split(",")),
     )
     duplicates = duplicate_stair_ids(_managed_records(scene))
     return diagnose_stair(state, duplicates)
@@ -136,13 +139,15 @@ def _set_canonical(stair, values):
 
 def _prepare_candidate(values):
     if values.get("stair_schema_version") == MULTIPOINT_SCHEMA_VERSION:
-        return multiflight.prepare_multiflight_geometry(
+        layout, _fragments, mesh_data = multiflight.prepare_multiflight_geometry(
             values["path_points"], values["ascent_direction"],
             values["base_z_mm"], values["floor_to_floor_mm"],
             values["riser_count"], values["stair_width_mm"],
             values["tread_thickness_mm"], values["riser_thickness_mm"],
             point_ids=values.get("point_ids"),
-            allocation=values.get("auto_riser_allocation"))[2]
+            allocation=values.get("auto_riser_allocation"))
+        values["auto_riser_allocation"] = layout.allocation
+        return mesh_data
     if values.get("assembly_mode") == STANDARD_RESIDENTIAL:
         return prepare_residential_geometry(
             values["path_points"], values["ascent_direction"],
@@ -319,13 +324,18 @@ class JHM_OT_create_stair(bpy.types.Operator):
             if event.type in {"ESC", "RIGHTMOUSE"}:
                 return self._finish({"CANCELLED"})
             if event.type == "MOUSEMOVE":
-                self._candidate, _error = self._plane_point(event)
+                raw_candidate, _error = self._plane_point(event)
+                self._candidate = self._resolve_creation_candidate(raw_candidate)
                 self._tag_redraw()
                 return {"RUNNING_MODAL"}
             if event.type == "LEFTMOUSE" and event.value == "PRESS":
                 point, error = self._plane_point(event)
                 if point is None:
                     self.report({"WARNING"}, error or "基準平面との交点を取得できません。")
+                    return {"RUNNING_MODAL"}
+                point = self._resolve_creation_candidate(point)
+                if point is None:
+                    self.report({"WARNING"}, "90度L candidateを解決できません。")
                     return {"RUNNING_MODAL"}
                 required = 2 if self._path_shape == "STRAIGHT" else 3
                 if not self._points:
@@ -385,6 +395,17 @@ class JHM_OT_create_stair(bpy.types.Operator):
             stair_width_mm=self._stair_defaults["stair_width_mm"],
             tread_thickness_mm=self._stair_defaults["tread_thickness_mm"],
             riser_thickness_mm=self._stair_defaults["riser_thickness_mm"])
+
+    def _resolve_creation_candidate(self, point):
+        """Apply the creation-only L projection used by preview and commit."""
+        if point is None or self._path_shape != "L" or len(self._points) != 2:
+            return point
+        try:
+            x, y = multiflight.project_l_creation_candidate(
+                self._points[0], self._points[1], point)
+        except ValueError:
+            return None
+        return Vector((x, y, self._base_z_m))
 
     def _commit(self, context, path, mesh_data, residential, layout,
                 material_plan):
@@ -557,6 +578,8 @@ class JHM_OT_edit_stair_dimensions(_StairOperationMixin, bpy.types.Operator):
         for name in _CANONICAL_NAMES:
             if name != "ascent_direction":
                 candidate[name] = getattr(self, name)
+        if candidate.get("stair_schema_version") == MULTIPOINT_SCHEMA_VERSION:
+            candidate["auto_riser_allocation"] = None
         return self._run_candidate(context, candidate)
 
 

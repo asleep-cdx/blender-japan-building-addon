@@ -84,6 +84,34 @@ def generate_path_point_id():
     return str(uuid.uuid4())
 
 
+def project_l_creation_candidate(p0, p1, raw_p2):
+    """Project only a creation-time third click onto an exact right angle.
+
+    Canonical validation intentionally does not call this helper: persisted or
+    numerically edited paths must never be silently repaired.
+    """
+    converted = []
+    for point in (p0, p1, raw_p2):
+        if point is None or len(point) < 2:
+            raise ValueError("L作成candidateのPath点を取得できません。")
+        xy = (float(point[0]), float(point[1]))
+        if not all(math.isfinite(value) for value in xy):
+            raise ValueError("L作成candidate座標は有限値である必要があります。")
+        converted.append(xy)
+    start, turn, raw_end = converted
+    dx, dy = turn[0] - start[0], turn[1] - start[1]
+    incoming_length = math.hypot(dx, dy)
+    if incoming_length <= _EPSILON:
+        raise ValueError("L作成candidateの第1 Flightが短すぎます。")
+    left = (-dy / incoming_length, dx / incoming_length)
+    raw_delta = (raw_end[0] - turn[0], raw_end[1] - turn[1])
+    signed_projection = raw_delta[0] * left[0] + raw_delta[1] * left[1]
+    if abs(signed_projection) <= _EPSILON:
+        raise ValueError("L作成candidateの曲がり方向または第2 Flight長を決定できません。")
+    return (turn[0] + left[0] * signed_projection,
+            turn[1] + left[1] * signed_projection)
+
+
 def canonical_multi_path(points, point_ids=None):
     """Validate the Stage 1 three-point, right-angle L canonical path."""
     if points is None or len(points) < 2:
