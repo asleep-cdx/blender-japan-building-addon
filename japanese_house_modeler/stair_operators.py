@@ -773,8 +773,9 @@ class JHM_OT_edit_stair_distribution(_StairOperationMixin, bpy.types.Operator):
             return {"CANCELLED"}
         candidate = _canonical_snapshot(obj.jhm_stair)
         self.mode = candidate["riser_distribution_mode"]
-        values = (candidate.get("manual_riser_allocation") or
-                  candidate.get("auto_riser_allocation"))
+        values = multiflight.distribution_edit_initial_allocation(
+            self.mode, candidate.get("auto_riser_allocation"),
+            candidate.get("manual_riser_allocation"))
         self.flight_1, self.flight_2 = values
         self._overall = candidate["riser_count"]
         return context.window_manager.invoke_props_dialog(self)

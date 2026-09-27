@@ -128,6 +128,24 @@ def switch_distribution_mode(current_mode, allocation, effective_runs,
     raise ValueError("Riser Distribution modeが不正です。")
 
 
+def distribution_edit_initial_allocation(current_mode, auto_allocation,
+                                         manual_allocation):
+    """Resolve dialog authority exclusively from the currently active mode."""
+    if current_mode == RISER_DISTRIBUTION_AUTO:
+        selected = auto_allocation
+    elif current_mode == RISER_DISTRIBUTION_MANUAL:
+        selected = manual_allocation
+    else:
+        raise ValueError("Riser Distribution modeが不正です。")
+    try:
+        values = tuple(int(value) for value in selected)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Riser Distribution初期値が不正です。") from exc
+    if not values:
+        raise ValueError("Riser Distribution初期値がありません。")
+    return values
+
+
 def generate_path_point_id():
     """Return identity generated only for an explicit schema-4 operation."""
     return str(uuid.uuid4())

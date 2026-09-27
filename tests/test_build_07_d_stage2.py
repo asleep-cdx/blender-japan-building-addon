@@ -10,7 +10,8 @@ from japanese_house_modeler.stair_guides import (aligned_candidates, endpoint_ri
     resolve_move_candidate, turn_right_angle_candidate)
 from japanese_house_modeler.stair_multiflight import (RISER_DISTRIBUTION_AUTO,
     FlightAllocation, allocation_counts, build_landing_side_board_fragments,
-    canonical_multi_path, prepare_multiflight_residential_geometry,
+    canonical_multi_path, distribution_edit_initial_allocation,
+    prepare_multiflight_residential_geometry,
     resolve_multiflight_layout, segment_allocations, switch_distribution_mode,
     validate_manual_allocation)
 from japanese_house_modeler.stair_residential import ResidentialFields
@@ -62,6 +63,21 @@ class AllocationTests(unittest.TestCase):
         l=resolve_multiflight_layout(POINTS,"REVERSE",0,2800,16,900,30,12,point_ids=IDS,allocation=(7,9));self.assertEqual(l.allocation,(7,9))
     def test_auto_path_change_reallocates(self):
         a=self.layout().allocation;b=resolve_multiflight_layout(((0,0),(5,0),(5,2)),"FORWARD",0,2800,16,900,30,12,point_ids=IDS).allocation;self.assertNotEqual(a,b)
+    def test_auto_dialog_ignores_stale_manual_history(self):
+        initial_auto=self.layout().allocation
+        stale_manual=(7,9)
+        self.assertNotEqual(initial_auto,stale_manual)
+        # MANUAL -> AUTO, followed by an AUTO Path edit/reallocation.
+        changed=resolve_multiflight_layout(((0,0),(5,0),(5,2)),"FORWARD",0,2800,16,900,30,12,point_ids=IDS).allocation
+        self.assertNotEqual(changed,stale_manual)
+        dialog=distribution_edit_initial_allocation("AUTO",changed,stale_manual)
+        self.assertEqual(dialog,changed)
+        mode,manual=switch_distribution_mode("AUTO",dialog,(4.55,1.55),16)
+        self.assertEqual((mode,manual),("MANUAL",changed))
+        source=(ROOT/'japanese_house_modeler/stair_operators.py').read_text()
+        self.assertIn('distribution_edit_initial_allocation(',source)
+    def test_manual_dialog_uses_current_manual(self):
+        self.assertEqual(distribution_edit_initial_allocation("MANUAL",(8,8),(7,9)),(7,9))
 
 class ResidentialGeometryTests(unittest.TestCase):
     def prepare(self, underside="STEPPED_CLOSED", board="STEPPED", edge="SQUARE", left=True,right=True,points=POINTS):
