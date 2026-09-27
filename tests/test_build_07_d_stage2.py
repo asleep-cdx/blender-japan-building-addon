@@ -11,11 +11,15 @@ from japanese_house_modeler.stair_guides import (aligned_candidates, endpoint_ri
     resolve_move_candidate, turn_right_angle_candidate)
 from japanese_house_modeler.stair_multiflight import (RISER_DISTRIBUTION_AUTO,
     FlightAllocation, allocation_counts, build_landing_side_board_fragments,
+    _build_l_flight_board_fragment, _flight_stair_layout,
     canonical_multi_path, distribution_edit_initial_allocation,
     prepare_multiflight_residential_geometry,
     resolve_multiflight_layout, segment_allocations, switch_distribution_mode,
     validate_manual_allocation)
 from japanese_house_modeler.stair_residential import ResidentialFields
+from japanese_house_modeler.stair_residential_geometry import (
+    side_board_lower_profile, side_board_profile,
+)
 
 POINTS=((0,0),(3,0),(3,3)); IDS=("p0","p1","p2")
 def dot_at(points):
@@ -111,7 +115,7 @@ class ResidentialGeometryTests(unittest.TestCase):
     def test_landing_tread_and_underbody(self):
         l,fr,m=self.prepare(); self.assertEqual(fr[-3].part_type,"TREAD");self.assertEqual(fr[-2].part_type,"UNDERBODY");self.assertEqual(fr[-1].part_type,"UNDERBODY");self.assertIn("UNDERSIDE",m.face_roles)
     def test_board_sides(self):
-        for left,right,count in ((True,True,6),(True,False,2),(False,True,4),(False,False,0)):
+        for left,right,count in ((True,True,7),(True,False,2),(False,True,5),(False,False,0)):
             _,fr,_=self.prepare(left=left,right=right); self.assertEqual(sum(f.part_type=="SIDE_BOARD" for f in fr),count)
     def test_per_flight_nosing_rejected(self):
         f=ResidentialFields(tread_front_overhang_mm=1000)
@@ -164,7 +168,7 @@ class ResidentialGeometryTests(unittest.TestCase):
                         layout,fragments,_mesh=self.prepare(board=mode,left=left,right=right,points=points)
                         fields=ResidentialFields(side_board_mode=mode,left_side_board_enabled=left,right_side_board_enabled=right)
                         joins=build_landing_side_board_fragments(layout,fields)
-                        expected=2 if ((outer=="LEFT" and left) or (outer=="RIGHT" and right)) else 0
+                        expected=3 if ((outer=="LEFT" and left) or (outer=="RIGHT" and right)) else 0
                         self.assertEqual(len(joins),expected)
                         center=layout.landing.center_xy; half=layout.width/2
                         portals=((layout.flights[0],-half),(layout.flights[1],half))
@@ -175,5 +179,67 @@ class ResidentialGeometryTests(unittest.TestCase):
                                 along=(min(p[0] for p in local),max(p[0] for p in local)); lateral=(min(p[1] for p in local),max(p[1] for p in local))
                                 if along[0]-1e-9<=plane<=along[1]+1e-9:
                                     self.assertFalse(lateral[0]<half-1e-9 and lateral[1]>-half+1e-9)
+    def test_upper_board_keeps_shared_flight_origin_and_reveal_semantics(self):
+        fields=ResidentialFields(underside_mode="SLOPED_CLOSED",side_board_mode="STEPPED")
+        layout=resolve_multiflight_layout(POINTS,"FORWARD",0,2800,16,900,30,12,point_ids=IDS)
+        locals_=tuple(_flight_stair_layout(flight,layout) for flight in layout.flights)
+        # Equal local dimensions yield identical accepted ordinary profiles;
+        # L trimming never translates lower_xy.
+        self.assertEqual(locals_[1].lower_xy,layout.flights[1].start_xy)
+        upper=side_board_profile(locals_[1],fields)
+        self.assertEqual(upper.lower,side_board_lower_profile(locals_[1],fields))
+        reveal=fields.side_board_reveal_mm/1000
+        ordinary_returns=[x for x,z in upper.outer[1:-2]]
+        self.assertTrue(any(math.isclose((level-1)*locals_[1].going-reveal,x,abs_tol=1e-9)
+                            for level in range(1,locals_[1].riser_count) for x in ordinary_returns))
+    def test_landing_board_caps_and_top_arrival_are_vertical(self):
+        fields=ResidentialFields(underside_mode="SLOPED_CLOSED",side_board_mode="STEPPED")
+        layout=resolve_multiflight_layout(POINTS,"FORWARD",0,2800,16,900,30,12,point_ids=IDS)
+        locals_=tuple(_flight_stair_layout(flight,layout) for flight in layout.flights)
+        for index,local in enumerate(locals_):
+            fragment=_build_l_flight_board_fragment(local,"RIGHT",fields,index)
+            boundary=local.run_length if index==0 else 0.0
+            local_x=[(v[0]-local.lower_xy[0])*local.axes.forward[0]+(v[1]-local.lower_xy[1])*local.axes.forward[1] for v in fragment.vertices]
+            self.assertGreaterEqual(sum(math.isclose(x,boundary,abs_tol=1e-8) for x in local_x),4)
+            if index==1:
+                rear=max(local_x)
+                rear_z={round(v[2],9) for v,x in zip(fragment.vertices,local_x)
+                        if math.isclose(x,rear,abs_tol=1e-8)}
+                self.assertGreaterEqual(len(rear_z),2)
+    def test_landing_front_treatment_only_changes_approach(self):
+        meshes={}
+        for edge in ("SQUARE","BEVEL","ROUND"):
+            layout,fragments,_=self.prepare(edge=edge,left=False,right=False)
+            tread=fragments[-3]
+            incoming=layout.flights[0];center=layout.landing.center_xy
+            local=[((v[0]-center[0])*incoming.forward[0]+(v[1]-center[1])*incoming.forward[1],
+                    (v[0]-center[0])*incoming.left[0]+(v[1]-center[1])*incoming.left[1],v[2]) for v in tread.vertices]
+            meshes[edge]=local
+            self.assertAlmostEqual(max(v[0] for v in local),layout.width/2)
+            self.assertAlmostEqual(min(v[1] for v in local),-layout.width/2)
+            self.assertAlmostEqual(max(v[1] for v in local),layout.width/2)
+            self.assertLess(min(v[0] for v in local),-layout.width/2)
+        self.assertNotEqual(len(meshes["SQUARE"]),len(meshes["BEVEL"]))
+        self.assertNotEqual(len(meshes["BEVEL"]),len(meshes["ROUND"]))
+    def test_landing_body_depth_is_profile_derived_not_width(self):
+        depths=[]
+        for width in (900,1100):
+            layout,fragments,_=prepare_multiflight_residential_geometry(
+                POINTS,"FORWARD",0,2800,16,width,30,12,point_ids=IDS,
+                fields=ResidentialFields(underside_mode="SLOPED_CLOSED",
+                                         left_side_board_enabled=False,
+                                         right_side_board_enabled=False))
+            body=fragments[-2]
+            depths.append(max(v[2] for v in body.vertices)-min(v[2] for v in body.vertices))
+            self.assertNotAlmostEqual(min(v[2] for v in body.vertices),layout.landing.top_z-layout.width)
+        self.assertNotAlmostEqual(abs(depths[1]-depths[0]),0.2)
+    def test_lower_flight_ordinary_profile_is_preserved_before_landing_clip(self):
+        fields=ResidentialFields(underside_mode="SLOPED_CLOSED",side_board_mode="STEPPED")
+        layout=resolve_multiflight_layout(POINTS,"FORWARD",0,2800,16,900,30,12,point_ids=IDS)
+        local=_flight_stair_layout(layout.flights[0],layout)
+        accepted=side_board_profile(local,fields)
+        fragment=_build_l_flight_board_fragment(local,"RIGHT",fields,0)
+        self.assertTrue(fragment.vertices)
+        self.assertEqual(accepted.lower,side_board_lower_profile(local,fields))
 
 if __name__ == '__main__': unittest.main()
