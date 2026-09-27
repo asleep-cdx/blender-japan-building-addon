@@ -11,14 +11,15 @@ from japanese_house_modeler.stair_guides import (aligned_candidates, endpoint_ri
     resolve_move_candidate, turn_right_angle_candidate)
 from japanese_house_modeler.stair_multiflight import (RISER_DISTRIBUTION_AUTO,
     FlightAllocation, allocation_counts, build_landing_side_board_fragments,
-    _build_l_flight_board_fragment, _flight_stair_layout,
+    _build_l_flight_board_fragment, _build_l_flight_underbody_fragment,
+    _build_landing_underbody_transition, _flight_stair_layout,
     canonical_multi_path, distribution_edit_initial_allocation,
     prepare_multiflight_residential_geometry,
     resolve_multiflight_layout, segment_allocations, switch_distribution_mode,
     validate_manual_allocation)
 from japanese_house_modeler.stair_residential import ResidentialFields
 from japanese_house_modeler.stair_residential_geometry import (
-    side_board_lower_profile, side_board_profile,
+    build_underbody_fragment, side_board_lower_profile, side_board_profile,
 )
 
 POINTS=((0,0),(3,0),(3,3)); IDS=("p0","p1","p2")
@@ -304,7 +305,7 @@ class ResidentialGeometryTests(unittest.TestCase):
         self.assertGreater(lower[2],lower[1])
         outgoing_local=_flight_stair_layout(outgoing,layout)
         accepted_contact=side_board_lower_profile(
-            outgoing_local,ResidentialFields(underside_mode="SLOPED_CLOSED"))[0]
+            outgoing_local,ResidentialFields(underside_mode="SLOPED_CLOSED"))[1]
         self.assertAlmostEqual(xs[2],accepted_contact[0])
         self.assertAlmostEqual(lower[2],accepted_contact[1])
         # The transition portion contains only its start and end: no kink.
@@ -313,5 +314,40 @@ class ResidentialGeometryTests(unittest.TestCase):
         self.assertEqual(transition.part_type,"UNDERBODY")
         self.assertLessEqual(max(v[2] for v in transition.vertices),
                              layout.landing.top_z+layout.actual_riser-layout.tread_thickness)
+    def test_sloped_upper_body_starts_on_visible_slope_contact(self):
+        fields=ResidentialFields(underside_mode="SLOPED_CLOSED")
+        layout=resolve_multiflight_layout(POINTS,"FORWARD",0,2800,16,900,30,12,point_ids=IDS)
+        local=_flight_stair_layout(layout.flights[1],layout)
+        contact=side_board_lower_profile(local,fields)[1]
+        body=_build_l_flight_underbody_fragment(local,fields,1)
+        local_x=[(v[0]-local.lower_xy[0])*local.axes.forward[0]
+                 +(v[1]-local.lower_xy[1])*local.axes.forward[1]
+                 for v in body.vertices]
+        self.assertAlmostEqual(min(local_x),contact[0])
+        lower=side_board_lower_profile(local,fields)
+        slope=(lower[2][1]-lower[1][1])/(lower[2][0]-lower[1][0])
+        self.assertAlmostEqual(contact[1],lower[2][1]-slope*(lower[2][0]-contact[0]))
+    def test_stepped_upper_underbody_regression_unchanged(self):
+        fields=ResidentialFields(underside_mode="STEPPED_CLOSED")
+        layout=resolve_multiflight_layout(POINTS,"FORWARD",0,2800,16,900,30,12,point_ids=IDS)
+        local=_flight_stair_layout(layout.flights[1],layout)
+        self.assertEqual(_build_l_flight_underbody_fragment(local,fields,1),
+                         build_underbody_fragment(local,fields))
+    def test_side_board_and_transition_share_outer_contact_plane(self):
+        fields=ResidentialFields(underside_mode="SLOPED_CLOSED",
+                                 left_side_board_enabled=True,
+                                 right_side_board_enabled=True)
+        layout=resolve_multiflight_layout(POINTS,"FORWARD",0,2800,16,900,30,12,point_ids=IDS)
+        local=_flight_stair_layout(layout.flights[1],layout)
+        soffit=side_board_lower_profile(_flight_stair_layout(layout.flights[0],layout),fields)[-1][1]
+        transition=_build_landing_underbody_transition(layout,local,fields,soffit,1)
+        board=_build_l_flight_board_fragment(local,"RIGHT",fields,1,True)
+        def local_y(fragment):
+            return [(v[0]-local.lower_xy[0])*local.axes.left[0]
+                    +(v[1]-local.lower_xy[1])*local.axes.left[1]
+                    for v in fragment.vertices]
+        self.assertAlmostEqual(min(local_y(transition)),-layout.width/2)
+        self.assertAlmostEqual(max(local_y(board)),-layout.width/2)
+        self.assertGreater(max(local_y(transition)),min(local_y(transition)))
 
 if __name__ == '__main__': unittest.main()

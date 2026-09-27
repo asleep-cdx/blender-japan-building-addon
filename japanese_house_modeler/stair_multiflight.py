@@ -537,15 +537,40 @@ def _build_landing_tread_fragment(layout, fields, ordinal):
     return result
 
 
+def _build_l_flight_underbody_fragment(local, fields, position):
+    """Keep stepped behavior; clip only upper SLOPED body to visible slope."""
+    from .stair_geometry import extrude_xz_profile
+    from .stair_residential_geometry import (
+        build_underbody_fragment, sloped_underbody_profile,
+    )
+    if position != 1 or fields.underside_mode != "SLOPED_CLOSED":
+        return build_underbody_fragment(local, fields)
+    profile = sloped_underbody_profile(local, fields)
+    contact_x = profile.outer[1][0]
+    polygon = _clip_profile_x(profile.polygon, contact_x, keep_greater=True)
+    fragment = extrude_xz_profile(
+        polygon, -local.width / 2.0, local.width / 2.0,
+        part_type="UNDERBODY", ordinal=1)
+    forward, left = local.axes.forward, local.axes.left
+    vertices = tuple((local.lower_xy[0] + forward[0] * x + left[0] * y,
+                      local.lower_xy[1] + forward[1] * x + left[1] * y, z)
+                     for x, y, z in fragment.vertices)
+    result = MeshFragment("UNDERBODY", 1, vertices, fragment.faces)
+    validate_mesh_fragments((result,))
+    return result
+
+
 def _build_landing_underbody_transition(layout, outgoing_local, fields,
                                         landing_soffit, ordinal):
     """Extrude one continuous Landing-horizontal-to-upper-slope section."""
     from .stair_geometry import extrude_xz_profile
     from .stair_residential_geometry import side_board_lower_profile
     lower = side_board_lower_profile(outgoing_local, fields)
-    # The accepted upper body begins at this exact outer/inner shared edge.
-    # Ending here avoids overlap while giving both solids identical vertices.
-    contact_x, contact_z = lower[0]
+    # SLOPED connects directly to the actual visible slope start, skipping the
+    # profile's initial horizontal foot. STEPPED retains its accepted first
+    # step contact unchanged.
+    contact_index = 1 if fields.underside_mode == "SLOPED_CLOSED" else 0
+    contact_x, contact_z = lower[contact_index]
     tread_bottom = layout.landing.top_z - layout.landing.thickness
     first_tread_underside = (outgoing_local.base_z + outgoing_local.actual_riser
                              - outgoing_local.tread_thickness)
@@ -630,7 +655,8 @@ def prepare_multiflight_residential_geometry(
             if cap is not None:
                 fragments.append(cap)
         fragments.extend(build_residential_riser_fragments(local, values))
-        fragments.append(build_underbody_fragment(local, values))
+        fragments.append(_build_l_flight_underbody_fragment(
+            local, values, index))
         if values.left_side_board_enabled:
             fragments.append(_build_l_flight_board_fragment(
                 local, "LEFT", values, index,
