@@ -482,24 +482,17 @@ def _clip_profile_x(profile, boundary, keep_greater):
 
 
 def _upper_section_baseline(layout, outgoing_local, fields, landing_soffit):
-    """Return the single SLOPED lower envelope from Landing to upper arrival."""
-    from .stair_residential_geometry import (
-        side_board_lower_profile, stepped_underbody_inner_profile,
-    )
+    """Resolve the two-point authority for the outgoing SLOPED body.
+
+    A is the Landing outgoing edge at local x=0 and the resolved Landing
+    soffit.  B is *exactly* the accepted 07-C upper soffit termination.  The
+    line is deliberately not extended into the Landing and is never adjusted
+    with intermediate clearance/control points.
+    """
+    from .stair_residential_geometry import side_board_lower_profile
     accepted_end = side_board_lower_profile(outgoing_local, fields)[-1]
-    start = (-layout.width, float(landing_soffit))
-    end_x, accepted_z = accepted_end
-    # Lower the common line enough to remain strictly below every upper-body
-    # contact point. This is one authority line, not a local repair wedge.
-    limits = [accepted_z]
-    contact_points = ((0.0, layout.landing.top_z - layout.landing.thickness),)
-    contact_points += stepped_underbody_inner_profile(outgoing_local)
-    for x, z in contact_points:
-        if x > start[0] + _EPSILON:
-            limits.append(start[1] + (z - start[1])
-                          * (end_x - start[0]) / (x - start[0]))
-    end_z = min(limits) - _EPSILON
-    return (start, (end_x, end_z))
+    return ((0.0, float(landing_soffit)),
+            (float(accepted_end[0]), float(accepted_end[1])))
 
 
 def _baseline_z(baseline, x):
@@ -519,10 +512,10 @@ def _build_l_flight_board_fragment(local, side, fields, position,
                else side_board_profile(local, fields))
     source_polygon = profile.polygon
     if lower_baseline is not None:
-        boundary = (-max(0.0, float(fields.side_board_reveal_mm) / _MM_PER_METRE)
-                    if preserve_outgoing_reveal else 0.0)
-        lower = ((boundary, _baseline_z(lower_baseline, boundary)),
-                 lower_baseline[1])
+        # The first-step reveal belongs to the upper outline only.  Extending
+        # the board's lower outline into x<0 previously created a second local
+        # authority beside the body.  Both board and body now use A-B exactly.
+        lower = lower_baseline
         source_polygon = validate_simple_polygon(
             profile.outer + tuple(reversed(lower)))
     if position == 1 and not math.isclose(
@@ -607,13 +600,7 @@ def _build_l_flight_underbody_fragment(local, fields, position):
 def _resolve_landing_upper_boundary(layout, outgoing_local, baseline):
     bottom = _baseline_z(baseline, 0.0)
     top = layout.landing.top_z - layout.landing.thickness
-    turn_cross = (layout.flights[0].forward[0] * layout.flights[1].forward[1]
-                  - layout.flights[0].forward[1] * layout.flights[1].forward[0])
     y_min, y_max = -layout.width / 2.0, layout.width / 2.0
-    if turn_cross > 0.0:
-        y_max -= layout.riser_thickness
-    else:
-        y_min += layout.riser_thickness
     def world(y, z):
         return (outgoing_local.lower_xy[0] + outgoing_local.axes.left[0] * y,
                 outgoing_local.lower_xy[1] + outgoing_local.axes.left[1] * y, z)
@@ -624,7 +611,10 @@ def _resolve_landing_upper_boundary(layout, outgoing_local, baseline):
 
 def _build_landing_turn_body(layout, outgoing_local, baseline, boundary, ordinal):
     """Build the dedicated 90-degree Landing corner region from world vertices."""
-    start_x, start_z = baseline[0]
+    # The Landing is horizontal through its outgoing edge A.  Its incoming
+    # extent is a separate 90-degree corner region; the A-B slope begins only
+    # at x=0 and must not be projected backwards through the Landing.
+    start_x, start_z = -layout.width, baseline[0][1]
     forward, left = outgoing_local.axes.forward, outgoing_local.axes.left
     y_values = []
     for point in (boundary.left_bottom, boundary.right_bottom):

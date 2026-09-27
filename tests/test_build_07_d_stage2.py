@@ -270,7 +270,9 @@ class ResidentialGeometryTests(unittest.TestCase):
                         for v in riser.vertices)
         body_front=min((v[0]-origin[0])*axis[0]+(v[1]-origin[1])*axis[1]
                        for v in landing_body.vertices)
-        self.assertGreater(body_front,riser_front)
+        # The full-width turn body terminates on the same authority plane as
+        # the existing Final Riser; it must never project in front of it.
+        self.assertGreaterEqual(body_front,riser_front)
     def test_enabled_landing_fascia_reaches_resolved_soffit(self):
         fields=ResidentialFields(underside_mode="SLOPED_CLOSED",
                                  left_side_board_enabled=True,
@@ -305,7 +307,8 @@ class ResidentialGeometryTests(unittest.TestCase):
             _flight_stair_layout(layout.flights[0],layout),fields)[-1][1]
         baseline=_upper_section_baseline(layout,outgoing_local,fields,soffit)
         self.assertEqual(len(baseline),2)
-        self.assertLess(baseline[0][0],0);self.assertGreater(baseline[1][0],0)
+        self.assertEqual(baseline[0],(0.0,soffit))
+        self.assertGreater(baseline[1][0],0)
         self.assertGreater(baseline[1][1],baseline[0][1])
         self.assertEqual(transition.part_type,"UNDERBODY")
     def test_sloped_upper_body_starts_on_visible_slope_contact(self):
@@ -356,10 +359,45 @@ class ResidentialGeometryTests(unittest.TestCase):
         local=[((v[0]-upper.lower_xy[0])*upper.axes.forward[0]
                 +(v[1]-upper.lower_xy[1])*upper.axes.forward[1],v[2])
                for v in board.vertices]
-        for x in (-fields.side_board_reveal_mm/1000,baseline[1][0]):
+        for x in (0.0,baseline[1][0]):
             zs=[z for px,z in local if math.isclose(px,x,abs_tol=1e-8)]
             self.assertTrue(zs);self.assertAlmostEqual(min(zs),_baseline_z(baseline,x))
         self.assertEqual(len(baseline),2)
+    def test_sloped_baseline_has_only_a_and_accepted_b(self):
+        fields=ResidentialFields(underside_mode="SLOPED_CLOSED")
+        layout=resolve_multiflight_layout(POINTS,"FORWARD",0,2800,16,900,30,12,point_ids=IDS)
+        lower,upper=(_flight_stair_layout(flight,layout) for flight in layout.flights)
+        soffit=side_board_lower_profile(lower,fields)[-1][1]
+        baseline=_upper_section_baseline(layout,upper,fields,soffit)
+        self.assertEqual(baseline,((0.0,soffit),side_board_lower_profile(upper,fields)[-1]))
+        self.assertEqual(len(baseline),2)
+    def test_upper_body_bottom_samples_are_collinear_and_full_width(self):
+        fields=ResidentialFields(underside_mode="SLOPED_CLOSED")
+        for points in (POINTS,((0,0),(3,0),(3,-3))):
+            with self.subTest(points=points):
+                layout=resolve_multiflight_layout(points,"FORWARD",0,2800,16,900,30,12,point_ids=IDS)
+                lower,upper=(_flight_stair_layout(flight,layout) for flight in layout.flights)
+                soffit=side_board_lower_profile(lower,fields)[-1][1]
+                baseline=_upper_section_baseline(layout,upper,fields,soffit)
+                boundary=_resolve_landing_upper_boundary(layout,upper,baseline)
+                body=_build_sloped_upper_body(layout,upper,fields,baseline,boundary,1)
+                local=[((v[0]-upper.lower_xy[0])*upper.axes.forward[0]
+                        +(v[1]-upper.lower_xy[1])*upper.axes.forward[1],
+                        (v[0]-upper.lower_xy[0])*upper.axes.left[0]
+                        +(v[1]-upper.lower_xy[1])*upper.axes.left[1],v[2])
+                       for v in body.vertices]
+                a,b=baseline; dx=b[0]-a[0]; dz=b[1]-a[1]
+                bottom=[v for v in local if a[0]-1e-9 <= v[0] <= b[0]+1e-9
+                        and math.isclose(v[2],_baseline_z(baseline,v[0]),abs_tol=1e-8)]
+                self.assertGreaterEqual(len(bottom),4)
+                self.assertTrue(all(math.isclose((x-a[0])*dz-(z-a[1])*dx,0,abs_tol=1e-8)
+                                    for x,_y,z in bottom))
+                self.assertAlmostEqual(min(y for _x,y,_z in local),-layout.width/2)
+                self.assertAlmostEqual(max(y for _x,y,_z in local),layout.width/2)
+                self.assertEqual(boundary.left_bottom,
+                                 min((v for v in body.vertices if math.isclose(v[2],a[1])),
+                                     key=lambda v:(v[0]-upper.lower_xy[0])*upper.axes.left[0]
+                                     +(v[1]-upper.lower_xy[1])*upper.axes.left[1]))
     def test_true_corner_and_upper_share_exact_world_boundary(self):
         fields=ResidentialFields(underside_mode="SLOPED_CLOSED")
         for points in (POINTS,((0,0),(3,0),(3,-3))):
