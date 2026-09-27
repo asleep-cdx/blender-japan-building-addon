@@ -30,6 +30,7 @@ class JHM_StairPathPoint(bpy.types.PropertyGroup):
 
     xy: bpy.props.FloatVectorProperty(
         name="Path座標", size=2, options={"HIDDEN"})
+    point_id: bpy.props.StringProperty(default="", options={"HIDDEN"})
 
 
 class JHM_NewStairDefaults(bpy.types.PropertyGroup):
@@ -47,6 +48,11 @@ class JHM_NewStairDefaults(bpy.types.PropertyGroup):
         name="蹴込み板厚", default=12.0, min=0.1, max=10000.0, precision=1)
     ascent_direction: bpy.props.EnumProperty(
         name="上り方向", items=_ASCENT_DIRECTION_ITEMS, default="FORWARD")
+    path_shape: bpy.props.EnumProperty(
+        name="Path形状",
+        items=(("STRAIGHT", "Straight", "従来の2-click直階段"),
+               ("L", "L", "3-clickの90度L字階段")),
+        default="STRAIGHT")
 
 
 class JHM_StairProperties(bpy.types.PropertyGroup):
@@ -58,6 +64,9 @@ class JHM_StairProperties(bpy.types.PropertyGroup):
         items=_STAIR_ASSEMBLY_ITEMS, default="BASIC_TREAD_RISER", options={"HIDDEN"})
     stair_schema_version: bpy.props.IntProperty(default=1, options={"HIDDEN"})
     path_points: bpy.props.CollectionProperty(type=JHM_StairPathPoint)
+    turn_mode: bpy.props.StringProperty(default="", options={"HIDDEN"})
+    riser_distribution_mode: bpy.props.StringProperty(default="", options={"HIDDEN"})
+    auto_riser_allocation: bpy.props.StringProperty(default="", options={"HIDDEN"})
     ascent_direction: bpy.props.EnumProperty(
         name="上り方向", items=_ASCENT_DIRECTION_ITEMS, default="FORWARD")
     base_z_mm: bpy.props.FloatProperty(name="下端基準高さ", default=0.0)

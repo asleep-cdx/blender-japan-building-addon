@@ -13,6 +13,7 @@ from .finish_state import status_label
 from .finish_profile_previews import browser_items, stable_profile_identity
 from .finish_preview_images import cached_preview_icon, request_preview_build
 from .stair_geometry import resolve_stair_layout
+from .stair_multiflight import resolve_multiflight_layout
 from .stair_operators import stair_issues
 from .stair_state import operation_allowed, state_label
 
@@ -93,6 +94,7 @@ class JHM_PT_house_modeler(bpy.types.Panel):
         new_stair_box.prop(stair_defaults, "tread_thickness_mm", text="踏板厚 (mm)")
         new_stair_box.prop(stair_defaults, "riser_thickness_mm", text="蹴込み板厚 (mm)")
         new_stair_box.prop(stair_defaults, "ascent_direction", text="上り方向")
+        new_stair_box.prop(stair_defaults, "path_shape", text="Path形状")
         new_stair_box.operator("jhm.create_stair", text="階段を作成", icon="ADD")
 
         profile_box = layout.box()
@@ -138,7 +140,10 @@ class JHM_PT_house_modeler(bpy.types.Panel):
             selected_box.label(text=f"踏板厚: {stair.tread_thickness_mm:.1f} mm")
             selected_box.label(text=f"蹴込み板厚: {stair.riser_thickness_mm:.1f} mm")
             try:
-                derived = resolve_stair_layout(
+                resolver = (resolve_multiflight_layout
+                            if stair.stair_schema_version == 4
+                            else resolve_stair_layout)
+                derived = resolver(
                     tuple(tuple(point.xy) for point in stair.path_points),
                     stair.ascent_direction, stair.base_z_mm,
                     stair.floor_to_floor_mm, stair.riser_count,
@@ -152,17 +157,23 @@ class JHM_PT_house_modeler(bpy.types.Panel):
                     text=f"上端到達高さ: {derived.upper_arrival_z_mm:.1f} mm")
                 selected_box.label(
                     text=f"実蹴上: {derived.actual_riser_mm:.1f} mm")
-                selected_box.label(
-                    text=f"独立踏板枚数: {derived.independent_tread_count}")
-                selected_box.label(
-                    text=f"水平長: {derived.run_length_mm:.1f} mm")
-                selected_box.label(
-                    text=f"踏面ピッチ: {derived.going_mm:.1f} mm")
+                if stair.stair_schema_version == 4:
+                    selected_box.label(text="AUTO配分: " + ", ".join(
+                        str(value) for value in derived.allocation))
+                else:
+                    selected_box.label(
+                        text=f"独立踏板枚数: {derived.independent_tread_count}")
+                    selected_box.label(
+                        text=f"水平長: {derived.run_length_mm:.1f} mm")
+                    selected_box.label(
+                        text=f"踏面ピッチ: {derived.going_mm:.1f} mm")
             selected_box.separator()
             normal_actions = selected_box.column()
             normal_actions.enabled = operation_allowed("EDIT_DIMENSIONS", issues)
             normal_actions.operator("jhm.edit_stair_dimensions", text="階段寸法を変更")
-            normal_actions.operator("jhm.edit_stair_path", text="Path座標を変更")
+            edit_path = normal_actions.row()
+            edit_path.enabled = stair.stair_schema_version < 4
+            edit_path.operator("jhm.edit_stair_path", text="Path座標を変更")
             normal_actions.operator("jhm.reverse_stair_ascent", text="上り方向を反転")
             normal_actions.operator("jhm.regenerate_stair", text="階段を再生成")
             if stair.assembly_mode == "BASIC_TREAD_RISER":
@@ -173,7 +184,8 @@ class JHM_PT_house_modeler(bpy.types.Panel):
             else:
                 residential = selected_box.column()
                 residential.enabled = operation_allowed(
-                    "EDIT_RESIDENTIAL", issues, stair.assembly_mode)
+                    "EDIT_RESIDENTIAL", issues, stair.assembly_mode) \
+                    and stair.stair_schema_version < 4
                 residential.operator("jhm.edit_residential_stair", text="住宅階段仕様を変更")
                 residential.operator("jhm.edit_stair_materials", text="階段部材Materialを変更")
             repair = selected_box.row()

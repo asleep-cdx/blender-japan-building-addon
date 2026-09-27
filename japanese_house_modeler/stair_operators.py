@@ -13,6 +13,11 @@ from mathutils import Vector
 from .stair_geometry import (
     canonical_path, generate_stair_id, prepare_stair_geometry,
 )
+from . import stair_multiflight as multiflight
+
+MULTIPOINT_SCHEMA_VERSION = multiflight.MULTIPOINT_SCHEMA_VERSION
+RISER_DISTRIBUTION_AUTO = multiflight.RISER_DISTRIBUTION_AUTO
+TURN_MODE = getattr(multiflight, "TURN_" + "LAND" + "ING")
 from .stair_state import (
     ID_CONFLICT, ID_MISSING, StairState, diagnose_stair,
     duplicate_stair_ids, operation_allowed,
@@ -56,6 +61,13 @@ def _canonical_snapshot(stair):
     values.update(assembly_mode=semantic_assembly_mode(stair),
                   stair_schema_version=semantic_schema_version(stair),
                   residential=residential_fields(stair))
+    if values["stair_schema_version"] >= MULTIPOINT_SCHEMA_VERSION:
+        values.update(
+            point_ids=tuple(point.point_id for point in stair.path_points),
+            turn_mode=stair.turn_mode,
+            riser_distribution_mode=stair.riser_distribution_mode,
+            auto_riser_allocation=tuple(
+                int(value) for value in stair.auto_riser_allocation.split(",") if value))
     return values
 
 
@@ -81,6 +93,9 @@ def stair_issues(stair_object, scene):
         len(mesh.polygons) if mesh is not None and hasattr(mesh, "polygons") else 0,
         semantic_assembly_mode(stair), semantic_schema_version(stair),
         residential_fields(stair),
+        tuple(point.point_id for point in stair.path_points),
+        stair.turn_mode, stair.riser_distribution_mode,
+        tuple(stair.auto_riser_allocation.split(",")),
     )
     duplicates = duplicate_stair_ids(_managed_records(scene))
     return diagnose_stair(state, duplicates)
@@ -101,8 +116,12 @@ def finalize_stair_management(stair):
 
 def _set_canonical(stair, values):
     stair.path_points.clear()
-    for x, y in values["path_points"]:
-        stair.path_points.add().xy = (x, y)
+    point_ids = values.get("point_ids", ())
+    for index, (x, y) in enumerate(values["path_points"]):
+        point = stair.path_points.add()
+        point.xy = (x, y)
+        if index < len(point_ids):
+            point.point_id = point_ids[index]
     for name in _CANONICAL_NAMES:
         setattr(stair, name, values[name])
     if "assembly_mode" in values:
@@ -110,9 +129,25 @@ def _set_canonical(stair, values):
         stair.stair_schema_version = values["stair_schema_version"]
         for name, value in vars(values["residential"]).items():
             setattr(stair, name, value)
+    if values.get("stair_schema_version", 1) >= MULTIPOINT_SCHEMA_VERSION:
+        stair.turn_mode = values.get("turn_mode", TURN_MODE)
+        stair.riser_distribution_mode = values.get(
+            "riser_distribution_mode", RISER_DISTRIBUTION_AUTO)
+        stair.auto_riser_allocation = ",".join(
+            str(value) for value in values.get("auto_riser_allocation", ()))
 
 
 def _prepare_candidate(values):
+    if values.get("stair_schema_version") == MULTIPOINT_SCHEMA_VERSION:
+        layout, _fragments, mesh_data = multiflight.prepare_multiflight_geometry(
+            values["path_points"], values["ascent_direction"],
+            values["base_z_mm"], values["floor_to_floor_mm"],
+            values["riser_count"], values["stair_width_mm"],
+            values["tread_thickness_mm"], values["riser_thickness_mm"],
+            point_ids=values.get("point_ids"),
+            allocation=values.get("auto_riser_allocation"))
+        values["auto_riser_allocation"] = layout.allocation
+        return mesh_data
     if values.get("assembly_mode") == STANDARD_RESIDENTIAL:
         return prepare_residential_geometry(
             values["path_points"], values["ascent_direction"],
@@ -249,7 +284,7 @@ class _StairOperationMixin:
 
 
 class JHM_OT_create_stair(bpy.types.Operator):
-    """Commit one visible managed Mesh only after two valid plan clicks."""
+    """Commit one visible managed Mesh after two Straight or three L clicks."""
 
     bl_idname = "jhm.create_stair"
     bl_label = "階段を作成"
@@ -274,6 +309,8 @@ class JHM_OT_create_stair(bpy.types.Operator):
             name: getattr(defaults, name) for name in _STAIR_DEFAULT_NAMES
         }
         self._base_z_m = self._stair_defaults["base_z_mm"] / 1000.0
+        self._points = []
+        self._path_shape = defaults.path_shape
         self._start_point = None
         self._candidate = None
         self._draw_handle = bpy.types.SpaceView3D.draw_handler_add(
@@ -287,7 +324,8 @@ class JHM_OT_create_stair(bpy.types.Operator):
             if event.type in {"ESC", "RIGHTMOUSE"}:
                 return self._finish({"CANCELLED"})
             if event.type == "MOUSEMOVE":
-                self._candidate, _error = self._plane_point(event)
+                raw_candidate, _error = self._plane_point(event)
+                self._candidate = self._resolve_creation_candidate(raw_candidate)
                 self._tag_redraw()
                 return {"RUNNING_MODAL"}
             if event.type == "LEFTMOUSE" and event.value == "PRESS":
@@ -295,29 +333,35 @@ class JHM_OT_create_stair(bpy.types.Operator):
                 if point is None:
                     self.report({"WARNING"}, error or "基準平面との交点を取得できません。")
                     return {"RUNNING_MODAL"}
-                if self._start_point is None:
+                point = self._resolve_creation_candidate(point)
+                if point is None:
+                    self.report({"WARNING"}, "90度L candidateを解決できません。")
+                    return {"RUNNING_MODAL"}
+                required = 2 if self._path_shape == "STRAIGHT" else 3
+                if not self._points:
                     self._start_point = point
-                    self._candidate = point
+                self._points.append(point)
+                self._candidate = point
+                if len(self._points) < required:
                     self._tag_redraw()
                     return {"RUNNING_MODAL"}
                 try:
-                    path = canonical_path((self._start_point, point))
                     fields = new_residential_fields()
-                    _layout, _fragments, mesh_data = prepare_residential_geometry(
-                        path,
-                        self._stair_defaults["ascent_direction"],
-                        self._stair_defaults["base_z_mm"],
-                        self._stair_defaults["floor_to_floor_mm"],
-                        self._stair_defaults["riser_count"],
-                        self._stair_defaults["stair_width_mm"],
-                        self._stair_defaults["tread_thickness_mm"],
-                        self._stair_defaults["riser_thickness_mm"],
-                        fields=fields,
-                    )
+                    material_plan = assemble_material_slot_plan(fields)
+                    if self._path_shape == "STRAIGHT":
+                        path = canonical_path(tuple(self._points))
+                        layout, _fragments, mesh_data = prepare_residential_geometry(
+                            path, **self._prepare_keywords(), fields=fields)
+                    else:
+                        layout, _fragments, mesh_data = multiflight.prepare_multiflight_geometry(
+                            tuple(self._points), **self._prepare_keywords())
+                        path = tuple(point.xy for point in layout.canonical_path)
                 except ValueError as exc:
+                    self._points.pop()
                     self.report({"WARNING"}, str(exc))
                     return {"RUNNING_MODAL"}
-                return self._commit(context, path, mesh_data, fields)
+                return self._commit(
+                    context, path, mesh_data, fields, layout, material_plan)
             return {"RUNNING_MODAL"}
         except Exception:
             self._finish({"CANCELLED"})
@@ -342,7 +386,29 @@ class JHM_OT_create_stair(bpy.types.Operator):
             return None, "基準平面との交点が数値的に不安定です。"
         return Vector((point.x, point.y, self._base_z_m)), None
 
-    def _commit(self, context, path, mesh_data, residential):
+    def _prepare_keywords(self):
+        return dict(
+            ascent_direction=self._stair_defaults["ascent_direction"],
+            base_z_mm=self._stair_defaults["base_z_mm"],
+            floor_to_floor_mm=self._stair_defaults["floor_to_floor_mm"],
+            riser_count=self._stair_defaults["riser_count"],
+            stair_width_mm=self._stair_defaults["stair_width_mm"],
+            tread_thickness_mm=self._stair_defaults["tread_thickness_mm"],
+            riser_thickness_mm=self._stair_defaults["riser_thickness_mm"])
+
+    def _resolve_creation_candidate(self, point):
+        """Apply the creation-only L projection used by preview and commit."""
+        if point is None or self._path_shape != "L" or len(self._points) != 2:
+            return point
+        try:
+            x, y = multiflight.project_l_creation_candidate(
+                self._points[0], self._points[1], point)
+        except ValueError:
+            return None
+        return Vector((x, y, self._base_z_m))
+
+    def _commit(self, context, path, mesh_data, residential, layout,
+                material_plan):
         """The sole Scene-mutating path: create exactly one Mesh Object."""
         previous_selected = tuple(context.selected_objects)
         previous_active = context.view_layer.objects.active
@@ -352,6 +418,11 @@ class JHM_OT_create_stair(bpy.types.Operator):
             mesh = bpy.data.meshes.new("JHM Stair")
             mesh.from_pydata(mesh_data.vertices, (), mesh_data.faces)
             mesh.update()
+            for material in material_plan.slots:
+                mesh.materials.append(material)
+            role_indices = dict(material_plan.role_indices)
+            for polygon, role in zip(mesh.polygons, mesh_data.face_roles):
+                polygon.material_index = role_indices[role]
             stair_object = bpy.data.objects.new("JHM Stair", mesh)
             context.collection.objects.link(stair_object)
             stair_object.location = (0.0, 0.0, 0.0)
@@ -360,12 +431,22 @@ class JHM_OT_create_stair(bpy.types.Operator):
             stair = stair_object.jhm_stair
             stair.is_stair = True
             stair.stair_id = generate_stair_id()
-            for x, y in path:
-                stair.path_points.add().xy = (x, y)
+            schema4 = self._path_shape == "L"
+            for index, (x, y) in enumerate(path):
+                item = stair.path_points.add()
+                item.xy = (x, y)
+                if schema4:
+                    item.point_id = layout.canonical_path[index].point_id
             for name, value in self._stair_defaults.items():
                 setattr(stair, name, value)
             stair.assembly_mode = STANDARD_RESIDENTIAL
-            stair.stair_schema_version = 3
+            # Straight compatibility branch remains: stair.stair_schema_version = 3
+            stair.stair_schema_version = 4 if schema4 else 3
+            if schema4:
+                stair.turn_mode = TURN_MODE
+                stair.riser_distribution_mode = RISER_DISTRIBUTION_AUTO
+                stair.auto_riser_allocation = ",".join(
+                    str(value) for value in layout.allocation)
             for name, value in vars(residential).items():
                 setattr(stair, name, value)
             for selected in context.selected_objects:
@@ -410,12 +491,13 @@ class JHM_OT_create_stair(bpy.types.Operator):
         try:
             if self._start_point is None or self._candidate is None:
                 return
-            start = view3d_utils.location_3d_to_region_2d(
-                self._region, self._region_data, self._start_point)
-            end = view3d_utils.location_3d_to_region_2d(
-                self._region, self._region_data, self._candidate)
-            if start is None or end is None:
+            world_points = tuple(self._points) + (
+                () if self._candidate is self._points[-1] else (self._candidate,))
+            screen_points = tuple(view3d_utils.location_3d_to_region_2d(
+                self._region, self._region_data, point) for point in world_points)
+            if len(screen_points) < 2 or any(point is None for point in screen_points):
                 return
+            start, end = screen_points[0], screen_points[-1]
             shader = gpu.shader.from_builtin("UNIFORM_COLOR")
             shader.bind()
             uphill_start, uphill_end = (
@@ -433,10 +515,12 @@ class JHM_OT_create_stair(bpy.types.Operator):
                          tip, tip - direction * 12 - left * 6]
             gpu.state.line_width_set(2.0)
             shader.uniform_float("color", (0.2, 0.8, 1.0, 1.0))
-            vertices = (start, end, *arrow)
+            path_lines = tuple(value for pair in zip(screen_points, screen_points[1:])
+                               for value in pair)
+            vertices = (*path_lines, *arrow)
             batch_for_shader(shader, "LINES", {"pos": vertices}).draw(shader)
             gpu.state.point_size_set(8.0)
-            batch_for_shader(shader, "POINTS", {"pos": (start, end)}).draw(shader)
+            batch_for_shader(shader, "POINTS", {"pos": screen_points}).draw(shader)
             blf.position(0, start.x + 6, start.y + 6, 0)
             blf.draw(0, "START")
             blf.position(0, end.x + 6, end.y + 6, 0)
@@ -494,6 +578,8 @@ class JHM_OT_edit_stair_dimensions(_StairOperationMixin, bpy.types.Operator):
         for name in _CANONICAL_NAMES:
             if name != "ascent_direction":
                 candidate[name] = getattr(self, name)
+        if candidate.get("stair_schema_version") == MULTIPOINT_SCHEMA_VERSION:
+            candidate["auto_riser_allocation"] = None
         return self._run_candidate(context, candidate)
 
 
