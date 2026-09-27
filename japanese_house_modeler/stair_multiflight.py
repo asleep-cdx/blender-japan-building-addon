@@ -537,22 +537,38 @@ def _build_landing_tread_fragment(layout, fields, ordinal):
     return result
 
 
-def _build_outgoing_soffit_transition(layout, outgoing_local, fields,
-                                       landing_soffit, ordinal):
-    """Build a full-width closed diagonal from Landing to upper soffit."""
+def _build_landing_underbody_transition(layout, outgoing_local, fields,
+                                        landing_soffit, ordinal):
+    """Extrude one continuous Landing-horizontal-to-upper-slope section."""
     from .stair_geometry import extrude_xz_profile
     from .stair_residential_geometry import side_board_lower_profile
     lower = side_board_lower_profile(outgoing_local, fields)
-    contact_x, contact_z = lower[1]
+    # The accepted upper body begins at this exact outer/inner shared edge.
+    # Ending here avoids overlap while giving both solids identical vertices.
+    contact_x, contact_z = lower[0]
     tread_bottom = layout.landing.top_z - layout.landing.thickness
     first_tread_underside = (outgoing_local.base_z + outgoing_local.actual_riser
                              - outgoing_local.tread_thickness)
     contact_top = min(first_tread_underside,
                       contact_z + (tread_bottom - landing_soffit))
-    polygon = ((0.0, landing_soffit), (contact_x, contact_z),
-               (contact_x, contact_top), (0.0, tread_bottom))
+    landing_start = -layout.width
+    polygon = ((landing_start, landing_soffit),
+               (0.0, landing_soffit),
+               (contact_x, contact_z),
+               (contact_x, contact_top),
+               (0.0, tread_bottom),
+               (landing_start, tread_bottom))
+    turn_cross = (layout.flights[0].forward[0] * layout.flights[1].forward[1]
+                  - layout.flights[0].forward[1] * layout.flights[1].forward[0])
+    y_min, y_max = -layout.width / 2.0, layout.width / 2.0
+    # Keep the existing Final Riser as the approach face: trim the prism to
+    # its rear plane rather than emitting a coplanar UNDERSIDE face over it.
+    if turn_cross > 0.0:
+        y_max -= layout.riser_thickness
+    else:
+        y_min += layout.riser_thickness
     local = extrude_xz_profile(
-        polygon, -layout.width / 2.0, layout.width / 2.0,
+        polygon, y_min, y_max,
         part_type="UNDERBODY", ordinal=ordinal)
     forward, left = outgoing_local.axes.forward, outgoing_local.axes.left
     vertices = tuple((outgoing_local.lower_xy[0] + forward[0] * x + left[0] * y,
@@ -626,18 +642,9 @@ def prepare_multiflight_residential_geometry(
     fragments.extend(build_landing_side_board_fragments(
         layout, values, len(fragments) + 1, landing_soffit))
     ordinal = len(fragments) + 1
-    incoming = layout.flights[0].forward
     fragments.append(_build_landing_tread_fragment(layout, values, ordinal))
-    # Dedicated closed Landing transition prevents a visible central cavity.
-    fragments.append(_oriented_box(
-        layout.landing.center_xy, incoming, (-incoming[1], incoming[0]),
-        layout.width + 2.0 * layout.riser_thickness,
-        -layout.width / 2.0 + layout.riser_thickness,
-        layout.width / 2.0 + layout.riser_thickness,
-        landing_soffit, tread_bottom,
-        "UNDERBODY", ordinal + 1))
-    fragments.append(_build_outgoing_soffit_transition(
-        layout, locals_[1], values, landing_soffit, ordinal + 2))
+    fragments.append(_build_landing_underbody_transition(
+        layout, locals_[1], values, landing_soffit, ordinal + 1))
     fragments = tuple(fragments)
     validate_mesh_fragments(fragments)
     return layout, fragments, assemble_stair_mesh(fragments)

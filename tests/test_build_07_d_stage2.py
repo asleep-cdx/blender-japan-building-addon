@@ -113,7 +113,7 @@ class ResidentialGeometryTests(unittest.TestCase):
                 l,fr,m=self.prepare(*combo);self.assertTrue(all(math.isfinite(x) for v in m.vertices for x in v));self.assertAlmostEqual(l.upper_arrival_z,2.8);self.assertGreaterEqual(min(v[2] for v in m.vertices),l.base_z)
                 self.assertEqual(set(m.face_roles),{"TREAD","RISER","UNDERSIDE","SIDE_BOARD"});self.assertNotIn("LANDING",m.face_roles)
     def test_landing_tread_and_underbody(self):
-        l,fr,m=self.prepare(); self.assertEqual(fr[-3].part_type,"TREAD");self.assertEqual(fr[-2].part_type,"UNDERBODY");self.assertEqual(fr[-1].part_type,"UNDERBODY");self.assertIn("UNDERSIDE",m.face_roles)
+        l,fr,m=self.prepare(); self.assertEqual(fr[-2].part_type,"TREAD");self.assertEqual(fr[-1].part_type,"UNDERBODY");self.assertIn("UNDERSIDE",m.face_roles)
     def test_board_sides(self):
         for left,right,count in ((True,True,7),(True,False,2),(False,True,5),(False,False,0)):
             _,fr,_=self.prepare(left=left,right=right); self.assertEqual(sum(f.part_type=="SIDE_BOARD" for f in fr),count)
@@ -144,18 +144,22 @@ class ResidentialGeometryTests(unittest.TestCase):
     def test_flight_underbodies_contact_landing_foundation(self):
         layout,fragments,_mesh=self.prepare(left=False,right=False)
         bodies=[fragment for fragment in fragments if fragment.part_type=="UNDERBODY"]
-        self.assertEqual(len(bodies),4)
+        self.assertEqual(len(bodies),3)
         def bounds(fragment):
             return tuple((min(vertex[axis] for vertex in fragment.vertices),max(vertex[axis] for vertex in fragment.vertices)) for axis in range(3))
-        ordered=[bodies[0],bodies[-2],bodies[-1],bodies[1]]
+        ordered=[bodies[0],bodies[-1],bodies[1]]
         for first,second in zip(ordered,ordered[1:]):
             self.assertTrue(all(max(a[0],b[0])<=min(a[1],b[1])+1e-9 for a,b in zip(bounds(first),bounds(second))))
         self.assertGreaterEqual(min(vertex[2] for fragment in bodies for vertex in fragment.vertices),layout.base_z)
     def test_landing_tread_underbody_do_not_overlap(self):
         layout,fragments,mesh=self.prepare(left=False,right=False)
-        tread,body=fragments[-3],fragments[-2]
+        tread,body=fragments[-2],fragments[-1]
         tread_bottom=min(vertex[2] for vertex in tread.vertices)
-        body_top=max(vertex[2] for vertex in body.vertices)
+        outgoing=layout.flights[1];origin=outgoing.start_xy
+        landing_vertices=[vertex for vertex in body.vertices
+                          if ((vertex[0]-origin[0])*outgoing.forward[0]
+                              +(vertex[1]-origin[1])*outgoing.forward[1])<=1e-9]
+        body_top=max(vertex[2] for vertex in landing_vertices)
         self.assertAlmostEqual(tread_bottom,body_top)
         self.assertAlmostEqual(max(vertex[2] for vertex in tread.vertices),layout.landing.top_z)
         self.assertLess(body_top,layout.landing.top_z)
@@ -213,7 +217,7 @@ class ResidentialGeometryTests(unittest.TestCase):
         meshes={}
         for edge in ("SQUARE","BEVEL","ROUND"):
             layout,fragments,_=self.prepare(edge=edge,left=False,right=False)
-            tread=fragments[-3]
+            tread=fragments[-2]
             incoming=layout.flights[0];center=layout.landing.center_xy
             local=[((v[0]-center[0])*incoming.forward[0]+(v[1]-center[1])*incoming.forward[1],
                     (v[0]-center[0])*incoming.left[0]+(v[1]-center[1])*incoming.left[1],v[2]) for v in tread.vertices]
@@ -232,7 +236,7 @@ class ResidentialGeometryTests(unittest.TestCase):
                 fields=ResidentialFields(underside_mode="SLOPED_CLOSED",
                                          left_side_board_enabled=False,
                                          right_side_board_enabled=False))
-            body=fragments[-2]
+            body=fragments[-1]
             depths.append(max(v[2] for v in body.vertices)-min(v[2] for v in body.vertices))
             self.assertNotAlmostEqual(min(v[2] for v in body.vertices),layout.landing.top_z-layout.width)
         self.assertNotAlmostEqual(abs(depths[1]-depths[0]),0.2)
@@ -246,9 +250,9 @@ class ResidentialGeometryTests(unittest.TestCase):
         self.assertEqual(accepted.lower,side_board_lower_profile(local,fields))
     def test_landing_material_role_boundaries(self):
         layout,fragments,mesh=self.prepare(underside="SLOPED_CLOSED")
-        tread,landing_body,transition=fragments[-3:]
-        self.assertEqual((tread.part_type,landing_body.part_type,transition.part_type),
-                         ("TREAD","UNDERBODY","UNDERBODY"))
+        tread,landing_body=fragments[-2:]
+        self.assertEqual((tread.part_type,landing_body.part_type),
+                         ("TREAD","UNDERBODY"))
         self.assertNotIn("LANDING",mesh.face_roles)
         incoming=layout.flights[0]
         final_risers=[part for part in fragments if part.part_type=="RISER"
@@ -289,15 +293,23 @@ class ResidentialGeometryTests(unittest.TestCase):
         self.assertAlmostEqual(minimum_x(inner),0.0)
     def test_outgoing_transition_has_diagonal_soffit_and_contacts(self):
         layout,fragments,_mesh=self.prepare(underside="SLOPED_CLOSED",left=False,right=False)
-        landing_body,transition=fragments[-2:]
+        transition=fragments[-1]
         outgoing=layout.flights[1];origin=outgoing.start_xy
         local=sorted({(round((v[0]-origin[0])*outgoing.forward[0]
                                   +(v[1]-origin[1])*outgoing.forward[1],9),
                              round(v[2],9)) for v in transition.vertices})
-        xs=sorted({x for x,z in local});self.assertEqual(len(xs),2)
+        xs=sorted({x for x,z in local});self.assertEqual(len(xs),3)
         lower=[min(z for x,z in local if x==value) for value in xs]
-        self.assertGreater(lower[1],lower[0])
-        self.assertAlmostEqual(lower[0],min(v[2] for v in landing_body.vertices))
+        self.assertAlmostEqual(lower[0],lower[1])
+        self.assertGreater(lower[2],lower[1])
+        outgoing_local=_flight_stair_layout(outgoing,layout)
+        accepted_contact=side_board_lower_profile(
+            outgoing_local,ResidentialFields(underside_mode="SLOPED_CLOSED"))[0]
+        self.assertAlmostEqual(xs[2],accepted_contact[0])
+        self.assertAlmostEqual(lower[2],accepted_contact[1])
+        # The transition portion contains only its start and end: no kink.
+        transition_lower=[(x,z) for x,z in zip(xs,lower) if x>=-1e-9]
+        self.assertEqual(len(transition_lower),2)
         self.assertEqual(transition.part_type,"UNDERBODY")
         self.assertLessEqual(max(v[2] for v in transition.vertices),
                              layout.landing.top_z+layout.actual_riser-layout.tread_thickness)
