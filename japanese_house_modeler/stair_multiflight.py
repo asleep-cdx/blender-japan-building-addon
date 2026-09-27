@@ -88,6 +88,15 @@ class FlightAllocation:
     riser_count: int
 
 
+@dataclass(frozen=True)
+class LandingUpperBoundary:
+    """One world-space quad shared by the Landing and upper body regions."""
+    left_bottom: tuple
+    right_bottom: tuple
+    left_top: tuple
+    right_top: tuple
+
+
 def segment_allocations(path, counts):
     path = tuple(path)
     counts = tuple(int(value) for value in counts)
@@ -595,17 +604,9 @@ def _build_l_flight_underbody_fragment(local, fields, position):
     return result
 
 
-def _build_sloped_upper_section_fragment(layout, outgoing_local, fields,
-                                          landing_soffit, ordinal):
-    """Build Landing and the complete upper body over one straight baseline."""
-    from .stair_geometry import extrude_xz_profile, validate_simple_polygon
-    from .stair_residential_geometry import stepped_underbody_inner_profile
-    baseline = _upper_section_baseline(
-        layout, outgoing_local, fields, landing_soffit)
-    tread_bottom = layout.landing.top_z - layout.landing.thickness
-    inner = ((-layout.width, tread_bottom), (0.0, tread_bottom))
-    inner += stepped_underbody_inner_profile(outgoing_local)
-    polygon = validate_simple_polygon(inner + tuple(reversed(baseline)))
+def _resolve_landing_upper_boundary(layout, outgoing_local, baseline):
+    bottom = _baseline_z(baseline, 0.0)
+    top = layout.landing.top_z - layout.landing.thickness
     turn_cross = (layout.flights[0].forward[0] * layout.flights[1].forward[1]
                   - layout.flights[0].forward[1] * layout.flights[1].forward[0])
     y_min, y_max = -layout.width / 2.0, layout.width / 2.0
@@ -613,6 +614,47 @@ def _build_sloped_upper_section_fragment(layout, outgoing_local, fields,
         y_max -= layout.riser_thickness
     else:
         y_min += layout.riser_thickness
+    def world(y, z):
+        return (outgoing_local.lower_xy[0] + outgoing_local.axes.left[0] * y,
+                outgoing_local.lower_xy[1] + outgoing_local.axes.left[1] * y, z)
+    return LandingUpperBoundary(
+        world(y_min, bottom), world(y_max, bottom),
+        world(y_min, top), world(y_max, top))
+
+
+def _build_landing_turn_body(layout, outgoing_local, baseline, boundary, ordinal):
+    """Build the dedicated 90-degree Landing corner region from world vertices."""
+    start_x, start_z = baseline[0]
+    forward, left = outgoing_local.axes.forward, outgoing_local.axes.left
+    y_values = []
+    for point in (boundary.left_bottom, boundary.right_bottom):
+        y_values.append((point[0] - outgoing_local.lower_xy[0]) * left[0]
+                        + (point[1] - outgoing_local.lower_xy[1]) * left[1])
+    top = layout.landing.top_z - layout.landing.thickness
+    start = tuple((outgoing_local.lower_xy[0] + forward[0] * start_x + left[0] * y,
+                   outgoing_local.lower_xy[1] + forward[1] * start_x + left[1] * y,
+                   z) for z in (start_z, top) for y in y_values)
+    vertices = (start[0], boundary.left_bottom, boundary.right_bottom, start[1],
+                start[2], boundary.left_top, boundary.right_top, start[3])
+    fragment = MeshFragment("UNDERBODY", ordinal, vertices, _BOX_FACES)
+    validate_mesh_fragments((fragment,))
+    return fragment
+
+
+def _build_sloped_upper_body(layout, outgoing_local, fields, baseline,
+                             boundary, ordinal):
+    """Build the straight upper region beginning at the authoritative quad."""
+    from .stair_geometry import extrude_xz_profile, validate_simple_polygon
+    from .stair_residential_geometry import stepped_underbody_inner_profile
+    tread_bottom = layout.landing.top_z - layout.landing.thickness
+    inner = ((0.0, tread_bottom),) + stepped_underbody_inner_profile(outgoing_local)
+    upper_baseline = ((0.0, _baseline_z(baseline, 0.0)), baseline[1])
+    polygon = validate_simple_polygon(inner + tuple(reversed(upper_baseline)))
+    left = outgoing_local.axes.left
+    y_min = ((boundary.left_bottom[0] - outgoing_local.lower_xy[0]) * left[0]
+             + (boundary.left_bottom[1] - outgoing_local.lower_xy[1]) * left[1])
+    y_max = ((boundary.right_bottom[0] - outgoing_local.lower_xy[0]) * left[0]
+             + (boundary.right_bottom[1] - outgoing_local.lower_xy[1]) * left[1])
     local = extrude_xz_profile(
         polygon, y_min, y_max, part_type="UNDERBODY", ordinal=ordinal)
     forward, left = outgoing_local.axes.forward, outgoing_local.axes.left
@@ -622,6 +664,39 @@ def _build_sloped_upper_section_fragment(layout, outgoing_local, fields,
     result = MeshFragment("UNDERBODY", ordinal, vertices, local.faces)
     validate_mesh_fragments((result,))
     return result
+
+
+def _merge_shared_boundary_fragments(first, second, ordinal):
+    """Weld two closed regions and remove their one coincident internal quad."""
+    vertices, lookup, face_counts = [], {}, {}
+    for fragment in (first, second):
+        remap = []
+        for vertex in fragment.vertices:
+            key = tuple(round(value, 12) for value in vertex)
+            if key not in lookup:
+                lookup[key] = len(vertices)
+                vertices.append(vertex)
+            remap.append(lookup[key])
+        for face in fragment.faces:
+            mapped = tuple(remap[index] for index in face)
+            key = tuple(sorted(mapped))
+            face_counts.setdefault(key, []).append(mapped)
+    faces = tuple(items[0] for items in face_counts.values() if len(items) == 1)
+    result = MeshFragment("UNDERBODY", ordinal, tuple(vertices), faces)
+    validate_mesh_fragments((result,))
+    return result
+
+
+def _build_sloped_upper_section_fragment(layout, outgoing_local, fields,
+                                          landing_soffit, ordinal):
+    """Build and weld a true Landing corner region to a straight upper region."""
+    baseline = _upper_section_baseline(layout, outgoing_local, fields, landing_soffit)
+    boundary = _resolve_landing_upper_boundary(layout, outgoing_local, baseline)
+    landing = _build_landing_turn_body(
+        layout, outgoing_local, baseline, boundary, ordinal)
+    upper = _build_sloped_upper_body(
+        layout, outgoing_local, fields, baseline, boundary, ordinal)
+    return _merge_shared_boundary_fragments(landing, upper, ordinal)
 
 
 def _build_landing_underbody_transition(layout, outgoing_local, fields,

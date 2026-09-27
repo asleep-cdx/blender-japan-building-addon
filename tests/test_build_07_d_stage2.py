@@ -14,6 +14,8 @@ from japanese_house_modeler.stair_multiflight import (RISER_DISTRIBUTION_AUTO,
     _build_l_flight_board_fragment, _build_l_flight_underbody_fragment,
     _build_landing_underbody_transition, _flight_stair_layout,
     _baseline_z, _build_sloped_upper_section_fragment, _upper_section_baseline,
+    _build_landing_turn_body, _build_sloped_upper_body,
+    _merge_shared_boundary_fragments, _resolve_landing_upper_boundary,
     canonical_multi_path, distribution_edit_initial_allocation,
     prepare_multiflight_residential_geometry,
     resolve_multiflight_layout, segment_allocations, switch_distribution_mode,
@@ -358,5 +360,36 @@ class ResidentialGeometryTests(unittest.TestCase):
             zs=[z for px,z in local if math.isclose(px,x,abs_tol=1e-8)]
             self.assertTrue(zs);self.assertAlmostEqual(min(zs),_baseline_z(baseline,x))
         self.assertEqual(len(baseline),2)
+    def test_true_corner_and_upper_share_exact_world_boundary(self):
+        fields=ResidentialFields(underside_mode="SLOPED_CLOSED")
+        for points in (POINTS,((0,0),(3,0),(3,-3))):
+            with self.subTest(points=points):
+                layout=resolve_multiflight_layout(points,"FORWARD",0,2800,16,900,30,12,point_ids=IDS)
+                lower=_flight_stair_layout(layout.flights[0],layout)
+                upper=_flight_stair_layout(layout.flights[1],layout)
+                soffit=side_board_lower_profile(lower,fields)[-1][1]
+                baseline=_upper_section_baseline(layout,upper,fields,soffit)
+                boundary=_resolve_landing_upper_boundary(layout,upper,baseline)
+                landing=_build_landing_turn_body(layout,upper,baseline,boundary,1)
+                upper_body=_build_sloped_upper_body(layout,upper,fields,baseline,boundary,1)
+                authority={boundary.left_bottom,boundary.right_bottom,
+                           boundary.left_top,boundary.right_top}
+                self.assertTrue(authority.issubset(set(landing.vertices)))
+                self.assertTrue(authority.issubset(set(upper_body.vertices)))
+                merged=_merge_shared_boundary_fragments(landing,upper_body,1)
+                self.assertEqual(len(merged.faces),len(landing.faces)+len(upper_body.faces)-2)
+                self.assertEqual(merged.part_type,"UNDERBODY")
+                self.assertTrue(all(math.isfinite(value) for vertex in merged.vertices for value in vertex))
+    def test_sloped_production_uses_one_welded_corner_upper_fragment(self):
+        _layout,fragments,_mesh=self.prepare(underside="SLOPED_CLOSED",left=False,right=False)
+        underbodies=[fragment for fragment in fragments if fragment.part_type=="UNDERBODY"]
+        # Lower Flight + one welded Landing/Upper region; no repair wedge/cap.
+        self.assertEqual(len(underbodies),2)
+        for fragment in underbodies:
+            edges={}
+            for face in fragment.faces:
+                for a,b in zip(face,face[1:]+face[:1]):
+                    key=tuple(sorted((a,b)));edges[key]=edges.get(key,0)+1
+            self.assertTrue(all(count==2 for count in edges.values()))
 
 if __name__ == '__main__': unittest.main()
