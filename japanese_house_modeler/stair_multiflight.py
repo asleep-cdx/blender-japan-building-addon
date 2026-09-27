@@ -376,6 +376,39 @@ def _flight_stair_layout(flight, layout):
         layout.tread_thickness, layout.riser_thickness)
 
 
+def build_landing_side_board_fragments(layout, fields, start_ordinal=1):
+    """Continue each enabled local uphill side deterministically around the turn."""
+    thickness = float(fields.side_board_thickness_mm) / _MM_PER_METRE
+    reveal = float(fields.side_board_reveal_mm) / _MM_PER_METRE
+    band = float(fields.side_board_band_width_mm) / _MM_PER_METRE
+    if not all(math.isfinite(v) and v > 0.0 for v in (thickness, band)):
+        raise ValueError("Landing Side Board寸法が不正です。")
+    top = layout.landing.top_z + max(0.0, reveal)
+    bottom = max(layout.base_z, top - band)
+    if top - bottom <= _EPSILON:
+        raise ValueError("Landing Side Board高さが不足しています。")
+    fragments = []
+    ordinal = int(start_ordinal)
+    for flight in layout.flights:
+        for side, enabled, sign in (
+                ("LEFT", fields.left_side_board_enabled, 1.0),
+                ("RIGHT", fields.right_side_board_enabled, -1.0)):
+            if not enabled:
+                continue
+            # LEFT/RIGHT is reevaluated in each Flight's uphill local frame.
+            center = (layout.landing.center_xy[0]
+                      + flight.left[0] * sign * (layout.width + thickness) / 2.0,
+                      layout.landing.center_xy[1]
+                      + flight.left[1] * sign * (layout.width + thickness) / 2.0)
+            fragments.append(_oriented_box(
+                center, flight.forward, flight.left, thickness,
+                -layout.width / 2.0, layout.width / 2.0,
+                bottom, top, "SIDE_BOARD", ordinal))
+            ordinal += 1
+    validate_mesh_fragments(tuple(fragments))
+    return tuple(fragments)
+
+
 def prepare_multiflight_residential_geometry(
         points, ascent_direction, base_z_mm, floor_to_floor_mm, riser_count,
         stair_width_mm, tread_thickness_mm, riser_thickness_mm, *,
@@ -425,6 +458,8 @@ def prepare_multiflight_residential_geometry(
             fragments.append(build_side_board_fragment(local, "LEFT", values))
         if values.right_side_board_enabled:
             fragments.append(build_side_board_fragment(local, "RIGHT", values))
+    fragments.extend(build_landing_side_board_fragments(
+        layout, values, len(fragments) + 1))
     ordinal = len(fragments) + 1
     incoming = layout.flights[0].forward
     fragments.append(_oriented_box(
@@ -435,9 +470,11 @@ def prepare_multiflight_residential_geometry(
     # Dedicated closed Landing transition prevents a visible central cavity.
     fragments.append(_oriented_box(
         layout.landing.center_xy, incoming, (-incoming[1], incoming[0]),
-        layout.width, -layout.width / 2.0, layout.width / 2.0,
+        layout.width + 2.0 * layout.riser_thickness,
+        -layout.width / 2.0 - layout.riser_thickness,
+        layout.width / 2.0 + layout.riser_thickness,
         max(layout.base_z, layout.landing.top_z - layout.width),
-        layout.landing.top_z - layout.landing.thickness,
+        layout.landing.top_z,
         "UNDERBODY", ordinal + 1))
     fragments = tuple(fragments)
     validate_mesh_fragments(fragments)

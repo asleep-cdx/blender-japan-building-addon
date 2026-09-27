@@ -11,6 +11,9 @@ from .drawing_alignment import constrained_direction, select_unambiguous_candida
 from .stair_multiflight import canonical_multi_path
 
 
+GUIDE_THRESHOLD_PX = 10.0
+
+
 @dataclass(frozen=True)
 class MoveCandidate:
     points: tuple
@@ -77,31 +80,93 @@ def aligned_candidates(raw_point, reference_points):
     return tuple(result)
 
 
+def project_to_line(raw_point, line_start, line_end):
+    """Project a world-XY point onto an infinite extension/parallel guide."""
+    raw = tuple(map(float, raw_point[:2]))
+    start = tuple(map(float, line_start[:2]))
+    end = tuple(map(float, line_end[:2]))
+    axis = end[0] - start[0], end[1] - start[1]
+    length_squared = axis[0] * axis[0] + axis[1] * axis[1]
+    if length_squared <= 1.0e-12:
+        return None
+    t = ((raw[0] - start[0]) * axis[0]
+         + (raw[1] - start[1]) * axis[1]) / length_squared
+    return start[0] + t * axis[0], start[1] + t * axis[1]
+
+
+def endpoint_shift_candidate(points, moved_index, raw_point):
+    """Solve endpoint Shift and exact-90 simultaneously, never sequentially."""
+    points = tuple(tuple(map(float, p[:2])) for p in points)
+    if len(points) != 3 or moved_index not in (0, 2):
+        raise ValueError("Endpoint Shiftは3点LのSTART/END専用です。")
+    anchor = points[1]
+    direction = constrained_direction(anchor, raw_point, step_degrees=15.0)
+    if direction is None:
+        raise ValueError("Shift方向を解決できません。")
+    fixed = points[2] if moved_index == 0 else points[0]
+    fixed_axis = fixed[0] - anchor[0], fixed[1] - anchor[1]
+    fixed_length = math.hypot(*fixed_axis)
+    if fixed_length <= 1.0e-6:
+        raise ValueError("90度条件の固定Flightが短すぎます。")
+    # The rounded ray itself must be the 90-degree locus.  Reprojection after
+    # rounding would violate the explicit Shift contract.
+    if abs(direction[0] * fixed_axis[0] + direction[1] * fixed_axis[1]) \
+            > fixed_length * 1.0e-6:
+        raise ValueError("Shift 15度とLanding 90度を同時に満たせません。")
+    length = math.hypot(float(raw_point[0]) - anchor[0],
+                        float(raw_point[1]) - anchor[1])
+    if length <= 1.0e-6:
+        raise ValueError("Shift candidateが短すぎます。")
+    return anchor[0] + direction[0] * length, anchor[1] + direction[1] * length
+
+
 def resolve_move_candidate(points, point_ids, moved_index, raw_point, *,
-                           shift=False, guide_candidates=(), distances=()):
+                           shift=False, guide_candidates=(), distances=(),
+                           guide_names=(), threshold_px=GUIDE_THRESHOLD_PX):
     """Resolve preview/commit identically and filter every snap through strict L validity."""
     original = tuple(tuple(map(float, p[:2])) for p in points)
     anchor = original[move_anchor_index(len(original), moved_index)]
     raw = tuple(map(float, raw_point[:2]))
-    if shift and moved_index != 1:
-        direction = constrained_direction(anchor, raw, step_degrees=15.0)
-        if direction is None:
-            raise ValueError("Shift方向を解決できません。")
-        length = math.hypot(raw[0] - anchor[0], raw[1] - anchor[1])
-        raw = (anchor[0] + direction[0] * length, anchor[1] + direction[1] * length)
-    structural = (turn_right_angle_candidate(original, raw, shift=shift)
-                  if moved_index == 1 else
-                  endpoint_right_angle_candidate(original, moved_index, raw))
-    candidates = [(0.0, structural, "RIGHT_ANGLE")]
-    for distance, point in zip(distances, guide_candidates):
+    if shift:
+        point = (turn_right_angle_candidate(original, raw, shift=True)
+                 if moved_index == 1 else
+                 endpoint_shift_candidate(original, moved_index, raw))
+        result = list(original)
+        result[moved_index] = point
+        path = canonical_multi_path(result, point_ids)
+        return MoveCandidate(tuple(p.xy for p in path),
+                             tuple(p.point_id for p in path), moved_index, "SHIFT")
+    # A free raw point is valid only when it already satisfies strict L.
+    candidates = []
+    raw_points = list(original)
+    raw_points[moved_index] = raw
+    try:
+        canonical_multi_path(raw_points, point_ids)
+    except ValueError:
+        pass
+    else:
+        candidates.append((0.0, raw, "FREE"))
+    names = tuple(guide_names)
+    for index, (distance, point) in enumerate(zip(distances, guide_candidates)):
+        distance = float(distance)
+        if not math.isfinite(distance) or distance > float(threshold_px):
+            continue
         candidate_points = list(original)
         candidate_points[moved_index] = tuple(point[:2])
         try:
             canonical_multi_path(candidate_points, point_ids)
         except ValueError:
             continue
-        candidates.append((float(distance), tuple(point[:2]), "ALIGNMENT"))
-    selected = select_unambiguous_candidate((d, (p, name)) for d, p, name in candidates)
+        name = names[index] if index < len(names) else "ALIGNMENT"
+        candidates.append((distance, tuple(point[:2]), name))
+    unique = []
+    for distance, point, name in candidates:
+        if any(math.hypot(point[0] - saved[1][0], point[1] - saved[1][1])
+               <= 1.0e-9 for saved in unique):
+            continue
+        unique.append((distance, point, name))
+    selected = select_unambiguous_candidate(
+        (d, (p, name)) for d, p, name in unique)
     if selected is None:
         raise ValueError("guide candidateが曖昧です。")
     point, guide = selected
@@ -110,3 +175,21 @@ def resolve_move_candidate(points, point_ids, moved_index, raw_point, *,
     path = canonical_multi_path(result, point_ids)
     return MoveCandidate(tuple(p.xy for p in path), tuple(p.point_id for p in path),
                          moved_index, guide)
+
+
+def resolve_creation_candidate(points, point_ids, raw_point, *, shift=False,
+                               guide_candidates=(), distances=(), guide_names=(),
+                               threshold_px=GUIDE_THRESHOLD_PX):
+    """Resolve an L third-click through the same strict guide selection policy."""
+    if len(points) != 2:
+        raise ValueError("L作成の第3点解決には確定済み2点が必要です。")
+    provisional = (tuple(points[0]), tuple(points[1]), tuple(raw_point[:2]))
+    ids = tuple(point_ids)
+    if len(ids) != 3:
+        raise ValueError("L作成point identityが不正です。")
+    # Reuse END rules: P1 is the canonical anchor and the incoming Flight is
+    # fixed.  Shift therefore also has to satisfy exact 90 degrees.
+    return resolve_move_candidate(provisional, ids, 2, raw_point, shift=shift,
+                                  guide_candidates=guide_candidates,
+                                  distances=distances, guide_names=guide_names,
+                                  threshold_px=threshold_px)

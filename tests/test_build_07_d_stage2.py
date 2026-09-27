@@ -6,7 +6,8 @@ package.__path__ = [str(ROOT / "japanese_house_modeler")]
 sys.modules.setdefault("japanese_house_modeler", package)
 from japanese_house_modeler.drawing_alignment import constrained_direction, select_unambiguous_candidate
 from japanese_house_modeler.stair_guides import (aligned_candidates, endpoint_right_angle_candidate,
-    move_anchor_index, resolve_move_candidate, turn_right_angle_candidate)
+    endpoint_shift_candidate, move_anchor_index, resolve_creation_candidate,
+    resolve_move_candidate, turn_right_angle_candidate)
 from japanese_house_modeler.stair_multiflight import (RISER_DISTRIBUTION_AUTO,
     FlightAllocation, allocation_counts, canonical_multi_path, prepare_multiflight_residential_geometry,
     resolve_multiflight_layout, segment_allocations, switch_distribution_mode,
@@ -29,11 +30,20 @@ class GuideTests(unittest.TestCase):
     def test_turn_thales_locus(self):
         c=turn_right_angle_candidate(POINTS,(2,2)); self.assertAlmostEqual(dot_at((POINTS[0],c,POINTS[2])),0)
     def test_ids_retained_and_preview_is_commit_candidate(self):
-        c=resolve_move_candidate(POINTS,IDS,1,(2,1)); self.assertEqual(c.point_ids,IDS);self.assertEqual(c.points,canonical_multi_path(c.points,IDS) and c.points)
+        c=resolve_move_candidate(POINTS,IDS,1,(2,1),guide_candidates=(turn_right_angle_candidate(POINTS,(2,1)),),distances=(2,),guide_names=("RIGHT_ANGLE",)); self.assertEqual(c.point_ids,IDS);self.assertEqual(c.points,canonical_multi_path(c.points,IDS) and c.points)
     def test_wall_references_are_coordinates_only(self): self.assertEqual(aligned_candidates((2,3),((1,4),)),((1.,3.),(2.,4.)))
     def test_ambiguous_policy(self): self.assertIsNone(select_unambiguous_candidate(((4,"a"),(4,"b"))))
     def test_non_right_numeric_rejected(self):
         with self.assertRaises(ValueError): canonical_multi_path(((0,0),(2,0),(3,2)),IDS)
+    def test_alignment_can_beat_right_angle_guide(self):
+        result=resolve_move_candidate(POINTS,IDS,2,(3.2,2.1),guide_candidates=((3,2),(3,4)),distances=(8,2),guide_names=("RIGHT_ANGLE","Y_ALIGNMENT"))
+        self.assertEqual(result.points[2],(3.,4.));self.assertEqual(result.guide,"Y_ALIGNMENT")
+    def test_threshold_outside_non_right_rejected(self):
+        with self.assertRaises(ValueError): resolve_creation_candidate(POINTS[:2],IDS,(2.8,2),guide_candidates=((3,2),),distances=(11,))
+    def test_endpoint_shift_compatible(self):
+        point=endpoint_shift_candidate(POINTS,2,(3,2));self.assertAlmostEqual(dot_at((POINTS[0],POINTS[1],point)),0)
+    def test_endpoint_shift_incompatible(self):
+        with self.assertRaises(ValueError): endpoint_shift_candidate(POINTS,2,(4,2))
 
 class AllocationTests(unittest.TestCase):
     def layout(self, **kw): return resolve_multiflight_layout(POINTS,"FORWARD",0,2800,16,900,30,12,point_ids=IDS,**kw)
@@ -65,7 +75,7 @@ class ResidentialGeometryTests(unittest.TestCase):
     def test_landing_tread_and_underbody(self):
         l,fr,m=self.prepare(); self.assertEqual(fr[-2].part_type,"TREAD");self.assertEqual(fr[-1].part_type,"UNDERBODY");self.assertIn("UNDERSIDE",m.face_roles)
     def test_board_sides(self):
-        for left,right,count in ((True,True,4),(True,False,2),(False,True,2),(False,False,0)):
+        for left,right,count in ((True,True,8),(True,False,4),(False,True,4),(False,False,0)):
             _,fr,_=self.prepare(left=left,right=right); self.assertEqual(sum(f.part_type=="SIDE_BOARD" for f in fr),count)
     def test_per_flight_nosing_rejected(self):
         f=ResidentialFields(tread_front_overhang_mm=1000)
@@ -73,5 +83,32 @@ class ResidentialGeometryTests(unittest.TestCase):
     def test_source_ui_and_transaction_foundations(self):
         source=(ROOT/'japanese_house_modeler/stair_operators.py').read_text(); ui=(ROOT/'japanese_house_modeler/ui.py').read_text()
         self.assertIn('class JHM_OT_move_stair_path_point',source);self.assertIn('prepare_multiflight_residential_geometry',source);self.assertIn('折れ点 1 を移動',ui)
+    def test_operator_production_wiring(self):
+        source=(ROOT/'japanese_house_modeler/stair_operators.py').read_text()
+        self.assertIn('resolve_creation_candidate(',source);self.assertIn('shift=event.shift',source)
+        self.assertIn('_visible_wall_endpoint_coordinates(context)',source)
+        self.assertIn('guide_candidates=guides',source);self.assertIn('draw_handler_add(',source);self.assertIn('draw_handler_remove(',source)
+        self.assertNotIn('wall.connections.add',source);self.assertNotIn('split_wall',source)
+    def test_fragments_closed_nonzero_and_turn_join_finite(self):
+        _layout,fragments,mesh=self.prepare("SLOPED_CLOSED","SLOPED","ROUND")
+        for fragment in fragments:
+            self.assertTrue(all(math.isfinite(value) for vertex in fragment.vertices for value in vertex))
+            edges={}
+            for face in fragment.faces:
+                self.assertGreaterEqual(len(set(face)),3)
+                for a,b in zip(face,face[1:]+face[:1]): edges[tuple(sorted((a,b)))]=edges.get(tuple(sorted((a,b))),0)+1
+            self.assertTrue(all(count==2 for count in edges.values()))
+        self.assertEqual(set(mesh.face_roles),{"TREAD","RISER","UNDERSIDE","SIDE_BOARD"})
+    def test_flight_underbodies_contact_landing_foundation(self):
+        layout,fragments,_mesh=self.prepare(left=False,right=False)
+        bodies=[fragment for fragment in fragments if fragment.part_type=="UNDERBODY"]
+        self.assertEqual(len(bodies),3)
+        def bounds(fragment):
+            return tuple((min(vertex[axis] for vertex in fragment.vertices),max(vertex[axis] for vertex in fragment.vertices)) for axis in range(3))
+        landing=bounds(bodies[-1])
+        for flight in bodies[:-1]:
+            flight_bounds=bounds(flight)
+            self.assertTrue(all(max(a[0],b[0])<=min(a[1],b[1])+1e-9 for a,b in zip(flight_bounds,landing)))
+        self.assertGreaterEqual(min(vertex[2] for fragment in bodies for vertex in fragment.vertices),layout.base_z)
 
 if __name__ == '__main__': unittest.main()
