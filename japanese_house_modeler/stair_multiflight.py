@@ -473,9 +473,42 @@ def _clip_profile_x(profile, boundary, keep_greater):
     return tuple(output)
 
 
+def _resolve_lower_outer_board_terminal(
+        source_polygon, run_length, riser_thickness, turn_soffit_z):
+    """Retain only the accepted terminal tail below Landing ownership."""
+    from .stair_geometry import validate_simple_polygon
+    left = float(run_length)
+    right = left + float(riser_thickness)
+    soffit = float(turn_soffit_z)
+    clipped = list(_clip_profile_x(source_polygon, left, keep_greater=False))
+    terminal_z = [point[1] for point in source_polygon
+                  if math.isclose(point[0], right, abs_tol=_EPSILON)]
+    if not terminal_z:
+        raise ValueError("Lower Flight Side Board terminalを解決できません。")
+    lower_right = min(terminal_z)
+    pair = None
+    for index, point in enumerate(clipped):
+        following = clipped[(index + 1) % len(clipped)]
+        if (math.isclose(point[0], left, abs_tol=_EPSILON)
+                and math.isclose(following[0], left, abs_tol=_EPSILON)
+                and point[1] < following[1]):
+            pair = index
+            break
+    if pair is None:
+        raise ValueError("Lower Flight Side Board clip境界が不正です。")
+    lower_left, upper_left = clipped[pair], clipped[pair + 1]
+    if not lower_right < soffit < upper_left[1]:
+        raise ValueError("Lower Flight Side Board ownership高さが不正です。")
+    clipped[pair:pair + 2] = (
+        lower_left, (right, lower_right), (right, soffit),
+        (left, soffit), upper_left)
+    return validate_simple_polygon(clipped)
+
+
 def _build_l_flight_board_fragment(local, side, fields, position,
                                    preserve_outgoing_reveal=False,
-                                   lower_profile=None):
+                                   lower_profile=None, extend_lower_terminal=False,
+                                   turn_soffit_z=None):
     """Clip only the Landing endpoint while preserving the Flight local frame."""
     from .stair_geometry import extrude_xz_profile, validate_simple_polygon
     from .stair_residential_geometry import side_board_profile, sloped_side_board_profile
@@ -498,9 +531,16 @@ def _build_l_flight_board_fragment(local, side, fields, position,
             outer + tuple(reversed(lower)))
     reveal = (max(0.0, float(fields.side_board_reveal_mm) / _MM_PER_METRE)
               if preserve_outgoing_reveal else 0.0)
-    polygon = _clip_profile_x(
-        source_polygon, -reveal if position == 1 else local.run_length,
-        keep_greater=position == 1)
+    if extend_lower_terminal:
+        if position != 0 or turn_soffit_z is None:
+            raise ValueError("Lower Flight outer terminal指定が不正です。")
+        polygon = _resolve_lower_outer_board_terminal(
+            source_polygon, local.run_length, local.riser_thickness,
+            turn_soffit_z)
+    else:
+        polygon = _clip_profile_x(
+            source_polygon, -reveal if position == 1 else local.run_length,
+            keep_greater=position == 1)
     thickness = float(fields.side_board_thickness_mm) / _MM_PER_METRE
     half = local.width / 2.0
     if side == "LEFT":
@@ -722,12 +762,16 @@ def prepare_multiflight_residential_geometry(
             fragments.append(_build_l_flight_board_fragment(
                 local, "LEFT", values, index,
                 False if sloped and index == 1 else index == 1 and outer_side == "LEFT",
-                upper_lower if sloped and index == 1 else None))
+                upper_lower if sloped and index == 1 else None,
+                sloped and index == 0 and outer_side == "LEFT",
+                turn_soffit_z))
         if values.right_side_board_enabled:
             fragments.append(_build_l_flight_board_fragment(
                 local, "RIGHT", values, index,
                 False if sloped and index == 1 else index == 1 and outer_side == "RIGHT",
-                upper_lower if sloped and index == 1 else None))
+                upper_lower if sloped and index == 1 else None,
+                sloped and index == 0 and outer_side == "RIGHT",
+                turn_soffit_z))
     fragments.extend(build_landing_side_board_fragments(
         layout, values, len(fragments) + 1, board_bottom))
     ordinal = len(fragments) + 1

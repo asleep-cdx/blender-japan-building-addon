@@ -12,16 +12,19 @@ from japanese_house_modeler.stair_guides import (aligned_candidates, endpoint_ri
 from japanese_house_modeler.stair_multiflight import (RISER_DISTRIBUTION_AUTO,
     FlightAllocation, allocation_counts, build_landing_side_board_fragments,
     _build_l_flight_board_fragment, _build_l_flight_underbody_fragment,
-    _build_landing_underbody_fragment, _build_landing_underbody_transition,
+    _build_landing_tread_fragment, _build_landing_underbody_fragment,
+    _build_landing_underbody_transition,
     _build_sloped_upper_underbody_fragment, _flight_stair_layout,
-    _resolve_upper_turn_soffit,
+    _resolve_lower_outer_board_terminal, _resolve_upper_turn_soffit,
     canonical_multi_path, distribution_edit_initial_allocation,
     prepare_multiflight_residential_geometry,
     resolve_multiflight_layout, segment_allocations, switch_distribution_mode,
     validate_manual_allocation)
 from japanese_house_modeler.stair_residential import ResidentialFields
 from japanese_house_modeler.stair_residential_geometry import (
-    build_underbody_fragment, side_board_lower_profile, side_board_profile,
+    build_underbody_fragment, build_residential_riser_fragments,
+    build_residential_tread_fragments, build_top_arrival_nosing_fragment,
+    side_board_lower_profile, side_board_profile,
     sloped_side_board_profile, sloped_underbody_profile,
 )
 
@@ -378,15 +381,102 @@ class ResidentialGeometryTests(unittest.TestCase):
                 underside="SLOPED_CLOSED",left=True,right=True,points=points)
             boards=[part for part in fragments if part.part_type=="SIDE_BOARD"]
             perimeter=boards[-1]
-            def bounds(part):
-                return tuple((min(v[axis] for v in part.vertices),
-                              max(v[axis] for v in part.vertices))
-                             for axis in range(3))
-            landing_bounds=bounds(perimeter)
-            for flight_board in boards[:-1]:
-                intersections=[min(a[1],b[1])-max(a[0],b[0])
-                               for a,b in zip(landing_bounds,bounds(flight_board))]
-                self.assertFalse(all(length>1e-9 for length in intersections))
+            incoming=layout.flights[0]
+            cross=(incoming.forward[0]*layout.flights[1].forward[1]
+                   -incoming.forward[1]*layout.flights[1].forward[0])
+            outer_board=boards[1 if cross>0 else 0]
+            local=_flight_stair_layout(incoming,layout)
+            tail=[v for v in outer_board.vertices
+                  if ((v[0]-local.lower_xy[0])*local.axes.forward[0]
+                      +(v[1]-local.lower_xy[1])*local.axes.forward[1])
+                     > local.run_length+1e-9]
+            self.assertTrue(tail)
+            self.assertLessEqual(max(v[2] for v in tail),
+                                 min(v[2] for v in perimeter.vertices)+1e-9)
+    def test_only_lower_outer_terminal_extends_to_body_end(self):
+        for points in (POINTS,((0,0),(3,0),(3,-3))):
+            for mode in ("STEPPED","SLOPED"):
+                for riser_mm in (8,12,18):
+                    with self.subTest(points=points,mode=mode,riser_mm=riser_mm):
+                        fields=ResidentialFields(
+                            underside_mode="SLOPED_CLOSED",side_board_mode=mode)
+                        layout,fragments,_mesh=prepare_multiflight_residential_geometry(
+                            points,"FORWARD",0,2800,16,900,30,riser_mm,
+                            point_ids=IDS,fields=fields)
+                        lower=_flight_stair_layout(layout.flights[0],layout)
+                        upper=_flight_stair_layout(layout.flights[1],layout)
+                        turn_z,_profile=_resolve_upper_turn_soffit(upper,fields)
+                        cross=(layout.flights[0].forward[0]*layout.flights[1].forward[1]
+                               -layout.flights[0].forward[1]*layout.flights[1].forward[0])
+                        outer="RIGHT" if cross>0 else "LEFT"
+                        inner="LEFT" if outer=="RIGHT" else "RIGHT"
+                        extended=_build_l_flight_board_fragment(
+                            lower,outer,fields,0,False,None,True,turn_z)
+                        unchanged=_build_l_flight_board_fragment(
+                            lower,inner,fields,0)
+                        def local_xz(fragment):
+                            return [((v[0]-lower.lower_xy[0])*lower.axes.forward[0]
+                                     +(v[1]-lower.lower_xy[1])*lower.axes.forward[1],v[2])
+                                    for v in fragment.vertices]
+                        outer_xz=local_xz(extended);inner_xz=local_xz(unchanged)
+                        terminal=lower.run_length+lower.riser_thickness
+                        self.assertAlmostEqual(max(x for x,_z in outer_xz),terminal)
+                        self.assertAlmostEqual(max(x for x,_z in inner_xz),lower.run_length)
+                        self.assertAlmostEqual(terminal-lower.run_length,riser_mm/1000)
+                        tail=[(x,z) for x,z in outer_xz if x>lower.run_length+1e-9]
+                        self.assertTrue(tail)
+                        self.assertLessEqual(max(z for _x,z in tail),turn_z+1e-9)
+                        accepted=(sloped_side_board_profile(lower,fields)
+                                  if mode=="SLOPED" else side_board_profile(lower,fields))
+                        terminal_bottom=min(z for x,z in outer_xz
+                                            if math.isclose(x,terminal,abs_tol=1e-9))
+                        self.assertAlmostEqual(terminal_bottom,accepted.lower[-1][1])
+                        production_boards=[part for part in fragments
+                                           if part.part_type=="SIDE_BOARD"]
+                        self.assertIn(extended,production_boards)
+                        self.assertIn(unchanged,production_boards)
+    def test_terminal_change_leaves_all_non_board_fragments_canonical(self):
+        fields=ResidentialFields(underside_mode="SLOPED_CLOSED",
+                                 left_side_board_enabled=True,
+                                 right_side_board_enabled=True)
+        layout,fragments,_mesh=prepare_multiflight_residential_geometry(
+            POINTS,"FORWARD",0,2800,16,900,30,12,point_ids=IDS,fields=fields)
+        locals_=tuple(_flight_stair_layout(flight,layout) for flight in layout.flights)
+        turn_z,_lower=_resolve_upper_turn_soffit(locals_[1],fields)
+        expected=[]
+        for index,local in enumerate(locals_):
+            expected.extend(build_residential_tread_fragments(local,fields))
+            if index==1:
+                cap=build_top_arrival_nosing_fragment(local,fields)
+                if cap is not None: expected.append(cap)
+            expected.extend(build_residential_riser_fragments(local,fields))
+            expected.append(build_underbody_fragment(local,fields) if index==0
+                            else _build_sloped_upper_underbody_fragment(local,fields,turn_z))
+        nonboards=[part for part in fragments if part.part_type!="SIDE_BOARD"]
+        turn=next(part for part in nonboards[len(expected):]
+                  if part.part_type=="UNDERBODY")
+        landing=nonboards[-1]
+        expected.append(_build_landing_underbody_fragment(
+            layout,fields,turn.ordinal,turn_z))
+        expected.append(_build_landing_tread_fragment(
+            layout,fields,landing.ordinal))
+        self.assertEqual(tuple(nonboards),tuple(expected))
+    def test_disabled_outer_board_does_not_create_terminal_extension(self):
+        for points,outer in ((POINTS,"RIGHT"),(((0,0),(3,0),(3,-3)),"LEFT")):
+            fields=ResidentialFields(
+                underside_mode="SLOPED_CLOSED",
+                left_side_board_enabled=outer!="LEFT",
+                right_side_board_enabled=outer!="RIGHT")
+            layout,fragments,_mesh=prepare_multiflight_residential_geometry(
+                points,"FORWARD",0,2800,16,900,30,12,
+                point_ids=IDS,fields=fields)
+            lower=_flight_stair_layout(layout.flights[0],layout)
+            boards=[part for part in fragments if part.part_type=="SIDE_BOARD"]
+            self.assertEqual(len(boards),2)
+            local_x=[(v[0]-lower.lower_xy[0])*lower.axes.forward[0]
+                     +(v[1]-lower.lower_xy[1])*lower.axes.forward[1]
+                     for v in boards[0].vertices]
+            self.assertAlmostEqual(max(local_x),lower.run_length)
     def test_sloped_production_has_three_owned_underbody_regions(self):
         _layout,fragments,_mesh=self.prepare(
             underside="SLOPED_CLOSED",left=False,right=False)
