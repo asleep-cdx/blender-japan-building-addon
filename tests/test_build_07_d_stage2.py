@@ -12,7 +12,8 @@ from japanese_house_modeler.stair_guides import (aligned_candidates, endpoint_ri
 from japanese_house_modeler.stair_multiflight import (RISER_DISTRIBUTION_AUTO,
     FlightAllocation, allocation_counts, build_landing_side_board_fragments,
     _build_l_flight_board_fragment, _build_l_flight_underbody_fragment,
-    _build_landing_underbody_transition, _flight_stair_layout,
+    _build_landing_underbody_fragment, _build_landing_underbody_transition,
+    _flight_stair_layout,
     canonical_multi_path, distribution_edit_initial_allocation,
     prepare_multiflight_residential_geometry,
     resolve_multiflight_layout, segment_allocations, switch_distribution_mode,
@@ -119,7 +120,7 @@ class ResidentialGeometryTests(unittest.TestCase):
         landing=fr[-1]
         self.assertEqual(landing.part_type,"TREAD")
         self.assertAlmostEqual(max(v[2] for v in landing.vertices)-min(v[2] for v in landing.vertices),l.tread_thickness)
-        self.assertEqual(sum(f.part_type=="UNDERBODY" for f in fr),2)
+        self.assertEqual(sum(f.part_type=="UNDERBODY" for f in fr),3)
         self.assertIn("UNDERSIDE",m.face_roles)
     def test_board_sides(self):
         for left,right,count in ((True,True,5),(True,False,2),(False,True,3),(False,False,0)):
@@ -151,11 +152,14 @@ class ResidentialGeometryTests(unittest.TestCase):
     def test_flight_underbodies_contact_landing_foundation(self):
         layout,fragments,_mesh=self.prepare(underside="SLOPED_CLOSED",left=False,right=False)
         bodies=[fragment for fragment in fragments if fragment.part_type=="UNDERBODY"]
-        self.assertEqual(len(bodies),2)
+        self.assertEqual(len(bodies),3)
         # Each straight Flight owns exactly its accepted local closed body;
         # there is no Landing-spanning transition or filler body.
         locals_=tuple(_flight_stair_layout(flight,layout) for flight in layout.flights)
-        self.assertEqual(tuple(bodies),tuple(build_underbody_fragment(local,ResidentialFields(underside_mode="SLOPED_CLOSED",left_side_board_enabled=False,right_side_board_enabled=False)) for local in locals_))
+        expected=tuple(build_underbody_fragment(local,ResidentialFields(underside_mode="SLOPED_CLOSED",left_side_board_enabled=False,right_side_board_enabled=False)) for local in locals_)
+        self.assertEqual((bodies[0],bodies[1]),expected)
+        self.assertEqual(bodies[2],_build_landing_underbody_fragment(
+            layout,ResidentialFields(underside_mode="SLOPED_CLOSED",left_side_board_enabled=False,right_side_board_enabled=False),bodies[2].ordinal))
         self.assertGreaterEqual(min(vertex[2] for fragment in bodies for vertex in fragment.vertices),layout.base_z)
     def test_landing_tread_underbody_do_not_overlap(self):
         layout,fragments,_mesh=self.prepare(underside="SLOPED_CLOSED",left=False,right=False)
@@ -163,8 +167,13 @@ class ResidentialGeometryTests(unittest.TestCase):
         self.assertEqual(tread.part_type,"TREAD")
         self.assertAlmostEqual(max(v[2] for v in tread.vertices),layout.landing.top_z)
         self.assertAlmostEqual(min(v[2] for v in tread.vertices),layout.landing.top_z-layout.tread_thickness)
-        # No UNDERBODY fragment owns the w x w Landing footprint.
-        self.assertEqual(sum(f.part_type=="UNDERBODY" for f in fragments),2)
+        bodies=[f for f in fragments if f.part_type=="UNDERBODY"]
+        self.assertEqual(len(bodies),3)
+        turn=bodies[-1]
+        self.assertAlmostEqual(max(v[2] for v in turn.vertices),
+                               min(v[2] for v in tread.vertices))
+        expected_thickness=ResidentialFields().underside_thickness_mm/1000
+        self.assertAlmostEqual(max(v[2] for v in turn.vertices)-min(v[2] for v in turn.vertices),expected_thickness)
     def test_landing_board_turn_mapping_and_openings(self):
         for points,outer in ((POINTS,"RIGHT"),(((0,0),(3,0),(3,-3)),"LEFT")):
             for mode in ("STEPPED","SLOPED"):
@@ -260,7 +269,7 @@ class ResidentialGeometryTests(unittest.TestCase):
                                        layout.landing.top_z-layout.tread_thickness,
                                        abs_tol=1e-9)]
         self.assertEqual(len(final_risers),1)
-        self.assertEqual(sum(f.part_type=="UNDERBODY" for f in fragments),2)
+        self.assertEqual(sum(f.part_type=="UNDERBODY" for f in fragments),3)
     def test_enabled_landing_fascia_reaches_resolved_soffit(self):
         fields=ResidentialFields(underside_mode="SLOPED_CLOSED",
                                  left_side_board_enabled=True,
@@ -293,11 +302,18 @@ class ResidentialGeometryTests(unittest.TestCase):
                     underside="SLOPED_CLOSED",left=False,right=False,points=points)
                 bodies=[part for part in fragments if part.part_type=="UNDERBODY"]
                 locals_=tuple(_flight_stair_layout(flight,layout) for flight in layout.flights)
-                self.assertEqual(len(bodies),2)
-                for body,local in zip(bodies,locals_):
+                self.assertEqual(len(bodies),3)
+                for body,local in zip(bodies[:2],locals_):
                     self.assertEqual(body,build_underbody_fragment(local,fields))
                     self.assertEqual(side_board_lower_profile(local,fields),
                                      sloped_underbody_profile(local,fields).outer)
+                    local_x=[(v[0]-local.lower_xy[0])*local.axes.forward[0]
+                             +(v[1]-local.lower_xy[1])*local.axes.forward[1]
+                             for v in body.vertices]
+                    for boundary in (min(local_x),max(local_x)):
+                        self.assertTrue(any(all(math.isclose(local_x[index],boundary,abs_tol=1e-9)
+                                                for index in face)
+                                            for face in body.faces))
     def test_landing_slab_footprint_and_thickness(self):
         for points in (POINTS,((0,0),(3,0),(3,-3))):
             layout,fragments,_mesh=self.prepare(
@@ -313,6 +329,13 @@ class ResidentialGeometryTests(unittest.TestCase):
             self.assertAlmostEqual(max(v[0] for v in local)-(-layout.width/2),layout.width)
             self.assertAlmostEqual(max(v[1] for v in local)-min(v[1] for v in local),layout.width)
             self.assertAlmostEqual(max(v[2] for v in local)-min(v[2] for v in local),layout.tread_thickness)
+            turn=[part for part in fragments if part.part_type=="UNDERBODY"][-1]
+            turn_local=[((v[0]-center[0])*incoming.forward[0]+(v[1]-center[1])*incoming.forward[1],
+                         (v[0]-center[0])*incoming.left[0]+(v[1]-center[1])*incoming.left[1],v[2])
+                        for v in turn.vertices]
+            self.assertAlmostEqual(max(v[0] for v in turn_local)-min(v[0] for v in turn_local),layout.width)
+            self.assertAlmostEqual(max(v[1] for v in turn_local)-min(v[1] for v in turn_local),layout.width)
+            self.assertEqual(len({round(v[2],10) for v in turn_local}),2)
     def test_landing_board_is_one_continuous_perimeter_without_filler(self):
         for points,side in ((POINTS,"RIGHT"),(((0,0),(3,0),(3,-3)),"LEFT")):
             fields=ResidentialFields(underside_mode="SLOPED_CLOSED",
@@ -344,11 +367,11 @@ class ResidentialGeometryTests(unittest.TestCase):
                 intersections=[min(a[1],b[1])-max(a[0],b[0])
                                for a,b in zip(landing_bounds,bounds(flight_board))]
                 self.assertFalse(all(length>1e-9 for length in intersections))
-    def test_sloped_production_has_no_landing_transition_fragment(self):
+    def test_sloped_production_has_three_owned_underbody_regions(self):
         _layout,fragments,_mesh=self.prepare(
             underside="SLOPED_CLOSED",left=False,right=False)
         underbodies=[fragment for fragment in fragments if fragment.part_type=="UNDERBODY"]
-        self.assertEqual(len(underbodies),2)
+        self.assertEqual(len(underbodies),3)
         self.assertEqual(fragments[-1].part_type,"TREAD")
         for fragment in underbodies:
             edges={}
@@ -358,7 +381,7 @@ class ResidentialGeometryTests(unittest.TestCase):
             self.assertTrue(all(count==2 for count in edges.values()))
     def test_sloped_parts_do_not_duplicate_visible_tread_faces(self):
         for points in (POINTS,((0,0),(3,0),(3,-3))):
-            _layout,fragments,_mesh=self.prepare(
+            layout,fragments,_mesh=self.prepare(
                 underside="SLOPED_CLOSED",left=True,right=True,points=points)
             owners={}
             for fragment in fragments:
@@ -367,10 +390,15 @@ class ResidentialGeometryTests(unittest.TestCase):
                                      for index in face))
                     prior=owners.get(key)
                     if prior is not None:
-                        # Closed local solids may share internal Riser-rear or
-                        # board-inner contact faces.  No body/board may own a
-                        # visible TREAD face.
-                        self.assertNotIn("TREAD",(prior,fragment.part_type))
+                        roles=(prior,fragment.part_type)
+                        if "TREAD" in roles:
+                            # The sole TREAD contact is the hidden interface
+                            # between Landing slab and thin turn body, never
+                            # the finished walking top.
+                            self.assertIn("UNDERBODY",roles)
+                            self.assertTrue(all(math.isclose(vertex[2],
+                                layout.landing.top_z-layout.tread_thickness)
+                                for vertex in key))
                     owners[key]=fragment.part_type
     def test_stepped_upper_underbody_regression_unchanged(self):
         fields=ResidentialFields(underside_mode="STEPPED_CLOSED")

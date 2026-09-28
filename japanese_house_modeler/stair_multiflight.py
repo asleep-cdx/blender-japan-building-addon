@@ -545,6 +545,29 @@ def _build_l_flight_underbody_fragment(local, fields, position):
     return build_underbody_fragment(local, fields)
 
 
+def _build_landing_underbody_fragment(layout, fields, ordinal):
+    """Build the thin horizontal SLOPED_CLOSED turn region.
+
+    This region owns only the canonical w x w Landing footprint.  Its shell
+    depth comes from the Residential underside thickness, never a Side Board
+    profile, and every boundary is horizontal or vertical.
+    """
+    from .stair_residential import validate_stepped_underbody_thickness
+    thickness = validate_stepped_underbody_thickness(
+        fields, layout.actual_riser, layout.tread_thickness,
+        layout.riser_thickness)
+    top = layout.landing.top_z - layout.landing.thickness
+    bottom = top - thickness
+    if bottom < layout.base_z - _EPSILON:
+        raise ValueError("Landing UNDERBODYがbase_z未満です。")
+    incoming = layout.flights[0]
+    left = (-incoming.forward[1], incoming.forward[0])
+    return _oriented_box(
+        layout.landing.center_xy, incoming.forward, left, layout.width,
+        -layout.width / 2.0, layout.width / 2.0,
+        bottom, top, "UNDERBODY", ordinal)
+
+
 def _build_landing_underbody_transition(layout, outgoing_local, fields,
                                         landing_soffit, ordinal):
     """Extrude one continuous Landing-horizontal-to-upper-slope section."""
@@ -655,8 +678,13 @@ def prepare_multiflight_residential_geometry(
     fragments.extend(build_landing_side_board_fragments(
         layout, values, len(fragments) + 1, board_bottom))
     ordinal = len(fragments) + 1
-    fragments.append(_build_landing_tread_fragment(layout, values, ordinal))
-    if not sloped:
+    if sloped:
+        fragments.append(_build_landing_underbody_fragment(
+            layout, values, ordinal))
+        fragments.append(_build_landing_tread_fragment(
+            layout, values, ordinal + 1))
+    else:
+        fragments.append(_build_landing_tread_fragment(layout, values, ordinal))
         fragments.append(_build_landing_underbody_transition(
             layout, locals_[1], values, board_bottom, ordinal + 1))
     fragments = tuple(fragments)
