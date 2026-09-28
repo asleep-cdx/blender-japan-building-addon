@@ -19,6 +19,7 @@ from japanese_house_modeler.stair_multiflight import (RISER_DISTRIBUTION_AUTO,
     _resolve_lower_outer_board_terminal, _resolve_upper_start_reveal,
     _resolve_upper_turn_soffit,
     canonical_multi_path, distribution_edit_initial_allocation,
+    prepare_distribution_edit_candidate,
     prepare_multiflight_residential_geometry,
     resolve_multiflight_layout, segment_allocations, switch_distribution_mode,
     validate_manual_allocation)
@@ -110,6 +111,44 @@ class AllocationTests(unittest.TestCase):
         self.assertIn('distribution_edit_initial_allocation(',source)
     def test_manual_dialog_uses_current_manual(self):
         self.assertEqual(distribution_edit_initial_allocation("MANUAL",(8,8),(7,9)),(7,9))
+    def test_invalid_distribution_edit_is_atomic(self):
+        baseline={"riser_distribution_mode":"MANUAL","riser_count":16,
+                  "manual_riser_allocation":(8,8),
+                  "auto_riser_allocation":(8,8),
+                  "path_points":POINTS,"point_ids":IDS,
+                  "geometry_authority":("unchanged",16)}
+        for invalid in ((8,7),(2,15)):
+            with self.subTest(invalid=invalid):
+                before=dict(baseline)
+                with self.assertRaises(ValueError):
+                    prepare_distribution_edit_candidate(
+                        baseline,"MANUAL",invalid)
+                self.assertEqual(baseline,before)
+    def test_valid_distribution_edit_transitions(self):
+        manual={"riser_distribution_mode":"MANUAL","riser_count":16,
+                "manual_riser_allocation":(8,8),"auto_riser_allocation":(8,8)}
+        changed=prepare_distribution_edit_candidate(manual,"MANUAL",(7,9))
+        self.assertEqual((changed["riser_distribution_mode"],
+                          changed["manual_riser_allocation"]),("MANUAL",(7,9)))
+        self.assertEqual(manual["manual_riser_allocation"],(8,8))
+        automatic=prepare_distribution_edit_candidate(changed,"AUTO",(7,9))
+        self.assertEqual(automatic["riser_distribution_mode"],"AUTO")
+        self.assertIsNone(automatic["auto_riser_allocation"])
+        auto={"riser_distribution_mode":"AUTO","riser_count":16,
+              "manual_riser_allocation":(),"auto_riser_allocation":(8,8)}
+        transitioned=prepare_distribution_edit_candidate(auto,"MANUAL",(8,8))
+        self.assertEqual(transitioned["manual_riser_allocation"],(8,8))
+        self.assertEqual(auto["manual_riser_allocation"],())
+    def test_distribution_operator_catches_validation_at_boundary(self):
+        source=(ROOT/'japanese_house_modeler/stair_operators.py').read_text()
+        execute=source[source.index('class JHM_OT_edit_stair_distribution'):
+                       source.index('class JHM_OT_move_stair_path_point')]
+        self.assertIn('prepare_distribution_edit_candidate(',execute)
+        self.assertIn('except ValueError as exc:',execute)
+        self.assertIn('self.report({"ERROR"}, str(exc))',execute)
+        self.assertIn('return {"CANCELLED"}',execute)
+        self.assertLess(execute.index('prepare_distribution_edit_candidate('),
+                        execute.index('return self._run_candidate(context, candidate)'))
 
 class ResidentialGeometryTests(unittest.TestCase):
     def prepare(self, underside="STEPPED_CLOSED", board="STEPPED", edge="SQUARE", left=True,right=True,points=POINTS):

@@ -826,15 +826,13 @@ class JHM_OT_edit_stair_distribution(_StairOperationMixin, bpy.types.Operator):
         obj = self._require_allowed(context)
         if obj is None:
             return {"CANCELLED"}
-        candidate = _canonical_snapshot(obj.jhm_stair)
-        old_mode = candidate["riser_distribution_mode"]
-        if self.mode == RISER_DISTRIBUTION_MANUAL:
-            values = multiflight.validate_manual_allocation(
-                (self.flight_1, self.flight_2), candidate["riser_count"])
-            candidate["manual_riser_allocation"] = values
-        elif old_mode == RISER_DISTRIBUTION_MANUAL:
-            candidate["auto_riser_allocation"] = None
-        candidate["riser_distribution_mode"] = self.mode
+        try:
+            candidate = multiflight.prepare_distribution_edit_candidate(
+                _canonical_snapshot(obj.jhm_stair), self.mode,
+                (self.flight_1, self.flight_2))
+        except ValueError as exc:
+            self.report({"ERROR"}, str(exc))
+            return {"CANCELLED"}
         return self._run_candidate(context, candidate)
 
 

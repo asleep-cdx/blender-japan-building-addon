@@ -25,3 +25,6 @@ Landing=TREAD、body=UNDERSIDE、board=SIDE_BOARDでLANDING roleがないこと�
 
 ## Test 7 — rollback / isolation / final review
 invalid numeric/mouse/MANUAL/Residential候補を試し、old Mesh、Path、IDs、allocation、dimensions、Material、Stair ID、Transformが不変でpartial Meshがないことを記録する。passive Wall endpoint alignment後にWall move/deleteしてもStairが追従しないこと、Finish/Wall topologyが不変なことを確認する。最後にFlight1 body→Landing body→Flight2 bodyおよびSTEPPED/SLOPED Side Boardのlocal LEFT/RIGHT turn continuationにgap、spike、巨大overlap、world-side反転がないことを目視する。
+
+### Test 7-A — MANUAL Riser Distribution atomic rollback
+MANUAL 8,8（全体16）を基準にMesh geometry hash、Material、Object Transform、Path/IDs、allocationを記録する。8,7を入力して確定し、通常のBlender ERROR表示、Python Tracebackなし、operator `CANCELLED`、mode MANUAL・allocation 8,8・geometry hash・Material・Transform・Path/IDsがすべて不変であることを確認する。2,15でも同じ結果を確認する。その後7,9を入力し、mode MANUAL・allocation 7,9として正常に再生成されることを確認する。

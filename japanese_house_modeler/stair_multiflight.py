@@ -146,6 +146,23 @@ def distribution_edit_initial_allocation(current_mode, auto_allocation,
     return values
 
 
+def prepare_distribution_edit_candidate(snapshot, mode, manual_allocation):
+    """Validate a distribution edit before returning a mutated copy."""
+    candidate = dict(snapshot)
+    old_mode = candidate["riser_distribution_mode"]
+    if mode == RISER_DISTRIBUTION_MANUAL:
+        values = validate_manual_allocation(
+            manual_allocation, candidate["riser_count"])
+        candidate["manual_riser_allocation"] = values
+    elif mode == RISER_DISTRIBUTION_AUTO:
+        if old_mode == RISER_DISTRIBUTION_MANUAL:
+            candidate["auto_riser_allocation"] = None
+    else:
+        raise ValueError("Riser Distribution modeが不正です。")
+    candidate["riser_distribution_mode"] = mode
+    return candidate
+
+
 def generate_path_point_id():
     """Return identity generated only for an explicit schema-4 operation."""
     return str(uuid.uuid4())
