@@ -345,16 +345,21 @@ class ResidentialGeometryTests(unittest.TestCase):
                                 point_ids=IDS,fields=fields))
                         production_boards=[part for part in built_fragments
                                            if part.part_type=="SIDE_BOARD"]
+                        cross=(layout.flights[0].forward[0]*layout.flights[1].forward[1]
+                               -layout.flights[0].forward[1]*layout.flights[1].forward[0])
+                        outer="RIGHT" if cross>0 else "LEFT"
                         for side in ("LEFT","RIGHT"):
                             fragment=_build_l_flight_board_fragment(
-                                local,side,fields,1,False,lower,False,None,floor)
+                                local,side,fields,1,False,lower,False,None,
+                                floor if side==outer else None)
                             local_xz=[((v[0]-local.lower_xy[0])*local.axes.forward[0]
                                        +(v[1]-local.lower_xy[1])*local.axes.forward[1],v[2])
                                       for v in fragment.vertices]
-                            self.assertAlmostEqual(min(x for x,_z in local_xz),
-                                                   -reveal_mm/1000)
-                            self.assertTrue(all(z>=floor-1e-9
-                                                for x,z in local_xz if x<0))
+                            expected_min=-reveal_mm/1000 if side==outer else 0.0
+                            self.assertAlmostEqual(min(x for x,_z in local_xz),expected_min)
+                            if side==outer:
+                                self.assertTrue(all(z>=floor-1e-9
+                                                    for x,z in local_xz if x<0))
                             self.assertIn(fragment,production_boards)
     def test_zero_reveal_helper_is_exact_r14_clip(self):
         from japanese_house_modeler.stair_geometry import validate_simple_polygon

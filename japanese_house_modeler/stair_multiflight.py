@@ -843,7 +843,8 @@ def prepare_multiflight_residential_geometry(
                 upper_lower if sloped and index == 1 else None,
                 sloped and index == 0 and outer_side == "LEFT",
                 turn_soffit_z,
-                upper_reveal_floor_z if sloped and index == 1 else None))
+                upper_reveal_floor_z
+                if sloped and index == 1 and outer_side == "LEFT" else None))
         if values.right_side_board_enabled:
             fragments.append(_build_l_flight_board_fragment(
                 local, "RIGHT", values, index,
@@ -851,7 +852,8 @@ def prepare_multiflight_residential_geometry(
                 upper_lower if sloped and index == 1 else None,
                 sloped and index == 0 and outer_side == "RIGHT",
                 turn_soffit_z,
-                upper_reveal_floor_z if sloped and index == 1 else None))
+                upper_reveal_floor_z
+                if sloped and index == 1 and outer_side == "RIGHT" else None))
     fragments.extend(build_landing_side_board_fragments(
         layout, values, len(fragments) + 1, board_bottom))
     ordinal = len(fragments) + 1
