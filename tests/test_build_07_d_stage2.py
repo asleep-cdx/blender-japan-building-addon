@@ -223,8 +223,10 @@ class ResidentialGeometryTests(unittest.TestCase):
             upper,ResidentialFields(underside_mode="SLOPED_CLOSED"))
         self.assertAlmostEqual(min(v[2] for v in turn.vertices),turn_z)
         expected_thickness=ResidentialFields().underside_thickness_mm/1000
-        self.assertAlmostEqual(max(v[2] for v in turn.vertices)-min(v[2] for v in turn.vertices),expected_thickness)
-        self.assertLess(max(v[2] for v in turn.vertices),min(v[2] for v in tread.vertices))
+        self.assertIn(round(turn_z+expected_thickness,10),
+                      {round(v[2],10) for v in turn.vertices})
+        self.assertAlmostEqual(max(v[2] for v in turn.vertices),
+                               min(v[2] for v in tread.vertices))
     def test_landing_board_turn_mapping_and_openings(self):
         for points,outer in ((POINTS,"RIGHT"),(((0,0),(3,0),(3,-3)),"LEFT")):
             for mode in ("STEPPED","SLOPED"):
@@ -457,12 +459,93 @@ class ResidentialGeometryTests(unittest.TestCase):
                         for v in turn.vertices]
             self.assertAlmostEqual(max(v[0] for v in turn_local)-min(v[0] for v in turn_local),layout.width)
             self.assertAlmostEqual(max(v[1] for v in turn_local)-min(v[1] for v in turn_local),layout.width)
-            self.assertEqual(len({round(v[2],10) for v in turn_local}),2)
+            self.assertEqual(len({round(v[2],10) for v in turn_local}),3)
             turn_z,_lower=_resolve_upper_turn_soffit(
                 _flight_stair_layout(layout.flights[1],layout),
                 ResidentialFields(underside_mode="SLOPED_CLOSED"))
             self.assertAlmostEqual(min(v[2] for v in turn_local),turn_z)
-            self.assertLess(max(v[2] for v in turn_local),min(v[2] for v in local))
+            self.assertAlmostEqual(max(v[2] for v in turn_local),
+                                   min(v[2] for v in local))
+    def test_landing_underbody_closes_only_exposed_perimeter_edges(self):
+        cases=((POINTS,"FORWARD"),(((0,0),(3,0),(3,-3)),"FORWARD"),
+               (POINTS,"REVERSE"),(((0,0),(3,0),(3,-3)),"REVERSE"))
+        for points,direction in cases:
+            for left_enabled,right_enabled in ((True,True),(True,False),
+                                                (False,True),(False,False)):
+                with self.subTest(points=points,direction=direction,
+                                  left=left_enabled,right=right_enabled):
+                    fields=ResidentialFields(
+                        underside_mode="SLOPED_CLOSED",
+                        left_side_board_enabled=left_enabled,
+                        right_side_board_enabled=right_enabled)
+                    layout,fragments,_mesh=prepare_multiflight_residential_geometry(
+                        points,direction,0,2800,16,900,30,12,
+                        point_ids=IDS,fields=fields)
+                    locals_=tuple(_flight_stair_layout(flight,layout)
+                                  for flight in layout.flights)
+                    turn_z,_lower=_resolve_upper_turn_soffit(locals_[1],fields)
+                    bodies=[part for part in fragments
+                            if part.part_type=="UNDERBODY"]
+                    turn=bodies[-1]
+                    self.assertEqual(bodies[0],build_underbody_fragment(
+                        locals_[0],fields))
+                    self.assertEqual(bodies[1],
+                        _build_sloped_upper_underbody_fragment(
+                            locals_[1],fields,turn_z))
+                    incoming,outgoing=layout.flights
+                    center=layout.landing.center_xy
+                    local=[((v[0]-center[0])*incoming.forward[0]
+                            +(v[1]-center[1])*incoming.forward[1],
+                            (v[0]-center[0])*incoming.left[0]
+                            +(v[1]-center[1])*incoming.left[1],v[2])
+                           for v in turn.vertices]
+                    half=layout.width/2
+                    slab_top=turn_z+fields.underside_thickness_mm/1000
+                    tread_bottom=(layout.landing.top_z
+                                  -layout.landing.thickness)
+                    bottom_xy={(round(x,10),round(y,10)) for x,y,z in local
+                               if math.isclose(z,turn_z,abs_tol=1e-9)}
+                    self.assertTrue({(-half,-half),(half,-half),
+                                     (half,half),(-half,half)}.issubset(bottom_xy))
+                    self.assertEqual({round(z,10) for _x,_y,z in local},
+                                     {round(turn_z,10),round(slab_top,10),
+                                      round(tread_bottom,10)})
+                    cross=(incoming.forward[0]*outgoing.forward[1]
+                           -incoming.forward[1]*outgoing.forward[0])
+                    exposed_y=-half if cross>0 else half
+                    connected_y=-exposed_y
+                    top_xy={(round(x,10),round(y,10)) for x,y,z in local
+                            if math.isclose(z,tread_bottom,abs_tol=1e-9)}
+                    self.assertIn((round(half,10),round(exposed_y,10)),top_xy)
+                    self.assertNotIn((round(-half,10),round(connected_y,10)),top_xy)
+                    upper_faces=[]
+                    for face in turn.faces:
+                        points_local=[local[index] for index in face]
+                        if ({round(point[2],10) for point in points_local}
+                                == {round(slab_top,10),round(tread_bottom,10)}):
+                            upper_faces.append(points_local)
+                    def plane_spans(axis,value,span_axis):
+                        return [max(point[span_axis] for point in face)
+                                -min(point[span_axis] for point in face)
+                                for face in upper_faces
+                                if all(math.isclose(point[axis],value,abs_tol=1e-9)
+                                       for point in face)]
+                    self.assertTrue(any(math.isclose(span,layout.width,abs_tol=1e-9)
+                                        for span in plane_spans(0,half,1)))
+                    self.assertTrue(any(math.isclose(span,layout.width,abs_tol=1e-9)
+                                        for span in plane_spans(1,exposed_y,0)))
+                    self.assertTrue(all(span<=layout.riser_thickness+1e-9
+                                        for span in plane_spans(0,-half,1)))
+                    self.assertTrue(all(span<=layout.riser_thickness+1e-9
+                                        for span in plane_spans(1,connected_y,0)))
+                    edges={}
+                    for face in turn.faces:
+                        self.assertGreaterEqual(len(set(face)),3)
+                        for first,second in zip(face,face[1:]+face[:1]):
+                            edge=tuple(sorted((first,second)))
+                            edges[edge]=edges.get(edge,0)+1
+                    self.assertTrue(all(count==2 for count in edges.values()))
+                    self.assertEqual(turn.part_type,"UNDERBODY")
     def test_landing_board_is_one_continuous_perimeter_without_filler(self):
         for points,side in ((POINTS,"RIGHT"),(((0,0),(3,0),(3,-3)),"LEFT")):
             fields=ResidentialFields(underside_mode="SLOPED_CLOSED",

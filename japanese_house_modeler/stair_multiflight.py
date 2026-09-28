@@ -714,27 +714,85 @@ def _build_sloped_upper_underbody_fragment(local, fields, turn_soffit_z):
 
 def _build_landing_underbody_fragment(
         layout, fields, ordinal, turn_soffit_z):
-    """Build the thin horizontal SLOPED_CLOSED turn region.
+    """Build the thin turn slab and its two exposed perimeter closures.
 
-    This region owns only the canonical w x w Landing footprint.  Its visible
-    bottom comes from the extrapolated Upper Flight pitch and its shell depth
-    from the Residential underside thickness; every boundary is horizontal
-    or vertical.
+    The canonical w x w bottom slab remains unchanged.  Above it, one
+    riser-thickness L-shaped skirt closes only the perimeter edges not joined
+    to either Flight; the Landing centre remains a cavity.
     """
     from .stair_residential import validate_stepped_underbody_thickness
     thickness = validate_stepped_underbody_thickness(
         fields, layout.actual_riser, layout.tread_thickness,
         layout.riser_thickness)
     bottom = float(turn_soffit_z)
-    top = bottom + thickness
+    slab_top = bottom + thickness
+    tread_bottom = layout.landing.top_z - layout.landing.thickness
     if bottom < layout.base_z - _EPSILON:
         raise ValueError("Landing UNDERBODYがbase_z未満です。")
     incoming = layout.flights[0]
     left = (-incoming.forward[1], incoming.forward[0])
-    return _oriented_box(
-        layout.landing.center_xy, incoming.forward, left, layout.width,
-        -layout.width / 2.0, layout.width / 2.0,
-        bottom, top, "UNDERBODY", ordinal)
+    if tread_bottom <= slab_top + _EPSILON:
+        return _oriented_box(
+            layout.landing.center_xy, incoming.forward, left, layout.width,
+            -layout.width / 2.0, layout.width / 2.0,
+            bottom, slab_top, "UNDERBODY", ordinal)
+    depth = layout.riser_thickness
+    if not _EPSILON < depth < layout.width:
+        raise ValueError("Landing UNDERBODY closure奥行が不正です。")
+    outgoing = layout.flights[1]
+    turn_cross = (incoming.forward[0] * outgoing.forward[1]
+                  - incoming.forward[1] * outgoing.forward[0])
+    if abs(turn_cross) <= _EPSILON:
+        raise ValueError("Landing UNDERBODYには非退化90度Turnが必要です。")
+    half = layout.width / 2.0
+    # The positive-turn template has connected edges x=-half and y=+half;
+    # mirror local Y for the opposite chirality.
+    mirror = 1.0 if turn_cross > 0.0 else -1.0
+    outer_loop = ((-half, -half), (half, -half), (half, half),
+                  (half - depth, half), (-half, half),
+                  (-half, -half + depth))
+    skirt_loop = ((-half, -half), (half, -half), (half, half),
+                  (half - depth, half), (half - depth, -half + depth),
+                  (-half, -half + depth))
+    cavity_loop = ((-half, -half + depth),
+                   (half - depth, -half + depth),
+                   (half - depth, half), (-half, half))
+    outer_loop = tuple((x, mirror * y) for x, y in outer_loop)
+    skirt_loop = tuple((x, mirror * y) for x, y in skirt_loop)
+    cavity_loop = tuple((x, mirror * y) for x, y in cavity_loop)
+    if mirror < 0.0:
+        outer_loop = tuple(reversed(outer_loop))
+        skirt_loop = tuple(reversed(skirt_loop))
+        cavity_loop = tuple(reversed(cavity_loop))
+    vertices, lookup = [], {}
+
+    def vertex(point, z):
+        key = (point[0], point[1], z)
+        if key not in lookup:
+            lookup[key] = len(vertices)
+            vertices.append((layout.landing.center_xy[0]
+                             + incoming.forward[0] * point[0]
+                             + left[0] * point[1],
+                             layout.landing.center_xy[1]
+                             + incoming.forward[1] * point[0]
+                             + left[1] * point[1], z))
+        return lookup[key]
+
+    bottom_loop = tuple(vertex(point, bottom) for point in outer_loop)
+    slab_loop = tuple(vertex(point, slab_top) for point in outer_loop)
+    skirt_bottom = tuple(vertex(point, slab_top) for point in skirt_loop)
+    skirt_top = tuple(vertex(point, tread_bottom) for point in skirt_loop)
+    cavity = tuple(vertex(point, slab_top) for point in cavity_loop)
+    faces = [tuple(reversed(bottom_loop)), cavity, skirt_top]
+    for lower, upper in ((bottom_loop, slab_loop),
+                         (skirt_bottom, skirt_top)):
+        faces.extend((lower[index], lower[(index + 1) % len(lower)],
+                      upper[(index + 1) % len(upper)], upper[index])
+                     for index in range(len(lower)))
+    result = MeshFragment(
+        "UNDERBODY", ordinal, tuple(vertices), tuple(faces))
+    validate_mesh_fragments((result,))
+    return result
 
 
 def _build_landing_underbody_transition(layout, outgoing_local, fields,
