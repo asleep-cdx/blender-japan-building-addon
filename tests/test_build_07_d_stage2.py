@@ -458,7 +458,7 @@ class ResidentialGeometryTests(unittest.TestCase):
             self.assertTrue(tail)
             self.assertLessEqual(max(v[2] for v in tail),
                                  min(v[2] for v in perimeter.vertices)+1e-9)
-    def test_only_lower_outer_terminal_extends_to_body_end(self):
+    def test_lower_board_terminals_extend_locally_to_body_end(self):
         for points in (POINTS,((0,0),(3,0),(3,-3))):
             for mode in ("STEPPED","SLOPED"):
                 for riser_mm in (8,12,18):
@@ -477,20 +477,32 @@ class ResidentialGeometryTests(unittest.TestCase):
                         inner="LEFT" if outer=="RIGHT" else "RIGHT"
                         extended=_build_l_flight_board_fragment(
                             lower,outer,fields,0,False,None,True,turn_z)
-                        unchanged=_build_l_flight_board_fragment(
+                        r16_inner=_build_l_flight_board_fragment(
                             lower,inner,fields,0)
+                        extended_inner=_build_l_flight_board_fragment(
+                            lower,inner,fields,0,False,None,True,turn_z)
                         def local_xz(fragment):
                             return [((v[0]-lower.lower_xy[0])*lower.axes.forward[0]
                                      +(v[1]-lower.lower_xy[1])*lower.axes.forward[1],v[2])
                                     for v in fragment.vertices]
-                        outer_xz=local_xz(extended);inner_xz=local_xz(unchanged)
+                        outer_xz=local_xz(extended)
+                        r16_inner_xz=local_xz(r16_inner)
+                        inner_xz=local_xz(extended_inner)
                         terminal=lower.run_length+lower.riser_thickness
                         self.assertAlmostEqual(max(x for x,_z in outer_xz),terminal)
-                        self.assertAlmostEqual(max(x for x,_z in inner_xz),lower.run_length)
+                        self.assertAlmostEqual(max(x for x,_z in r16_inner_xz),lower.run_length)
+                        self.assertAlmostEqual(max(x for x,_z in inner_xz),terminal)
                         self.assertAlmostEqual(terminal-lower.run_length,riser_mm/1000)
-                        tail=[(x,z) for x,z in outer_xz if x>lower.run_length+1e-9]
-                        self.assertTrue(tail)
-                        self.assertLessEqual(max(z for _x,z in tail),turn_z+1e-9)
+                        for points_xz in (outer_xz,inner_xz):
+                            tail=[(x,z) for x,z in points_xz
+                                  if x>lower.run_length+1e-9]
+                            self.assertTrue(tail)
+                            self.assertLessEqual(max(z for _x,z in tail),turn_z+1e-9)
+                        self.assertEqual(
+                            {(round(x,12),round(z,12)) for x,z in inner_xz
+                             if x<lower.run_length-1e-9},
+                            {(round(x,12),round(z,12)) for x,z in r16_inner_xz
+                             if x<lower.run_length-1e-9})
                         accepted=(sloped_side_board_profile(lower,fields)
                                   if mode=="SLOPED" else side_board_profile(lower,fields))
                         terminal_bottom=min(z for x,z in outer_xz
@@ -499,7 +511,7 @@ class ResidentialGeometryTests(unittest.TestCase):
                         production_boards=[part for part in fragments
                                            if part.part_type=="SIDE_BOARD"]
                         self.assertIn(extended,production_boards)
-                        self.assertIn(unchanged,production_boards)
+                        self.assertIn(extended_inner,production_boards)
     def test_terminal_change_leaves_all_non_board_fragments_canonical(self):
         fields=ResidentialFields(underside_mode="SLOPED_CLOSED",
                                  left_side_board_enabled=True,
@@ -526,7 +538,7 @@ class ResidentialGeometryTests(unittest.TestCase):
         expected.append(_build_landing_tread_fragment(
             layout,fields,landing.ordinal))
         self.assertEqual(tuple(nonboards),tuple(expected))
-    def test_disabled_outer_board_does_not_create_terminal_extension(self):
+    def test_disabled_outer_board_keeps_single_inner_terminal_fragment(self):
         for points,outer in ((POINTS,"RIGHT"),(((0,0),(3,0),(3,-3)),"LEFT")):
             fields=ResidentialFields(
                 underside_mode="SLOPED_CLOSED",
@@ -541,7 +553,8 @@ class ResidentialGeometryTests(unittest.TestCase):
             local_x=[(v[0]-lower.lower_xy[0])*lower.axes.forward[0]
                      +(v[1]-lower.lower_xy[1])*lower.axes.forward[1]
                      for v in boards[0].vertices]
-            self.assertAlmostEqual(max(local_x),lower.run_length)
+            self.assertAlmostEqual(
+                max(local_x),lower.run_length+lower.riser_thickness)
     def test_sloped_production_has_three_owned_underbody_regions(self):
         _layout,fragments,_mesh=self.prepare(
             underside="SLOPED_CLOSED",left=False,right=False)

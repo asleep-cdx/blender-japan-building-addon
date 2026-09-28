@@ -841,7 +841,7 @@ def prepare_multiflight_residential_geometry(
                 local, "LEFT", values, index,
                 False if sloped and index == 1 else index == 1 and outer_side == "LEFT",
                 upper_lower if sloped and index == 1 else None,
-                sloped and index == 0 and outer_side == "LEFT",
+                sloped and index == 0,
                 turn_soffit_z,
                 upper_reveal_floor_z
                 if sloped and index == 1 and outer_side == "LEFT" else None))
@@ -850,7 +850,7 @@ def prepare_multiflight_residential_geometry(
                 local, "RIGHT", values, index,
                 False if sloped and index == 1 else index == 1 and outer_side == "RIGHT",
                 upper_lower if sloped and index == 1 else None,
-                sloped and index == 0 and outer_side == "RIGHT",
+                sloped and index == 0,
                 turn_soffit_z,
                 upper_reveal_floor_z
                 if sloped and index == 1 and outer_side == "RIGHT" else None))
