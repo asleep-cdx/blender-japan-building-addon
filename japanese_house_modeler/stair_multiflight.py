@@ -505,10 +505,72 @@ def _resolve_lower_outer_board_terminal(
     return validate_simple_polygon(clipped)
 
 
+def _clip_profile_z(profile, boundary, keep_greater):
+    """Clip a closed XZ polygon against one horizontal line."""
+    output = []
+    points = tuple(profile)
+    inside = ((lambda point: point[1] >= boundary - _EPSILON)
+              if keep_greater else
+              (lambda point: point[1] <= boundary + _EPSILON))
+    for start, end in zip(points, points[1:] + points[:1]):
+        start_in, end_in = inside(start), inside(end)
+        if start_in:
+            output.append(start)
+        if start_in != end_in:
+            dz = end[1] - start[1]
+            if abs(dz) <= _EPSILON:
+                continue
+            parameter = (boundary - start[1]) / dz
+            output.append((start[0] + parameter * (end[0] - start[0]),
+                           boundary))
+    return tuple(output)
+
+
+def _resolve_upper_start_reveal(
+        source_polygon, reveal, reveal_floor_z):
+    """Restore only accepted x<0 profile area above Landing ownership."""
+    from .stair_geometry import validate_simple_polygon
+    reveal = float(reveal)
+    current = validate_simple_polygon(
+        _clip_profile_x(source_polygon, 0.0, keep_greater=True))
+    if reveal <= _EPSILON:
+        return current
+    cap = validate_simple_polygon(_clip_profile_z(
+        _clip_profile_x(source_polygon, 0.0, keep_greater=False),
+        float(reveal_floor_z), keep_greater=True))
+    current_start = min((point for point in current
+                         if math.isclose(point[0], 0.0, abs_tol=_EPSILON)),
+                        key=lambda point: point[1])
+    current_upper = max((point for point in current
+                         if math.isclose(point[0], 0.0, abs_tol=_EPSILON)),
+                        key=lambda point: point[1])
+    start_index = current.index(current_start)
+    current = current[start_index:] + current[:start_index]
+    if current[-1] != current_upper:
+        raise ValueError("Upper Flight Side Board境界orderingが不正です。")
+    cap_floor = min((point for point in cap
+                     if math.isclose(point[0], 0.0, abs_tol=_EPSILON)),
+                    key=lambda point: point[1])
+    cap_upper = max((point for point in cap
+                     if math.isclose(point[0], 0.0, abs_tol=_EPSILON)),
+                    key=lambda point: point[1])
+    if not (math.isclose(cap_upper[1], current_upper[1], abs_tol=_EPSILON)
+            and math.isclose(cap_floor[1], reveal_floor_z,
+                             abs_tol=_EPSILON)):
+        raise ValueError("Upper Flight Side Board reveal境界が不正です。")
+    cap_index = cap.index(cap_floor)
+    cap = cap[cap_index:] + cap[:cap_index]
+    if len(cap) < 4 or cap[1] != cap_upper:
+        raise ValueError("Upper Flight Side Board reveal orderingが不正です。")
+    return validate_simple_polygon(
+        current + cap[2:] + (cap_floor,))
+
+
 def _build_l_flight_board_fragment(local, side, fields, position,
                                    preserve_outgoing_reveal=False,
                                    lower_profile=None, extend_lower_terminal=False,
-                                   turn_soffit_z=None):
+                                   turn_soffit_z=None,
+                                   upper_reveal_floor_z=None):
     """Clip only the Landing endpoint while preserving the Flight local frame."""
     from .stair_geometry import extrude_xz_profile, validate_simple_polygon
     from .stair_residential_geometry import side_board_profile, sloped_side_board_profile
@@ -531,7 +593,15 @@ def _build_l_flight_board_fragment(local, side, fields, position,
             outer + tuple(reversed(lower)))
     reveal = (max(0.0, float(fields.side_board_reveal_mm) / _MM_PER_METRE)
               if preserve_outgoing_reveal else 0.0)
-    if extend_lower_terminal:
+    if upper_reveal_floor_z is not None:
+        if position != 1:
+            raise ValueError("Upper Flight reveal指定が不正です。")
+        from .stair_residential import validate_side_board_reveal
+        reveal = validate_side_board_reveal(
+            fields, local.actual_riser, local.going)
+        polygon = _resolve_upper_start_reveal(
+            source_polygon, reveal, upper_reveal_floor_z)
+    elif extend_lower_terminal:
         if position != 0 or turn_soffit_z is None:
             raise ValueError("Lower Flight outer terminal指定が不正です。")
         polygon = _resolve_lower_outer_board_terminal(
@@ -741,10 +811,18 @@ def prepare_multiflight_residential_geometry(
     sloped = values.underside_mode == "SLOPED_CLOSED"
     turn_soffit_z = None
     upper_lower = None
+    upper_reveal_floor_z = None
     if sloped:
         turn_soffit_z, upper_lower = _resolve_upper_turn_soffit(
             locals_[1], values)
         board_bottom = turn_soffit_z
+        reveal = validate_side_board_reveal(
+            values, locals_[1].actual_riser, locals_[1].going)
+        upper_reveal_floor_z = locals_[1].base_z + reveal
+        if not math.isclose(
+                upper_reveal_floor_z, layout.landing.top_z + reveal,
+                abs_tol=_EPSILON):
+            raise ValueError("LandingとUpper Flight reveal高さが一致しません。")
     for index, local in enumerate(locals_):
         fragments.extend(build_residential_tread_fragments(local, values))
         # The final upper arrival alone owns the 07-C positive-nosing cap.
@@ -764,14 +842,16 @@ def prepare_multiflight_residential_geometry(
                 False if sloped and index == 1 else index == 1 and outer_side == "LEFT",
                 upper_lower if sloped and index == 1 else None,
                 sloped and index == 0 and outer_side == "LEFT",
-                turn_soffit_z))
+                turn_soffit_z,
+                upper_reveal_floor_z if sloped and index == 1 else None))
         if values.right_side_board_enabled:
             fragments.append(_build_l_flight_board_fragment(
                 local, "RIGHT", values, index,
                 False if sloped and index == 1 else index == 1 and outer_side == "RIGHT",
                 upper_lower if sloped and index == 1 else None,
                 sloped and index == 0 and outer_side == "RIGHT",
-                turn_soffit_z))
+                turn_soffit_z,
+                upper_reveal_floor_z if sloped and index == 1 else None))
     fragments.extend(build_landing_side_board_fragments(
         layout, values, len(fragments) + 1, board_bottom))
     ordinal = len(fragments) + 1

@@ -12,10 +12,12 @@ from japanese_house_modeler.stair_guides import (aligned_candidates, endpoint_ri
 from japanese_house_modeler.stair_multiflight import (RISER_DISTRIBUTION_AUTO,
     FlightAllocation, allocation_counts, build_landing_side_board_fragments,
     _build_l_flight_board_fragment, _build_l_flight_underbody_fragment,
+    _clip_profile_x,
     _build_landing_tread_fragment, _build_landing_underbody_fragment,
     _build_landing_underbody_transition,
     _build_sloped_upper_underbody_fragment, _flight_stair_layout,
-    _resolve_lower_outer_board_terminal, _resolve_upper_turn_soffit,
+    _resolve_lower_outer_board_terminal, _resolve_upper_start_reveal,
+    _resolve_upper_turn_soffit,
     canonical_multi_path, distribution_edit_initial_allocation,
     prepare_multiflight_residential_geometry,
     resolve_multiflight_layout, segment_allocations, switch_distribution_mode,
@@ -292,6 +294,8 @@ class ResidentialGeometryTests(unittest.TestCase):
         perimeter=[part for part in fragments if part.part_type=="SIDE_BOARD"][-1]
         self.assertAlmostEqual(min(v[2] for v in perimeter.vertices),turn_z)
         self.assertNotAlmostEqual(turn_z,incoming_old)
+        self.assertEqual((perimeter,),build_landing_side_board_fragments(
+            layout,fields,perimeter.ordinal,turn_z))
     def test_upper_boards_share_deterministic_turn_start(self):
         for points in (POINTS,((0,0),(3,0),(3,-3))):
             fields=ResidentialFields(underside_mode="SLOPED_CLOSED",
@@ -308,6 +312,62 @@ class ResidentialGeometryTests(unittest.TestCase):
                           for v in board.vertices]
                 at_start=[z for x,z in local_xz if math.isclose(x,0,abs_tol=1e-9)]
                 self.assertIn(turn_z,at_start)
+    def test_upper_only_reveal_restoration_tracks_profile_and_value(self):
+        from japanese_house_modeler.stair_geometry import validate_simple_polygon
+        for points in (POINTS,((0,0),(3,0),(3,-3))):
+            for mode in ("STEPPED","SLOPED"):
+                for reveal_mm in (20,40,60):
+                    with self.subTest(points=points,mode=mode,reveal=reveal_mm):
+                        fields=ResidentialFields(
+                            underside_mode="SLOPED_CLOSED",side_board_mode=mode,
+                            side_board_reveal_mm=reveal_mm)
+                        layout=resolve_multiflight_layout(
+                            points,"FORWARD",0,2800,16,900,30,12,point_ids=IDS)
+                        local=_flight_stair_layout(layout.flights[1],layout)
+                        _turn_z,lower=_resolve_upper_turn_soffit(local,fields)
+                        profile=(sloped_side_board_profile(local,fields)
+                                 if mode=="SLOPED" else side_board_profile(local,fields))
+                        source=validate_simple_polygon(
+                            profile.outer+tuple(reversed(lower)))
+                        floor=local.base_z+reveal_mm/1000
+                        restored=_resolve_upper_start_reveal(
+                            source,reveal_mm/1000,floor)
+                        self.assertAlmostEqual(min(x for x,_z in restored),
+                                               -reveal_mm/1000)
+                        self.assertTrue(all(z>=floor-1e-9 for x,z in restored if x<0))
+                        current=validate_simple_polygon(
+                            _clip_profile_x(source,0,keep_greater=True))
+                        self.assertEqual({p for p in restored if p[0]>1e-9},
+                                         {p for p in current if p[0]>1e-9})
+                        _built_layout,built_fragments,_mesh=(
+                            prepare_multiflight_residential_geometry(
+                                points,"FORWARD",0,2800,16,900,30,12,
+                                point_ids=IDS,fields=fields))
+                        production_boards=[part for part in built_fragments
+                                           if part.part_type=="SIDE_BOARD"]
+                        for side in ("LEFT","RIGHT"):
+                            fragment=_build_l_flight_board_fragment(
+                                local,side,fields,1,False,lower,False,None,floor)
+                            local_xz=[((v[0]-local.lower_xy[0])*local.axes.forward[0]
+                                       +(v[1]-local.lower_xy[1])*local.axes.forward[1],v[2])
+                                      for v in fragment.vertices]
+                            self.assertAlmostEqual(min(x for x,_z in local_xz),
+                                                   -reveal_mm/1000)
+                            self.assertTrue(all(z>=floor-1e-9
+                                                for x,z in local_xz if x<0))
+                            self.assertIn(fragment,production_boards)
+    def test_zero_reveal_helper_is_exact_r14_clip(self):
+        from japanese_house_modeler.stair_geometry import validate_simple_polygon
+        fields=ResidentialFields(underside_mode="SLOPED_CLOSED")
+        layout=resolve_multiflight_layout(
+            POINTS,"FORWARD",0,2800,16,900,30,12,point_ids=IDS)
+        local=_flight_stair_layout(layout.flights[1],layout)
+        _turn_z,lower=_resolve_upper_turn_soffit(local,fields)
+        profile=side_board_profile(local,fields)
+        source=validate_simple_polygon(profile.outer+tuple(reversed(lower)))
+        self.assertEqual(_resolve_upper_start_reveal(source,0,local.base_z),
+                         validate_simple_polygon(
+                             _clip_profile_x(source,0,keep_greater=True)))
     def test_lower_is_accepted_and_upper_only_replaces_initial_foot(self):
         fields=ResidentialFields(underside_mode="SLOPED_CLOSED")
         for points in (POINTS,((0,0),(3,0),(3,-3))):
