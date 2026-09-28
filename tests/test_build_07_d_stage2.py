@@ -13,7 +13,8 @@ from japanese_house_modeler.stair_multiflight import (RISER_DISTRIBUTION_AUTO,
     FlightAllocation, allocation_counts, build_landing_side_board_fragments,
     _build_l_flight_board_fragment, _build_l_flight_underbody_fragment,
     _build_landing_underbody_fragment, _build_landing_underbody_transition,
-    _flight_stair_layout,
+    _build_sloped_upper_underbody_fragment, _flight_stair_layout,
+    _resolve_upper_turn_soffit,
     canonical_multi_path, distribution_edit_initial_allocation,
     prepare_multiflight_residential_geometry,
     resolve_multiflight_layout, segment_allocations, switch_distribution_mode,
@@ -156,10 +157,13 @@ class ResidentialGeometryTests(unittest.TestCase):
         # Each straight Flight owns exactly its accepted local closed body;
         # there is no Landing-spanning transition or filler body.
         locals_=tuple(_flight_stair_layout(flight,layout) for flight in layout.flights)
-        expected=tuple(build_underbody_fragment(local,ResidentialFields(underside_mode="SLOPED_CLOSED",left_side_board_enabled=False,right_side_board_enabled=False)) for local in locals_)
-        self.assertEqual((bodies[0],bodies[1]),expected)
+        fields=ResidentialFields(underside_mode="SLOPED_CLOSED",left_side_board_enabled=False,right_side_board_enabled=False)
+        turn_z,_lower=_resolve_upper_turn_soffit(locals_[1],fields)
+        self.assertEqual(bodies[0],build_underbody_fragment(locals_[0],fields))
+        self.assertEqual(bodies[1],_build_sloped_upper_underbody_fragment(
+            locals_[1],fields,turn_z))
         self.assertEqual(bodies[2],_build_landing_underbody_fragment(
-            layout,ResidentialFields(underside_mode="SLOPED_CLOSED",left_side_board_enabled=False,right_side_board_enabled=False),bodies[2].ordinal))
+            layout,fields,bodies[2].ordinal,turn_z))
         self.assertGreaterEqual(min(vertex[2] for fragment in bodies for vertex in fragment.vertices),layout.base_z)
     def test_landing_tread_underbody_do_not_overlap(self):
         layout,fragments,_mesh=self.prepare(underside="SLOPED_CLOSED",left=False,right=False)
@@ -170,10 +174,13 @@ class ResidentialGeometryTests(unittest.TestCase):
         bodies=[f for f in fragments if f.part_type=="UNDERBODY"]
         self.assertEqual(len(bodies),3)
         turn=bodies[-1]
-        self.assertAlmostEqual(max(v[2] for v in turn.vertices),
-                               min(v[2] for v in tread.vertices))
+        upper=_flight_stair_layout(layout.flights[1],layout)
+        turn_z,_lower=_resolve_upper_turn_soffit(
+            upper,ResidentialFields(underside_mode="SLOPED_CLOSED"))
+        self.assertAlmostEqual(min(v[2] for v in turn.vertices),turn_z)
         expected_thickness=ResidentialFields().underside_thickness_mm/1000
         self.assertAlmostEqual(max(v[2] for v in turn.vertices)-min(v[2] for v in turn.vertices),expected_thickness)
+        self.assertLess(max(v[2] for v in turn.vertices),min(v[2] for v in tread.vertices))
     def test_landing_board_turn_mapping_and_openings(self):
         for points,outer in ((POINTS,"RIGHT"),(((0,0),(3,0),(3,-3)),"LEFT")):
             for mode in ("STEPPED","SLOPED"):
@@ -274,27 +281,31 @@ class ResidentialGeometryTests(unittest.TestCase):
         fields=ResidentialFields(underside_mode="SLOPED_CLOSED",
                                  left_side_board_enabled=True,
                                  right_side_board_enabled=True)
-        layout=resolve_multiflight_layout(POINTS,"FORWARD",0,2800,16,900,30,12,point_ids=IDS)
+        layout,fragments,_mesh=prepare_multiflight_residential_geometry(
+            POINTS,"FORWARD",0,2800,16,900,30,12,point_ids=IDS,fields=fields)
         locals_=tuple(_flight_stair_layout(flight,layout) for flight in layout.flights)
-        soffit=side_board_lower_profile(locals_[0],fields)[-1][1]
-        boards=build_landing_side_board_fragments(layout,fields,1,soffit)
-        self.assertEqual(len(boards),1)
-        self.assertTrue(all(math.isclose(min(v[2] for v in board.vertices),soffit)
-                            for board in boards))
-        self.assertTrue(all(board.part_type=="SIDE_BOARD" for board in boards))
-    def test_first_upper_outer_reveal_survives_without_inner_opening_intrusion(self):
-        fields=ResidentialFields(underside_mode="SLOPED_CLOSED",side_board_mode="STEPPED")
-        layout=resolve_multiflight_layout(POINTS,"FORWARD",0,2800,16,900,30,12,point_ids=IDS)
-        local=_flight_stair_layout(layout.flights[1],layout)
-        outer=_build_l_flight_board_fragment(local,"RIGHT",fields,1,False)
-        inner=_build_l_flight_board_fragment(local,"LEFT",fields,1,False)
-        def minimum_x(fragment):
-            return min((v[0]-local.lower_xy[0])*local.axes.forward[0]
-                       +(v[1]-local.lower_xy[1])*local.axes.forward[1]
-                       for v in fragment.vertices)
-        self.assertAlmostEqual(minimum_x(outer),0.0)
-        self.assertAlmostEqual(minimum_x(inner),0.0)
-    def test_sloped_flights_keep_independent_accepted_local_bodies(self):
+        turn_z,_lower=_resolve_upper_turn_soffit(locals_[1],fields)
+        incoming_old=side_board_lower_profile(locals_[0],fields)[-1][1]
+        perimeter=[part for part in fragments if part.part_type=="SIDE_BOARD"][-1]
+        self.assertAlmostEqual(min(v[2] for v in perimeter.vertices),turn_z)
+        self.assertNotAlmostEqual(turn_z,incoming_old)
+    def test_upper_boards_share_deterministic_turn_start(self):
+        for points in (POINTS,((0,0),(3,0),(3,-3))):
+            fields=ResidentialFields(underside_mode="SLOPED_CLOSED",
+                                     side_board_mode="STEPPED")
+            layout=resolve_multiflight_layout(
+                points,"FORWARD",0,2800,16,900,30,12,point_ids=IDS)
+            local=_flight_stair_layout(layout.flights[1],layout)
+            turn_z,lower=_resolve_upper_turn_soffit(local,fields)
+            for side in ("LEFT","RIGHT"):
+                board=_build_l_flight_board_fragment(
+                    local,side,fields,1,False,lower)
+                local_xz=[((v[0]-local.lower_xy[0])*local.axes.forward[0]
+                           +(v[1]-local.lower_xy[1])*local.axes.forward[1],v[2])
+                          for v in board.vertices]
+                at_start=[z for x,z in local_xz if math.isclose(x,0,abs_tol=1e-9)]
+                self.assertIn(turn_z,at_start)
+    def test_lower_is_accepted_and_upper_only_replaces_initial_foot(self):
         fields=ResidentialFields(underside_mode="SLOPED_CLOSED")
         for points in (POINTS,((0,0),(3,0),(3,-3))):
             with self.subTest(points=points):
@@ -303,17 +314,21 @@ class ResidentialGeometryTests(unittest.TestCase):
                 bodies=[part for part in fragments if part.part_type=="UNDERBODY"]
                 locals_=tuple(_flight_stair_layout(flight,layout) for flight in layout.flights)
                 self.assertEqual(len(bodies),3)
-                for body,local in zip(bodies[:2],locals_):
-                    self.assertEqual(body,build_underbody_fragment(local,fields))
-                    self.assertEqual(side_board_lower_profile(local,fields),
-                                     sloped_underbody_profile(local,fields).outer)
-                    local_x=[(v[0]-local.lower_xy[0])*local.axes.forward[0]
-                             +(v[1]-local.lower_xy[1])*local.axes.forward[1]
-                             for v in body.vertices]
-                    for boundary in (min(local_x),max(local_x)):
-                        self.assertTrue(any(all(math.isclose(local_x[index],boundary,abs_tol=1e-9)
-                                                for index in face)
-                                            for face in body.faces))
+                self.assertEqual(bodies[0],build_underbody_fragment(locals_[0],fields))
+                turn_z,lower=_resolve_upper_turn_soffit(locals_[1],fields)
+                self.assertEqual(bodies[1],_build_sloped_upper_underbody_fragment(
+                    locals_[1],fields,turn_z))
+                accepted=sloped_underbody_profile(locals_[1],fields).outer
+                self.assertEqual(lower[1:],accepted[-2:])
+                slope=(accepted[-1][1]-accepted[-2][1])/(accepted[-1][0]-accepted[-2][0])
+                self.assertAlmostEqual(turn_z,accepted[-2][1]-slope*accepted[-2][0])
+                local_xz=[((v[0]-locals_[1].lower_xy[0])*locals_[1].axes.forward[0]
+                           +(v[1]-locals_[1].lower_xy[1])*locals_[1].axes.forward[1],v[2])
+                          for v in bodies[1].vertices]
+                at_start=[z for x,z in local_xz if math.isclose(x,0,abs_tol=1e-9)]
+                self.assertIn(turn_z,at_start)
+                self.assertTrue(math.isclose((lower[1][1]-lower[0][1])
+                    /(lower[1][0]-lower[0][0]),slope,abs_tol=1e-9))
     def test_landing_slab_footprint_and_thickness(self):
         for points in (POINTS,((0,0),(3,0),(3,-3))):
             layout,fragments,_mesh=self.prepare(
@@ -336,6 +351,11 @@ class ResidentialGeometryTests(unittest.TestCase):
             self.assertAlmostEqual(max(v[0] for v in turn_local)-min(v[0] for v in turn_local),layout.width)
             self.assertAlmostEqual(max(v[1] for v in turn_local)-min(v[1] for v in turn_local),layout.width)
             self.assertEqual(len({round(v[2],10) for v in turn_local}),2)
+            turn_z,_lower=_resolve_upper_turn_soffit(
+                _flight_stair_layout(layout.flights[1],layout),
+                ResidentialFields(underside_mode="SLOPED_CLOSED"))
+            self.assertAlmostEqual(min(v[2] for v in turn_local),turn_z)
+            self.assertLess(max(v[2] for v in turn_local),min(v[2] for v in local))
     def test_landing_board_is_one_continuous_perimeter_without_filler(self):
         for points,side in ((POINTS,"RIGHT"),(((0,0),(3,0),(3,-3)),"LEFT")):
             fields=ResidentialFields(underside_mode="SLOPED_CLOSED",

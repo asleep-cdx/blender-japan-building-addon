@@ -474,7 +474,8 @@ def _clip_profile_x(profile, boundary, keep_greater):
 
 
 def _build_l_flight_board_fragment(local, side, fields, position,
-                                   preserve_outgoing_reveal=False):
+                                   preserve_outgoing_reveal=False,
+                                   lower_profile=None):
     """Clip only the Landing endpoint while preserving the Flight local frame."""
     from .stair_geometry import extrude_xz_profile, validate_simple_polygon
     from .stair_residential_geometry import side_board_profile, sloped_side_board_profile
@@ -482,7 +483,10 @@ def _build_l_flight_board_fragment(local, side, fields, position,
                if fields.side_board_mode == "SLOPED"
                else side_board_profile(local, fields))
     source_polygon = profile.polygon
-    lower = profile.lower
+    lower = profile.lower if lower_profile is None else tuple(lower_profile)
+    if lower_profile is not None:
+        source_polygon = validate_simple_polygon(
+            profile.outer + tuple(reversed(lower)))
     if position == 1 and not math.isclose(
             profile.outer[-2][0], profile.outer[-1][0], abs_tol=_EPSILON):
         # L upper arrival uses a horizontal cap followed by a world-Z return;
@@ -545,19 +549,57 @@ def _build_l_flight_underbody_fragment(local, fields, position):
     return build_underbody_fragment(local, fields)
 
 
-def _build_landing_underbody_fragment(layout, fields, ordinal):
+def _resolve_upper_turn_soffit(local, fields):
+    """Return x=0 Z and the accepted constant-pitch upper soffit tail."""
+    from .stair_residential_geometry import sloped_underbody_profile
+    accepted = sloped_underbody_profile(local, fields).outer
+    slope_start, slope_end = accepted[-2:]
+    dx = slope_end[0] - slope_start[0]
+    if dx <= _EPSILON:
+        raise ValueError("Upper Flight soffit勾配runが不足しています。")
+    slope = (slope_end[1] - slope_start[1]) / dx
+    turn_soffit_z = slope_start[1] - slope * slope_start[0]
+    return float(turn_soffit_z), ((0.0, float(turn_soffit_z)),
+                                  slope_start, slope_end)
+
+
+def _build_sloped_upper_underbody_fragment(local, fields, turn_soffit_z):
+    """Replace only the accepted Landing-side horizontal lower foot."""
+    from .stair_geometry import extrude_xz_profile, validate_simple_polygon
+    from .stair_residential_geometry import sloped_underbody_profile
+    accepted = sloped_underbody_profile(local, fields)
+    resolved_z, lower = _resolve_upper_turn_soffit(local, fields)
+    if not math.isclose(resolved_z, turn_soffit_z, abs_tol=_EPSILON):
+        raise ValueError("Upper Flight turn soffit authorityが一致しません。")
+    inner = ((0.0, local.base_z),) + accepted.inner
+    polygon = validate_simple_polygon(inner + tuple(reversed(lower)))
+    fragment = extrude_xz_profile(
+        polygon, -local.width / 2.0, local.width / 2.0,
+        part_type="UNDERBODY", ordinal=1)
+    forward, left = local.axes.forward, local.axes.left
+    vertices = tuple((local.lower_xy[0] + forward[0] * x + left[0] * y,
+                      local.lower_xy[1] + forward[1] * x + left[1] * y, z)
+                     for x, y, z in fragment.vertices)
+    result = MeshFragment("UNDERBODY", 1, vertices, fragment.faces)
+    validate_mesh_fragments((result,))
+    return result
+
+
+def _build_landing_underbody_fragment(
+        layout, fields, ordinal, turn_soffit_z):
     """Build the thin horizontal SLOPED_CLOSED turn region.
 
-    This region owns only the canonical w x w Landing footprint.  Its shell
-    depth comes from the Residential underside thickness, never a Side Board
-    profile, and every boundary is horizontal or vertical.
+    This region owns only the canonical w x w Landing footprint.  Its visible
+    bottom comes from the extrapolated Upper Flight pitch and its shell depth
+    from the Residential underside thickness; every boundary is horizontal
+    or vertical.
     """
     from .stair_residential import validate_stepped_underbody_thickness
     thickness = validate_stepped_underbody_thickness(
         fields, layout.actual_riser, layout.tread_thickness,
         layout.riser_thickness)
-    top = layout.landing.top_z - layout.landing.thickness
-    bottom = top - thickness
+    bottom = float(turn_soffit_z)
+    top = bottom + thickness
     if bottom < layout.base_z - _EPSILON:
         raise ValueError("Landing UNDERBODYがbase_z未満です。")
     incoming = layout.flights[0]
@@ -646,8 +688,8 @@ def prepare_multiflight_residential_geometry(
         validate_stepped_closure_depth(values, local.actual_riser, local.going)
         if values.left_side_board_enabled or values.right_side_board_enabled:
             validate_side_board_reveal(values, local.actual_riser, local.going)
-    # Side Board depth is visual profile data only.  The structural Landing is
-    # the already-generated TREAD slab whose bottom is top-tread_thickness.
+    # STEPPED retains its accepted incoming-profile authority.  SLOPED replaces
+    # this below with the Upper Flight pitch extrapolated only to local x=0.
     board_bottom = side_board_lower_profile(locals_[0], values)[-1][1]
     if not math.isclose(layout.landing.thickness, layout.tread_thickness,
                         abs_tol=_EPSILON):
@@ -657,6 +699,12 @@ def prepare_multiflight_residential_geometry(
                   - layout.flights[0].forward[1] * layout.flights[1].forward[0])
     outer_side = "RIGHT" if turn_cross > 0.0 else "LEFT"
     sloped = values.underside_mode == "SLOPED_CLOSED"
+    turn_soffit_z = None
+    upper_lower = None
+    if sloped:
+        turn_soffit_z, upper_lower = _resolve_upper_turn_soffit(
+            locals_[1], values)
+        board_bottom = turn_soffit_z
     for index, local in enumerate(locals_):
         fragments.extend(build_residential_tread_fragments(local, values))
         # The final upper arrival alone owns the 07-C positive-nosing cap.
@@ -665,22 +713,27 @@ def prepare_multiflight_residential_geometry(
             if cap is not None:
                 fragments.append(cap)
         fragments.extend(build_residential_riser_fragments(local, values))
-        fragments.append(_build_l_flight_underbody_fragment(
-            local, values, index))
+        fragments.append(
+            _build_sloped_upper_underbody_fragment(
+                local, values, turn_soffit_z)
+            if sloped and index == 1 else
+            _build_l_flight_underbody_fragment(local, values, index))
         if values.left_side_board_enabled:
             fragments.append(_build_l_flight_board_fragment(
                 local, "LEFT", values, index,
-                False if sloped and index == 1 else index == 1 and outer_side == "LEFT"))
+                False if sloped and index == 1 else index == 1 and outer_side == "LEFT",
+                upper_lower if sloped and index == 1 else None))
         if values.right_side_board_enabled:
             fragments.append(_build_l_flight_board_fragment(
                 local, "RIGHT", values, index,
-                False if sloped and index == 1 else index == 1 and outer_side == "RIGHT"))
+                False if sloped and index == 1 else index == 1 and outer_side == "RIGHT",
+                upper_lower if sloped and index == 1 else None))
     fragments.extend(build_landing_side_board_fragments(
         layout, values, len(fragments) + 1, board_bottom))
     ordinal = len(fragments) + 1
     if sloped:
         fragments.append(_build_landing_underbody_fragment(
-            layout, values, ordinal))
+            layout, values, ordinal, turn_soffit_z))
         fragments.append(_build_landing_tread_fragment(
             layout, values, ordinal + 1))
     else:
