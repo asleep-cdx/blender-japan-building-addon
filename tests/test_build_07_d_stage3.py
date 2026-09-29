@@ -6,6 +6,8 @@ package.__path__ = [str(ROOT / "japanese_house_modeler")]
 sys.modules.setdefault("japanese_house_modeler", package)
 from japanese_house_modeler.stair_multiflight import (
     RISER_DISTRIBUTION_AUTO, RISER_DISTRIBUTION_MANUAL,
+    _build_multiturn_residential_parts, _flight_stair_layout,
+    _residential_turn_contexts,
     auto_distribute_risers, canonical_multi_path, prepare_distribution_edit_candidate,
     prepare_multiflight_geometry, prepare_multiflight_residential_geometry,
     resolve_multiflight_layout, switch_distribution_mode, validate_manual_allocation)
@@ -73,6 +75,35 @@ class DistributionTests(unittest.TestCase):
         self.assertEqual(snapshot,original)
 
 class GeometryTests(unittest.TestCase):
+    @staticmethod
+    def owned(points=U, direction="FORWARD", underside="SLOPED_CLOSED",
+              left=True, right=True):
+        layout=resolve_multiflight_layout(
+            points,direction,0,2800,16,900,30,12,
+            point_ids=IDS if points==U else None,allocation=(5,6,5))
+        fields=ResidentialFields(
+            underside_mode=underside,left_side_board_enabled=left,
+            right_side_board_enabled=right)
+        locals_=tuple(_flight_stair_layout(f,layout) for f in layout.flights)
+        turns=_residential_turn_contexts(layout,locals_,fields)
+        return layout,fields,locals_,turns,_build_multiturn_residential_parts(
+            layout,locals_,turns,fields)
+
+    @staticmethod
+    def assert_closed(test, fragment):
+        incidence={}
+        for face in fragment.faces:
+            test.assertGreaterEqual(len(face),3)
+            for a,b in zip(face,face[1:]+face[:1]):
+                edge=tuple(sorted((a,b))); incidence[edge]=incidence.get(edge,0)+1
+        test.assertTrue(incidence)
+        test.assertTrue(all(count==2 for count in incidence.values()))
+
+    @staticmethod
+    def local_x(local, vertex):
+        dx,dy=vertex[0]-local.lower_xy[0],vertex[1]-local.lower_xy[1]
+        return dx*local.axes.forward[0]+dy*local.axes.forward[1]
+
     def test_basic_has_two_landings_finite(self):
         layout,fragments,mesh=prepare_multiflight_geometry(*ARGS,point_ids=IDS)
         self.assertEqual(sum(f.part_type=="TREAD" and len(f.vertices)==8 for f in fragments)>=2,True)
@@ -83,6 +114,83 @@ class GeometryTests(unittest.TestCase):
             layout,fragments,mesh=prepare_multiflight_residential_geometry(*ARGS,point_ids=IDS,fields=fields)
             self.assertEqual(len(layout.landings),2); self.assertTrue(mesh.faces)
             self.assertIn("UNDERBODY",{f.part_type for f in fragments}); self.assertIn("SIDE_BOARD",{f.part_type for f in fragments})
+    def test_sloped_ownership_is_exactly_once(self):
+        layout,fields,locals_,turns,parts=self.owned()
+        self.assertEqual([x.owner_index for x in parts.flight_underbodies],[0,1,2])
+        self.assertEqual(len(parts.flight_underbodies),3)
+        self.assertEqual([(x.owner_index,x.side) for x in parts.flight_boards],
+                         [(0,"LEFT"),(0,"RIGHT"),(1,"LEFT"),(1,"RIGHT"),(2,"LEFT"),(2,"RIGHT")])
+        self.assertEqual(len(parts.landing_treads),2)
+        self.assertEqual(len(parts.landing_underbodies),2)
+        self.assertLess(turns[0].turn_soffit_z,turns[0].landing.top_z-turns[0].landing.thickness)
+        self.assertLess(turns[1].turn_soffit_z,turns[1].landing.top_z-turns[1].landing.thickness)
+        self.assertNotEqual(turns[0].turn_soffit_z,turns[1].turn_soffit_z)
+    def test_r19_landings_are_low_hollow_closed_per_turn(self):
+        _layout,_fields,_locals,turns,parts=self.owned(left=False,right=False)
+        self.assertEqual(parts.landing_boards,())
+        for turn,owned in zip(turns,parts.landing_underbodies):
+            fragment=owned.fragment; zs=[v[2] for v in fragment.vertices]
+            self.assertAlmostEqual(min(zs),turn.turn_soffit_z)
+            self.assertGreater(len(fragment.vertices),8) # not a full-footprint box
+            self.assertGreater(len(set(round(z,9) for z in zs)),2)
+            self.assert_closed(self,fragment)
+    def test_mirrored_chirality_owns_opposite_perimeter(self):
+        mirrored=((0,0),(3,0),(3,-1.8),(0,-1.8))
+        _,_,_,left_turns,left_parts=self.owned()
+        _,_,_,right_turns,right_parts=self.owned(mirrored)
+        self.assertEqual([t.outer_side for t in left_turns],["RIGHT","RIGHT"])
+        self.assertEqual([t.outer_side for t in right_turns],["LEFT","LEFT"])
+        self.assertEqual([b.side for b in left_parts.landing_boards],["RIGHT","RIGHT"])
+        self.assertEqual([b.side for b in right_parts.landing_boards],["LEFT","LEFT"])
+    def test_reverse_keeps_plan_owners_and_recomputes_turn_z(self):
+        forward=self.owned(); reverse=self.owned(direction="REVERSE")
+        self.assertEqual({x.owner_index for x in forward[4].flight_underbodies},
+                         {x.owner_index for x in reverse[4].flight_underbodies})
+        self.assertEqual([t.landing.center_xy for t in forward[3]],
+                         list(reversed([t.landing.center_xy for t in reverse[3]])))
+        self.assertEqual([round(t.landing.top_z,3) for t in forward[3]],[.875,1.925])
+        self.assertEqual([round(t.landing.top_z,3) for t in reverse[3]],[.875,1.925])
+    def test_middle_board_has_start_and_end_in_one_fragment(self):
+        _layout,fields,locals_,_turns,parts=self.owned()
+        middle=locals_[1]
+        for owned in [x for x in parts.flight_boards if x.owner_index==1]:
+            xs=[self.local_x(middle,v) for v in owned.fragment.vertices]
+            self.assertLessEqual(min(xs),0.0)
+            self.assertGreaterEqual(max(xs),middle.run_length)
+        self.assertEqual(sum(x.owner_index==1 for x in parts.flight_boards),2)
+    def test_each_landing_board_has_one_owner_and_no_duplicate_geometry(self):
+        _layout,_fields,_locals,_turns,parts=self.owned()
+        self.assertEqual([x.owner_index for x in parts.landing_boards],[0,1])
+        fragments=(parts.flight_underbodies+parts.flight_boards+
+                   parts.landing_treads+parts.landing_underbodies+
+                   parts.landing_boards)
+        signatures=[]
+        for owned in fragments:
+            signature=tuple(sorted(tuple(round(c,8) for c in v)
+                                   for v in owned.fragment.vertices))
+            self.assertNotIn(signature,signatures); signatures.append(signature)
+    def test_stepped_both_turns_are_single_closed_transitions(self):
+        _layout,_fields,_locals,_turns,parts=self.owned(underside="STEPPED_CLOSED")
+        self.assertEqual(len(parts.flight_underbodies),3)
+        self.assertEqual(len(parts.landing_underbodies),2)
+        for owned in parts.flight_underbodies+parts.landing_underbodies:
+            self.assert_closed(self,owned.fragment)
+    def test_topology_is_finite_nonzero_and_closed(self):
+        import math
+        for underside in ("STEPPED_CLOSED","SLOPED_CLOSED"):
+            *_,parts=self.owned(underside=underside)
+            collections=(parts.flight_underbodies,parts.flight_boards,
+                         parts.landing_treads,parts.landing_underbodies,
+                         parts.landing_boards)
+            for owned in sum(collections,()):
+                fragment=owned.fragment
+                self.assertTrue(all(math.isfinite(c) for v in fragment.vertices for c in v))
+                for face in fragment.faces:
+                    a,b,c=(fragment.vertices[i] for i in face[:3])
+                    ab=tuple(b[i]-a[i] for i in range(3)); ac=tuple(c[i]-a[i] for i in range(3))
+                    cross=(ab[1]*ac[2]-ab[2]*ac[1],ab[2]*ac[0]-ab[0]*ac[2],ab[0]*ac[1]-ab[1]*ac[0])
+                    self.assertGreater(sum(v*v for v in cross),1e-18)
+                self.assert_closed(self,fragment)
     def test_l_regression_still_uses_compatibility_landing(self):
         l=resolve_multiflight_layout(((0,0),(3,0),(3,3)),"FORWARD",0,2800,16,900,30,12,point_ids=("a","b","c"))
         self.assertEqual(l.landing,l.landings[0])
