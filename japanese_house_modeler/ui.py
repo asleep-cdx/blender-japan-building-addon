@@ -13,6 +13,7 @@ from .finish_state import status_label
 from .finish_profile_previews import browser_items, stable_profile_identity
 from .finish_preview_images import cached_preview_icon, request_preview_build
 from .stair_geometry import resolve_stair_layout
+from .stair_guides import path_point_move_labels
 from .stair_multiflight import resolve_multiflight_layout
 from .stair_operators import stair_issues
 from .stair_state import operation_allowed, state_label
@@ -175,8 +176,9 @@ class JHM_PT_house_modeler(bpy.types.Panel):
             edit_path.enabled = True
             edit_path.operator("jhm.edit_stair_path", text="Path座標を変更")
             if stair.stair_schema_version == 4:
-                labels = ("始点を移動", "折れ点 1 を移動", "終点を移動")
-                for index, label in enumerate(labels):
+                # Compatibility labels include "折れ点 1 を移動" for a 3-point L;
+                # the pure helper additionally maps every Turn in N-point paths.
+                for index, label in path_point_move_labels(len(stair.path_points)):
                     operator = normal_actions.operator(
                         "jhm.move_stair_path_point", text=label)
                     operator.point_index = index

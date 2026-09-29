@@ -19,7 +19,8 @@ from . import stair_multiflight as multiflight
 from .stair_guides import (
     GUIDE_THRESHOLD_PX, aligned_candidates, endpoint_right_angle_candidate,
     creation_right_angle_guide_rays, project_to_line,
-    move_persistent_guides, resolve_creation_candidate, resolve_move_candidate,
+    move_persistent_guides, move_point_semantic_label,
+    resolve_creation_candidate, resolve_move_candidate,
     turn_right_angle_candidate,
 )
 
@@ -936,6 +937,14 @@ class JHM_OT_move_stair_path_point(_StairOperationMixin, bpy.types.Operator):
             names.append("RIGHT_ANGLE")
         except ValueError:
             pass
+        if index in (0, len(points) - 1):
+            coordinate = (event.mouse_x - self._region.x,
+                          event.mouse_y - self._region.y)
+            z = self._snapshot["base_z_mm"] / 1000.0
+            distances = tuple(_candidate_pixel_distance(
+                self._region, self._region_data, coordinate, point, z)
+                              for point in candidates)
+            return tuple(candidates), distances, tuple(names)
         references = tuple(point for i, point in enumerate(points) if i != index)
         references += _visible_wall_endpoint_coordinates(context)
         for candidate in aligned_candidates(raw, references):
@@ -995,11 +1004,11 @@ class JHM_OT_move_stair_path_point(_StairOperationMixin, bpy.types.Operator):
                           *(value * 1.5 for value in adjacent_lengths)))
             guide_screen = []
             for guide in self._persistent_guides:
-                for sign in (-1.0, 1.0):
-                    world = Vector((guide.origin[0] + sign * length * guide.direction[0],
-                                    guide.origin[1] + sign * length * guide.direction[1], z))
+                for x, y in (guide.origin,
+                             (guide.origin[0] + length * guide.direction[0],
+                              guide.origin[1] + length * guide.direction[1])):
                     guide_screen.append(view3d_utils.location_3d_to_region_2d(
-                        self._region, self._region_data, world))
+                        self._region, self._region_data, Vector((x, y, z))))
             if guide_screen and all(point is not None for point in guide_screen):
                 shader.uniform_float("color", (0.2, 0.8, 1.0, 0.45))
                 batch_for_shader(shader, "LINES", {"pos": guide_screen}).draw(shader)
@@ -1028,7 +1037,8 @@ class JHM_OT_move_stair_path_point(_StairOperationMixin, bpy.types.Operator):
                     batch_for_shader(shader, "LINES",
                                      {"pos": (raw, moving)}).draw(shader)
             blf.position(0, moving.x + 8, moving.y + 8, 0)
-            blf.draw(0, self._candidate.guide)
+            blf.draw(0, move_point_semantic_label(
+                len(self._snapshot["path_points"]), self.point_index))
         finally:
             gpu.state.line_width_set(1.0)
             gpu.state.point_size_set(1.0)

@@ -15,7 +15,7 @@ from japanese_house_modeler.stair_residential import ResidentialFields
 from japanese_house_modeler.stair_guides import (
     GUIDE_THRESHOLD_PX, endpoint_right_angle_candidate,
     endpoint_right_angle_guide_line, move_persistent_guides,
-    resolve_move_candidate)
+    move_point_semantic_label, path_point_move_labels, resolve_move_candidate)
 
 U=((0,0),(3,0),(3,1.8),(0,1.8)); IDS=("p0","p1","p2","p3")
 ARGS=(U,"FORWARD",0,2800,16,900,30,12)
@@ -30,8 +30,10 @@ class GuideTests(unittest.TestCase):
         self.assertAlmostEqual(abs(start.direction[1]),1.0)
         self.assertAlmostEqual(abs(end.direction[1]),1.0)
         self.assertAlmostEqual(start.direction[0],0.0); self.assertAlmostEqual(end.direction[0],0.0)
-        self.assertTrue(any(g.name=="RIGHT_ANGLE" for g in move_persistent_guides(GUIDE_U,0)))
-        self.assertTrue(any(g.name=="RIGHT_ANGLE" for g in move_persistent_guides(GUIDE_U,3)))
+        self.assertEqual(start.direction,(0.,-1.)); self.assertEqual(end.direction,(0.,-1.))
+        self.assertEqual(move_persistent_guides(GUIDE_U,0),(start,))
+        self.assertEqual(move_persistent_guides(GUIDE_U,3),(end,))
+        self.assertEqual(start.name,"ENDPOINT"); self.assertEqual(end.name,"ENDPOINT")
     def test_endpoint_projection_is_canonical_and_retains_ids(self):
         for index,raw in ((0,(-.2,-1.0)),(3,(3.2,-1.0))):
             projected=endpoint_right_angle_candidate(GUIDE_U,index,raw)
@@ -55,6 +57,10 @@ class GuideTests(unittest.TestCase):
             resolve_move_candidate(GUIDE_U,IDS,0,raw,guide_candidates=(projected,),
                                    distances=(GUIDE_THRESHOLD_PX+.01,),guide_names=("RIGHT_ANGLE",))
         self.assertEqual(guides,move_persistent_guides(GUIDE_U,0))
+    def test_endpoint_ray_rejects_hidden_opposite_half(self):
+        for index,opposite in ((0,(0,4)),(3,(3,4))):
+            with self.assertRaisesRegex(ValueError,"反対側"):
+                endpoint_right_angle_candidate(GUIDE_U,index,opposite)
     def test_rotated_and_mirrored_endpoint_guides(self):
         angle=math.radians(30); c,s=math.cos(angle),math.sin(angle)
         rotate=lambda p:(p[0]*c-p[1]*s,p[0]*s+p[1]*c)
@@ -76,6 +82,16 @@ class GuideTests(unittest.TestCase):
                     guide_candidates=((1,3),),distances=(1,),
                     guide_names=("PARALLEL",))
             self.assertEqual(original,GUIDE_U)
+    def test_move_button_mapping_and_semantic_labels(self):
+        self.assertEqual(path_point_move_labels(3),(
+            (0,"始点を移動"),(1,"折れ点 1 を移動"),(2,"終点を移動")))
+        self.assertEqual(path_point_move_labels(4),(
+            (0,"始点を移動"),(1,"折れ点 1 を移動"),
+            (2,"折れ点 2 を移動"),(3,"終点を移動")))
+        self.assertEqual(dict(path_point_move_labels(4))[3],"終点を移動")
+        self.assertEqual(dict(path_point_move_labels(4))[2],"折れ点 2 を移動")
+        self.assertEqual([move_point_semantic_label(4,index) for index in range(4)],
+                         ["START","TURN 1","TURN 2","END"])
 
 class CanonicalTests(unittest.TestCase):
     def test_u_identity_and_turns(self):
