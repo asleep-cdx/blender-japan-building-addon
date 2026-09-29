@@ -8,12 +8,12 @@ Date: 2026-09-29
 - Build 07-D Stage 1 — **ACCEPTED**
 - Build 07-D Stage 2 — **ACCEPTED**
 - Build 07-D Stage 3 — **ACCEPTED**
-- Build 07-D Stage 4 — NOT YET ACCEPTED
-- Build 07-D overall — **IN PROGRESS**
+- Build 07-D Stage 4 — **ACCEPTED**
+- Build 07-D overall — **ACCEPTED**
 
-Stage 1 established the schema-4 Multi-point foundation and first visible 3-point L Stair. Stage 2 completed the 3-point L editing / guide / distribution / Residential integration scope. Stage 3 completes the 4-point U / multi-flight production, editing, allocation, Residential turn ownership, material, persistence, and rollback scope defined for Stage 3 while preserving accepted schema-1/2/3 Straight behavior and the accepted Stage-1/2 schema-4 foundation.
+Stage 1 established the schema-4 Multi-point foundation and first visible 3-point L Stair. Stage 2 completed the 3-point L editing / guide / distribution / Residential integration scope. Stage 3 completed the 4-point U / multi-flight production, editing, allocation, Residential turn ownership, material, persistence, and rollback scope. Stage 4 closed the lifecycle, legacy-regression, repair, persistence, Finalize/Delete, Wall/Finish isolation, practical-placement, and final-topology gates without requiring any production Python change.
 
-Implementation authority remains `BUILD_07_D_SPECIFICATION.md`. Build 07-D overall is not accepted until Stage 4.
+Implementation authority remains `BUILD_07_D_SPECIFICATION.md`. This record is authoritative for Build 07-D acceptance status. Winder / 廻り段 remains Build 07-E scope.
 
 ## 2. Stage 1 accepted baseline
 
@@ -63,7 +63,7 @@ Add-on version: (0, 7, 3)
 Description: Build 07-D: Multi-point Path + L/U + Landing
 ```
 
-Documentation / acceptance commits created after runtime review do not supersede the exact runtime-tested production revision above. Accepted runtime archives must be derived from the production revision above, not from later documentation-only commits.
+Documentation / acceptance commits created after runtime review do not supersede the exact runtime-tested production revision above. Accepted runtime archives must be derived from the recorded tested revision when exact runtime identity is required.
 
 ## 4. Stage 2 automated evidence
 
@@ -120,8 +120,6 @@ Stage 2 accepts the following production behavior in addition to the Stage-1 con
 - Lower and Upper Flight slope authorities remain unchanged by the Landing closure.
 
 ### Accepted Side Board corrections from the runtime correction series
-
-The following corrections are part of the Stage-2 accepted production result:
 
 - r14: Lower Flight outer terminal locally reaches the accepted body terminal rather than stopping one riser-thickness early.
 - r16: Upper Flight outer Landing-side reveal is restored only on the exterior-continuing board; the nearby inner corner retains the accepted `x = 0` return rather than projecting backward.
@@ -183,29 +181,20 @@ A passive Wall alignment snap was not claimed as a successful snap-to-arbitrary-
 
 ## 7. Stage 2 intentionally deferred scope
 
-Stage 2 does **not** claim completion of:
-
-- 4-point U-shaped production geometry
-- more-than-two-Flight production path
-- general multi-turn Stair generation
-- Stage-3 U / multi-flight editing and allocation completion
-- Stage-4 full lifecycle / broad practical acceptance
-- Winder / 廻り段 geometry; that remains Build 07-E scope
-
-These remain governed by `BUILD_07_D_SPECIFICATION.md` and later Build stages.
+Stage 2 did **not** claim completion of 4-point U production, general multi-turn production, Stage-3/4 completion, or Winder geometry. Those items were handled by later Stage 3 / Stage 4 work or remain Build 07-E scope.
 
 ## 8. Stage 2 acceptance conclusion
 
-Build 07-D Stage 1 is **ACCEPTED** at its recorded Stage-1 runtime-tested revision.
+Build 07-D Stage 1 — **ACCEPTED**.
 
-Build 07-D Stage 2 is **ACCEPTED** at the exact runtime-tested production revision:
+Build 07-D Stage 2 — **ACCEPTED** at:
 
 ```text
 commit b4869816da1b6d1d92033b4994e9bdbbf55b08a2
 tree   871d7bd4971c5433e4d7bec8c7b8af06e716d03d
 ```
 
-The accepted Stage-2 Candidate is:
+Accepted Stage-2 Candidate:
 
 ```text
 Japanese_House_Modeler_Build_07_D_Stage2_Candidate_r19.zip
@@ -240,7 +229,7 @@ Add-on version: (0, 7, 3)
 Description: Build 07-D: Multi-point Path + L/U + Landing
 ```
 
-Documentation / acceptance commits created after this runtime review do not supersede the exact runtime-tested production revision above. Accepted runtime archives must be derived from the production revision above, not from later documentation-only commits.
+Documentation / acceptance commits created after runtime review do not supersede the exact runtime-tested production revision above.
 
 ## 10. Stage 3 automated evidence
 
@@ -254,11 +243,7 @@ python -m compileall -q japanese_house_modeler tests   PASS
 git diff --check                                  PASS
 ```
 
-The implementation report also confirmed a clean working tree before GitHub-side acceptance documentation.
-
 ## 11. Stage 3 accepted contracts
-
-Stage 3 accepts the following production behavior in addition to the Stage-1 / Stage-2 contracts:
 
 ### Canonical U / multi-flight foundation
 
@@ -274,7 +259,6 @@ Stage 3 accepts the following production behavior in addition to the Stage-1 / S
 - START / END candidate semantics and Shift-compatible endpoint candidate handling work on ordinary, rotated and mirrored U plans.
 - Turn 1 / Turn 2 target P1 / P2 separately.
 - when fixed neighboring points over-constrain an interior Turn, the move is rejected atomically without moving another point.
-- in the over-constrained runtime case there is no valid candidate, so the semantic `TURN 1` / `TURN 2` candidate label is not rendered; P1/P2 target indication and atomic rejection verify the actual mapping.
 - valid endpoint moves remain one Undo step; strict UI operation -> Ctrl+Z -> Ctrl+Shift+Z -> Console verification passed.
 - ESC, RMB and invalid operations preserve canonical points / IDs, allocation, Mesh, Materials, Stair ID and identity Transform.
 
@@ -327,13 +311,11 @@ START and END endpoint relocation, Shift candidate behavior, valid moves, strict
 
 ### Test 4 — MANUAL rollback — PASS
 
-AUTO -> MANUAL `6,3,7` persisted exactly. Wrong-total MANUAL input, below-two backend validation, and a too-short middle Flight were rejected without state mutation. Final comparison returned:
+AUTO -> MANUAL `6,3,7` persisted exactly. Wrong-total MANUAL input, below-two backend validation, and a too-short middle Flight were rejected without state mutation.
 
 ```text
 T4 ROLLBACK = True
 ```
-
-AUTO was then restored successfully.
 
 ### Test 5 — Residential U geometry — PASS
 
@@ -364,21 +346,9 @@ T6 FINAL: PTS=True IDS=True ALLOC=True STAIR_ID=True MATS=True SLOTS=True XFORM=
 
 ### Test 7 — persistence, regeneration, isolation — PASS
 
-Save -> complete Blender exit -> reopen:
-
 ```text
 T7 REOPEN = True DIFF = []
-```
-
-Three repeated Regenerate operations:
-
-```text
 T7 REGEN: MESH=True STATE=True
-```
-
-Final invalid Flight-3 edit:
-
-```text
 T7 INVALID ROLLBACK=True MESH_PTR=True DIFF=[]
 ```
 
@@ -386,19 +356,15 @@ The invalid edit produced a normal validation message, no traceback, no visible 
 
 ## 13. Stage 3 intentionally deferred scope
 
-Stage 3 does **not** claim completion of:
+Stage 3 did **not** claim final Stage-4 lifecycle / full-regression / practical-placement acceptance or Build 07-D overall acceptance. Winder / 廻り段 remained Build 07-E scope.
 
-- Build 07-D Stage-4 lifecycle / full-regression / practical-placement acceptance
-- final Build 07-D overall acceptance
-- Winder / 廻り段 geometry; that remains Build 07-E scope
-
-## 14. Acceptance conclusion
+## 14. Stage 3 acceptance conclusion
 
 Build 07-D Stage 1 — **ACCEPTED**.
 
 Build 07-D Stage 2 — **ACCEPTED**.
 
-Build 07-D Stage 3 — **ACCEPTED** at the exact runtime-tested production revision:
+Build 07-D Stage 3 — **ACCEPTED** at:
 
 ```text
 commit ec41d3e5b4c1730f24fb22000762ab2975978afd
@@ -413,4 +379,312 @@ SIZE    143226 bytes
 SHA256  d6c454a06d97554b9e5d6b306e06896fafa9fd3b2a5572cb6994bb922c6a0c06
 ```
 
-Build 07-D overall remains **IN PROGRESS**. The next implementation target is Build 07-D Stage 4: lifecycle / full regression / practical acceptance.
+## 15. Stage 4 runtime-tested revision and artifact
+
+GitHub PR: #30
+
+Exact runtime-tested Stage-4 revision:
+
+```text
+commit 6c8cd05e7a854a28c1396a26b4282bb6ecbc052b
+tree   f4c7b338560b688577314d297e422bd248e6554f
+```
+
+Runtime Candidate:
+
+```text
+Japanese_House_Modeler_Build_07_D_Stage4_Candidate_r1.zip
+SIZE    143226 bytes
+SHA256  58af371ded07b33ef1ec3f465fdde2e52ebaec9d88be7f0e8eea2f8802fcbed3
+```
+
+Runtime environment:
+
+```text
+Blender 5.2.0 LTS
+Add-on version: (0, 7, 3)
+Description: Build 07-D: Multi-point Path + L/U + Landing
+```
+
+Stage 4 changed automated tests and runtime documentation only; production Python was not changed. The add-on production code is therefore the already accepted Stage-3 production implementation. The exact Stage-4 Candidate above is nevertheless the runtime-tested package identity for the final lifecycle/regression acceptance pass.
+
+Acceptance/documentation commits created after the Blender runtime review do not supersede the exact Stage-4 runtime-tested revision above.
+
+## 16. Stage 4 automated evidence
+
+Codex Stage-4 implementation report recorded:
+
+```text
+python -m unittest tests.test_build_07_d_stage4                                      14 PASS
+python -m unittest tests.test_build_07_d_stage1 tests.test_build_07_d_stage2 tests.test_build_07_d_stage3 tests.test_build_07_d_stage4   131 PASS
+07-A targeted suites                                                                 84 PASS
+07-B targeted suites                                                                 98 PASS
+07-C targeted suites                                                                 90 PASS
+python -m unittest discover -s tests                                                 766 PASS
+python -m compileall -q japanese_house_modeler tests                                 PASS
+git diff --check                                                                      PASS
+git status --short --branch                                                          clean
+```
+
+Codex local final revision after the runtime-document wording correction was:
+
+```text
+commit 581ca0fd4e9ee17a601c2d6c9cf302551aab3193
+tree   f4c7b338560b688577314d297e422bd248e6554f
+```
+
+GitHub PR head and Codex local commit SHA differ, but the tree SHA is identical; repository contents are therefore the same for acceptance purposes.
+
+The Stage-4 automated suite covers schema-1/2/3 compatibility without implicit upgrades, schema-4 L/U persistence foundations, repair policy for `GEOMETRY_MISSING`, `TRANSFORM_CHANGED`, `ID_MISSING`, and `ID_CONFLICT`, duplicate-ID isolation, deterministic geometry, representative topology checks, Finalize/Delete contracts, and Wall/Finish isolation.
+
+## 17. Stage 4 Blender 5.2 LTS runtime acceptance
+
+All fifteen grouped Stage-4 runtime tests passed on Candidate r1.
+
+### Test 1 — Candidate identity / baseline — PASS
+
+```text
+VERSION=(0,7,3)
+DESCRIPTION=Build 07-D: Multi-point Path + L/U + Landing
+BLENDER=(5,2,0)
+```
+
+Straight / L / U creation entry points were visible in the Stair UI.
+
+### Test 2 — schema-1 BASIC Straight regression — PASS
+
+A schema-1 `BASIC_TREAD_RISER` Straight fixture survived save -> complete Blender exit -> reopen and Regenerate without implicit upgrade or geometry change.
+
+```text
+STATE=True
+MESH=True
+SCHEMA=1
+MODE=BASIC_TREAD_RISER
+FINITE=True
+ZERO=[]
+```
+
+### Test 3 — schema-2 07-B Straight regression — PASS
+
+A legacy schema-2 `STANDARD_RESIDENTIAL` Straight fixture remained schema 2 after Regenerate and no-op material lifecycle operations.
+
+```text
+STATE=True
+MESH=True
+SCHEMA=2
+MODE=STANDARD_RESIDENTIAL
+FINITE=True
+ZERO=[]
+```
+
+The current UI's Residential Apply path creates schema 3, so the legacy schema-2 fixture was intentionally established as legacy state before regression testing; the test validated that current 07-D ordinary handling does not silently upgrade it.
+
+### Test 4 — schema-3 07-C Straight regression — PASS
+
+SLOPED_CLOSED and STEPPED_CLOSED schema-3 Straight cases both survived Reverse round-trip and Regenerate with deterministic state and geometry.
+
+```text
+STATE=True
+MESH=True
+SCHEMA=3
+FINITE=True
+ZERO=[]
+```
+
+Both underside variants were visually accepted.
+
+### Test 5 — schema-4 L / U persistence — PASS
+
+L and U were saved, Blender was fully exited, and the same `.blend` reopened. Both retained schema, Stair ID, Path coordinates, persistent point IDs, direction, Turn/distribution state, allocation, identity transform, and mesh counts.
+
+```text
+T5 REOPEN: L=True U=True
+T5 MANAGED: [('T5_L','MESH',True),('T5_U','MESH',True)]
+```
+
+L/U visual appearance and Landings remained intact.
+
+### Test 6 — AUTO / MANUAL persistence — PASS
+
+L remained AUTO `8,8`; U remained MANUAL `6,5,5` through save -> full exit -> reopen and subsequent Regenerate.
+
+```text
+T6 REOPEN: L=True U=True
+T6 REGEN: L=True U=True
+T6 FINAL: AUTO 8,8 | MANUAL 6,5,5
+```
+
+### Test 7 — Undo / Redo representative lifecycle — PASS
+
+Path endpoint move, Reverse, and Material change each passed the required UI operation -> Ctrl+Z -> Ctrl+Shift+Z -> Console sequence.
+
+Representative evidence:
+
+```text
+T7A RESULT: PATH_CHANGED=True IDS=True STAIR_ID=True DIR=True XFORM=True
+T7B RESULT: DIR_CHANGED=True PATH=True IDS=True STAIR_ID=True
+T7C RESULT: TREAD=T7_MAT XFORM=((0,0,0),(0,0,0),(1,1,1))
+```
+
+### Test 8 — invalid edit full rollback — PASS
+
+Wrong MANUAL total, too-short Flight, and non-90-degree Landing Turn were all rejected with no canonical/material/transform/mesh mutation.
+
+```text
+T8A MANUAL ROLLBACK=True
+T8B SHORT FLIGHT ROLLBACK=True
+T8C NON90 ROLLBACK=True
+```
+
+Runtime validation messages included `Landing cutback後のFlight長が不足しています。` and `Landingは正確な90度Turnのみ対応します。`.
+
+### Test 9 — Geometry / Transform Repair — PASS
+
+Intentional empty geometry diagnosed `GEOMETRY_MISSING` and repaired back to the exact previous canonical and mesh result. Intentional Object translation diagnosed `TRANSFORM_CHANGED` and repaired to identity.
+
+```text
+T9G RESULT: CANONICAL=True MESH=True ISSUES=() FINITE=True ZERO=[]
+T9T RESULT: CANONICAL=True MESH=True XFORM=((0,0,0),(0,0,0),(1,1,1)) ISSUES=() FINITE=True ZERO=[]
+```
+
+### Test 10 — duplicate Stair ID diagnosis / Repair — PASS
+
+A/B were intentionally given the same Stair ID. Both diagnosed `ID_CONFLICT`; C remained healthy. Repairing active B assigned a new ID only to B.
+
+```text
+UNIQUE=True
+B_NEW_ID=True
+A_UNCHANGED=True
+B_CANONICAL=True
+B_MESH=True
+C_UNCHANGED=True
+T10 ISSUES FINAL: () () ()
+```
+
+### Test 11 — Material lifecycle / repeated Regenerate — PASS
+
+Distinct TREAD / RISER / UNDERSIDE / SIDE_BOARD Materials were assigned to L/U. Regenerate x3, Reverse round-trip, save -> full exit -> reopen all preserved canonical Material pointers, effective slots, canonical state, mesh hash, and topology.
+
+```text
+T11 REGEN3: L=True U=True
+T11 REVERSE ROUNDTRIP: L=True U=True
+T11 REOPEN: L=True U=True
+FINITE=True ZERO=[] BOUNDARY=0 NONMANIFOLD=0
+```
+
+No z-fighting or duplicate body was observed.
+
+### Test 12 — Finalize transition — PASS
+
+A schema-4 U was finalized to an ordinary editable Blender Mesh.
+
+```text
+TYPE=MESH
+MANAGED=False
+MESH_SAME=True
+COUNTS=(656,732)
+XFORM=identity
+```
+
+Managed Stair UI disappeared, Edit Mode remained available, and appearance did not change.
+
+### Test 13 — active-only Delete / abnormal Delete — PASS
+
+With multiple Stair/Wall/Finish/Mesh objects selected, Delete Stair removed only the active managed Stair. Wall, Finish, other Stair, and finalized Mesh remained unchanged. A second managed Stair with intentionally missing geometry could also be deleted normally.
+
+```text
+T13A RESULT: A_DELETED=True B_REMAINS=True MESH_REMAINS=True WALL_REMAINS=True FINISH_REMAINS=True
+T13A HOLD: B_ID=True WALL_ID=True FINISH_ID=True FINAL_MESH=True
+T13B BROKEN: 0 0 ('GEOMETRY_MISSING',)
+T13B RESULT: B_DELETED=True FINAL_MESH=True WALL=True FINISH=True
+```
+
+### Test 14 — Wall / Finish isolation + practical placement — PASS
+
+L/U Stair were placed with a simple floor-like Mesh and accepted managed Wall / Finish objects. Stair-only Regenerate, Reverse, Transform Repair, Finalize, and Delete did not mutate Wall / Finish property snapshots, transform, or evaluated geometry.
+
+```text
+T14 REPAIR BEFORE: (1,0,0) ('TRANSFORM_CHANGED',)
+T14 REPAIR AFTER: identity ()
+T14 FINALIZE: MESH False 644 738
+T14 DELETE: U_DELETED=True L_FINALIZED=True
+T14 ISOLATION: WALL=True FINISH=True
+T14 REVERSE: FORWARD -> REVERSE CHANGED=True
+T14 REVERSE ISOLATION: WALL=True FINISH=True
+```
+
+Visual review accepted practical floor/wall placement, finalized L appearance, and unchanged Wall / Finish geometry.
+
+### Test 15 — final topology / visual inspection — PASS
+
+Six representative final combinations were tested:
+
+```text
+1. Straight / FORWARD / STEPPED_CLOSED / Boards OFF
+2. Straight / REVERSE / SLOPED_CLOSED / Boards SLOPED
+3. L / FORWARD / STEPPED_CLOSED / Boards STEPPED
+4. L / REVERSE / SLOPED_CLOSED / Boards SLOPED
+5. U / FORWARD / STEPPED_CLOSED / Boards OFF
+6. U / REVERSE / SLOPED_CLOSED / Boards SLOPED
+```
+
+All six returned:
+
+```text
+finite=True
+zero=[]
+boundary=0
+nonmanifold=0
+```
+
+and each same-condition second Regenerate returned `SAME=True`. Visual review found no obvious Landing/Flight gap, closed-underside hole or spike, Side Board duplication/side swap, giant triangle, filler prism, duplicate positive-volume body, or obvious reversed face.
+
+## 18. Final accepted contracts
+
+Build 07-D overall acceptance includes all Stage 1–4 contracts above. In particular:
+
+- legacy schema-1 BASIC, schema-2 07-B Residential, and schema-3 07-C Residential Straight remain compatible and are not silently upgraded by ordinary handling.
+- schema-4 Multi-point supports production L and U / three-Flight Landing routes as one Managed Stair.
+- persistent Stair ID and Path point IDs survive ordinary edit, regeneration, save/reopen, and accepted Repair workflows.
+- AUTO and MANUAL physical Flight allocations are deterministic and persistent under their respective authority rules.
+- valid START / END / TURN editing uses canonical Path data; invalid candidates rollback atomically.
+- Shift 15-degree / alignment-guide foundation remains part of the accepted 07-D Path interaction contract; production Landing turns remain exact ±90 degrees.
+- STEPPED_CLOSED / SLOPED_CLOSED and STEPPED / SLOPED Side Board variants are accepted across representative L/U, mirrored, and Reverse cases.
+- Material role mapping, Material persistence, and deterministic regeneration remain stable.
+- Geometry Repair, Transform Repair, and duplicate-ID Repair operate from canonical state without unrelated-object mutation.
+- Finalize produces an ordinary editable Mesh and ends Stair management without visible geometry change.
+- Delete Stair is active-object-only and remains available in supported abnormal managed states.
+- Stair lifecycle operations do not mutate unrelated managed Wall / Finish objects.
+- representative final Straight/L/U meshes are finite, positive-area, closed, and free of unintended boundary / non-manifold edges.
+- Build 07-D remains a standalone Stair system and does not require Wall / Floor / Room attachment.
+
+## 19. Deferred to later builds
+
+Build 07-D acceptance does **not** add or accept:
+
+- Winder / 廻り段 geometry; this remains Build 07-E scope.
+- arbitrary-angle Landing turns such as 30 / 45 / 60 degrees; 07-D production Landing turns remain exact ±90 degrees.
+- automatic conversion of saved 07-D Landing turns to Winder.
+- open stair / support variants; these remain Build 07-F scope.
+- handrail / newel / baluster systems.
+- automatic Wall / Floor / Room attachment.
+
+World-space Stair placement may be oblique and the accepted interaction foundation includes Shift 15-degree direction constraint; that does not change the exact-90-degree production Landing-turn contract.
+
+## 20. Acceptance conclusion
+
+**Build 07-D Stage 1 is ACCEPTED.**
+
+**Build 07-D Stage 2 is ACCEPTED.**
+
+**Build 07-D Stage 3 is ACCEPTED.**
+
+**Build 07-D Stage 4 is ACCEPTED.**
+
+**Build 07-D overall is ACCEPTED.**
+
+The exact Stage-4 runtime-tested artifact is `Japanese_House_Modeler_Build_07_D_Stage4_Candidate_r1.zip` with SIZE `143226` bytes and SHA256 `58af371ded07b33ef1ec3f465fdde2e52ebaec9d88be7f0e8eea2f8802fcbed3`.
+
+The exact Stage-4 runtime-tested revision is `6c8cd05e7a854a28c1396a26b4282bb6ecbc052b` / tree `f4c7b338560b688577314d297e422bd248e6554f`.
+
+Stage 4 introduced no production Python change. Acceptance/documentation commits created after the Blender runtime review do not supersede that exact runtime-tested revision.
