@@ -7,7 +7,7 @@ sys.modules.setdefault("japanese_house_modeler", package)
 from japanese_house_modeler.stair_multiflight import (
     RISER_DISTRIBUTION_AUTO, RISER_DISTRIBUTION_MANUAL,
     _build_multiturn_residential_parts, _flight_stair_layout,
-    _residential_turn_contexts,
+    _residential_turn_contexts, _resolve_multiturn_flight_board_polygon,
     auto_distribute_risers, canonical_multi_path, prepare_distribution_edit_candidate,
     prepare_multiflight_geometry, prepare_multiflight_residential_geometry,
     resolve_multiflight_layout, switch_distribution_mode, validate_manual_allocation)
@@ -77,13 +77,15 @@ class DistributionTests(unittest.TestCase):
 class GeometryTests(unittest.TestCase):
     @staticmethod
     def owned(points=U, direction="FORWARD", underside="SLOPED_CLOSED",
-              left=True, right=True):
+              left=True, right=True, board_mode="STEPPED", reveal=35.0,
+              riser_thickness=12.0):
         layout=resolve_multiflight_layout(
-            points,direction,0,2800,16,900,30,12,
+            points,direction,0,2800,16,900,30,riser_thickness,
             point_ids=IDS if points==U else None,allocation=(5,6,5))
         fields=ResidentialFields(
             underside_mode=underside,left_side_board_enabled=left,
-            right_side_board_enabled=right)
+            right_side_board_enabled=right,side_board_mode=board_mode,
+            side_board_reveal_mm=reveal)
         locals_=tuple(_flight_stair_layout(f,layout) for f in layout.flights)
         turns=_residential_turn_contexts(layout,locals_,fields)
         return layout,fields,locals_,turns,_build_multiturn_residential_parts(
@@ -158,6 +160,52 @@ class GeometryTests(unittest.TestCase):
             self.assertLessEqual(min(xs),0.0)
             self.assertGreaterEqual(max(xs),middle.run_length)
         self.assertEqual(sum(x.owner_index==1 for x in parts.flight_boards),2)
+    def test_four_outgoing_board_starts_use_entire_turn_lower_profile(self):
+        _layout,fields,_locals,turns,parts=self.owned()
+        end_by_flight={t.incoming_flight.canonical_index:t for t in turns}
+        checked=[]
+        for turn in turns:
+            for side in ("LEFT","RIGHT"):
+                polygon=_resolve_multiturn_flight_board_polygon(
+                    turn.outgoing_local,side,fields,start_turn=turn,
+                    end_turn=end_by_flight.get(turn.outgoing_flight.canonical_index))
+                for point in turn.lower_profile:
+                    self.assertTrue(any(abs(point[0]-p[0])<1e-9 and
+                                        abs(point[1]-p[1])<1e-9 for p in polygon))
+                self.assertTrue(any(abs(p[0])<1e-9 and
+                                    abs(p[1]-turn.turn_soffit_z)<1e-9
+                                    for p in polygon))
+                # The complete first lower segment, not only its x=0 endpoint,
+                # remains an edge of the final closed board polygon.
+                a,b=turn.lower_profile[:2]
+                edges=tuple(zip(polygon,polygon[1:]+polygon[:1]))
+                self.assertTrue(any((u==a and v==b) or (u==b and v==a)
+                                    for u,v in edges))
+                checked.append((turn.turn_index,side))
+        self.assertEqual(checked,[(0,"LEFT"),(0,"RIGHT"),(1,"LEFT"),(1,"RIGHT")])
+        self.assertEqual(len(parts.flight_boards),6)
+    def test_lower_authority_survives_mirror_reverse_board_modes_and_dimensions(self):
+        routes=(U,((0,0),(3,0),(3,-1.8),(0,-1.8)))
+        for route in routes:
+            for direction in ("FORWARD","REVERSE"):
+                for board_mode in ("STEPPED","SLOPED"):
+                    for reveal in (20.0,40.0,60.0):
+                        for riser_thickness in (8.0,12.0,18.0):
+                            _layout,fields,_locals,turns,parts=self.owned(
+                                route,direction,board_mode=board_mode,
+                                reveal=reveal,riser_thickness=riser_thickness)
+                            end_by_flight={t.incoming_flight.canonical_index:t
+                                           for t in turns}
+                            self.assertEqual(len(parts.flight_boards),6)
+                            for turn in turns:
+                                for side in ("LEFT","RIGHT"):
+                                    polygon=_resolve_multiturn_flight_board_polygon(
+                                        turn.outgoing_local,side,fields,
+                                        start_turn=turn,end_turn=end_by_flight.get(
+                                            turn.outgoing_flight.canonical_index))
+                                    self.assertTrue(all(point in polygon
+                                                        for point in turn.lower_profile))
+                                    self.assertGreaterEqual(len(polygon),4)
     def test_each_landing_board_has_one_owner_and_no_duplicate_geometry(self):
         _layout,_fields,_locals,_turns,parts=self.owned()
         self.assertEqual([x.owner_index for x in parts.landing_boards],[0,1])

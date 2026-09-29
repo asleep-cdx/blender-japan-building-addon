@@ -759,21 +759,26 @@ def _build_l_flight_board_fragment(local, side, fields, position,
     return result
 
 
-def _build_multiturn_flight_board_fragment(
+def _resolve_multiturn_flight_board_polygon(
         local, side, fields, *, start_turn=None, end_turn=None):
-    """Apply both Landing-boundary transforms to one physical board profile.
-
-    ``start_turn`` owns the outgoing boundary and ``end_turn`` owns the
-    incoming boundary.  The resulting polygon is extruded exactly once, which
-    is essential for a middle Flight shared by two Turns.
-    """
-    from .stair_geometry import extrude_xz_profile, validate_simple_polygon
+    """Resolve one board polygon from both Turn boundaries before extrusion."""
+    from .stair_geometry import validate_simple_polygon
     from .stair_residential import validate_side_board_reveal
     from .stair_residential_geometry import side_board_profile, sloped_side_board_profile
     profile = (sloped_side_board_profile(local, fields)
                if fields.side_board_mode == "SLOPED" else side_board_profile(local, fields))
-    polygon = profile.polygon
     sloped = fields.underside_mode == "SLOPED_CLOSED"
+    if sloped and start_turn is not None:
+        lower = tuple(start_turn.lower_profile)
+        if not lower:
+            raise ValueError("Outgoing FlightのTurn補正lower profileがありません。")
+        # The Side Board and its UNDERBODY must share the complete accepted
+        # Turn slope, not merely the x=0 soffit vertex.  Top-family selection
+        # remains controlled independently by side_board_mode.
+        polygon = validate_simple_polygon(
+            profile.outer + tuple(reversed(lower)))
+    else:
+        polygon = profile.polygon
     if start_turn is not None:
         reveal = validate_side_board_reveal(fields, local.actual_riser, local.going)
         if sloped and side == start_turn.outer_side:
@@ -792,6 +797,15 @@ def _build_multiturn_flight_board_fragment(
         else:
             polygon = validate_simple_polygon(
                 _clip_profile_x(polygon, local.run_length, keep_greater=False))
+    return validate_simple_polygon(polygon)
+
+
+def _build_multiturn_flight_board_fragment(
+        local, side, fields, *, start_turn=None, end_turn=None):
+    """Extrude exactly one board after applying both Turn transformations."""
+    from .stair_geometry import extrude_xz_profile
+    polygon = _resolve_multiturn_flight_board_polygon(
+        local, side, fields, start_turn=start_turn, end_turn=end_turn)
     thickness = float(fields.side_board_thickness_mm) / _MM_PER_METRE
     half = local.width / 2.0
     if side == "LEFT":
