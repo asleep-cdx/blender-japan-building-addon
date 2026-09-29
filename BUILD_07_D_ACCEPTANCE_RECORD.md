@@ -7,11 +7,11 @@ Date: 2026-09-29
 
 - Build 07-D Stage 1 — **ACCEPTED**
 - Build 07-D Stage 2 — **ACCEPTED**
-- Build 07-D Stage 3 — NOT YET ACCEPTED
+- Build 07-D Stage 3 — **ACCEPTED**
 - Build 07-D Stage 4 — NOT YET ACCEPTED
 - Build 07-D overall — **IN PROGRESS**
 
-Stage 1 established the schema-4 Multi-point foundation and first visible 3-point L Stair. Stage 2 completes the 3-point L editing / guide / distribution / Residential integration scope defined for Stage 2 while preserving accepted schema-1/2/3 Straight behavior and the Stage-1 schema-4 foundation.
+Stage 1 established the schema-4 Multi-point foundation and first visible 3-point L Stair. Stage 2 completed the 3-point L editing / guide / distribution / Residential integration scope. Stage 3 completes the 4-point U / multi-flight production, editing, allocation, Residential turn ownership, material, persistence, and rollback scope defined for Stage 3 while preserving accepted schema-1/2/3 Straight behavior and the accepted Stage-1/2 schema-4 foundation.
 
 Implementation authority remains `BUILD_07_D_SPECIFICATION.md`. Build 07-D overall is not accepted until Stage 4.
 
@@ -194,7 +194,7 @@ Stage 2 does **not** claim completion of:
 
 These remain governed by `BUILD_07_D_SPECIFICATION.md` and later Build stages.
 
-## 8. Acceptance conclusion
+## 8. Stage 2 acceptance conclusion
 
 Build 07-D Stage 1 is **ACCEPTED** at its recorded Stage-1 runtime-tested revision.
 
@@ -213,4 +213,204 @@ SIZE    138267 bytes
 SHA256  85fefa1c0a20d1eddf968bc2d59ac874098307060aa9fcaf852e49c6def46c13
 ```
 
-The next implementation target is Build 07-D Stage 3: U-shaped / multi-flight production. Build 07-D overall remains **IN PROGRESS** until Stage 4 acceptance.
+## 9. Stage 3 runtime-tested revision and artifact
+
+GitHub PR: #29
+
+Exact runtime-tested Stage-3 production revision:
+
+```text
+commit ec41d3e5b4c1730f24fb22000762ab2975978afd
+tree   b2c1f3d813ed51cd59028a3d5217c3ce7c4c81c6
+```
+
+Runtime Candidate:
+
+```text
+Japanese_House_Modeler_Build_07_D_Stage3_Candidate_r4.zip
+SIZE    143226 bytes
+SHA256  d6c454a06d97554b9e5d6b306e06896fafa9fd3b2a5572cb6994bb922c6a0c06
+```
+
+Runtime environment:
+
+```text
+Blender 5.2 LTS
+Add-on version: (0, 7, 3)
+Description: Build 07-D: Multi-point Path + L/U + Landing
+```
+
+Documentation / acceptance commits created after this runtime review do not supersede the exact runtime-tested production revision above. Accepted runtime archives must be derived from the production revision above, not from later documentation-only commits.
+
+## 10. Stage 3 automated evidence
+
+Final implementation report:
+
+```text
+python -m unittest tests.test_build_07_d_stage3   13 PASS
+Stage-1 / Stage-2 / Stage-3 combined suites      PASS
+python -m unittest discover -s tests             PASS
+python -m compileall -q japanese_house_modeler tests   PASS
+git diff --check                                  PASS
+```
+
+The implementation report also confirmed a clean working tree before GitHub-side acceptance documentation.
+
+## 11. Stage 3 accepted contracts
+
+Stage 3 accepts the following production behavior in addition to the Stage-1 / Stage-2 contracts:
+
+### Canonical U / multi-flight foundation
+
+- explicit 4-point U creation persists schema-4 `P0/P1/P2/P3` with stable unique point IDs.
+- a 4-point U resolves three physical Flights and two Landings.
+- orthogonal canonical validation extends beyond the Stage-2 3-point L and rejects non-adjacent self-intersection / overlap.
+- one Managed Stair remains one Mesh Object with identity Object Transform.
+- mirrored and rotated U plans preserve canonical identity and local turn semantics.
+
+### Relocation and guides
+
+- START and END each expose one persistent cyan endpoint ray in the current valid endpoint direction.
+- START / END candidate semantics and Shift-compatible endpoint candidate handling work on ordinary, rotated and mirrored U plans.
+- Turn 1 / Turn 2 target P1 / P2 separately.
+- when fixed neighboring points over-constrain an interior Turn, the move is rejected atomically without moving another point.
+- in the over-constrained runtime case there is no valid candidate, so the semantic `TURN 1` / `TURN 2` candidate label is not rendered; P1/P2 target indication and atomic rejection verify the actual mapping.
+- valid endpoint moves remain one Undo step; strict UI operation -> Ctrl+Z -> Ctrl+Shift+Z -> Console verification passed.
+- ESC, RMB and invalid operations preserve canonical points / IDs, allocation, Mesh, Materials, Stair ID and identity Transform.
+
+### Three-Flight allocation
+
+- AUTO produces deterministic physical allocation across three Flights, each satisfying the minimum-riser contract and summing exactly to the overall riser count.
+- MANUAL accepts three explicit Flight counts.
+- wrong total, below-two allocation and geometry made invalid by Path edits are rejected without mutation.
+- MANUAL -> AUTO returns authority to the valid AUTO allocation.
+
+### Multi-turn Residential geometry
+
+- each physical Flight has one underbody owner; the middle physical Flight is not duplicated at either Turn.
+- each Landing has its own underbody / closure ownership.
+- SLOPED_CLOSED body-only U geometry preserves separate Landing soffits and a single constant-pitch middle Flight body rather than a global turn-to-turn wedge or repair box.
+- STEPPED_CLOSED closes both Turn transitions without duplicate transition bodies.
+- STEPPED and SLOPED Side Board profiles resolve through both turns with local chirality and ownership.
+- mirrored and REVERSE variants do not retain stale FORWARD / opposite-side Side Board geometry.
+- representative reveal / riser-thickness coverage was exercised across a 72-case pure geometry sweep.
+
+### Reverse, materials and lifecycle
+
+- Reverse changes traversal without canonical Path reorder or physical allocation rewrite.
+- both Landing elevations recompute from the current uphill traversal.
+- only the final uphill Flight owns final-arrival semantics.
+- all five canonical Material pointers and effective Mesh slots remain stable across Reverse.
+- save -> complete Blender exit -> reopen preserves canonical state, point IDs/order, distribution state, dimensions, Residential settings, Materials, Stair ID, Mesh result and identity Transform.
+- repeated Regenerate is deterministic for the accepted runtime state.
+- invalid final edits are rejected atomically while preserving the same Mesh datablock pointer and full pre-operation state.
+
+## 12. Stage 3 Blender 5.2 LTS runtime acceptance
+
+All eight grouped Stage-3 runtime tests passed on Candidate r4.
+
+### Test 0 — identity and regressions — PASS
+
+Accepted 07-C Straight and accepted Stage-2 3-point L behavior remained available under the Stage-3 package.
+
+### Test 1 — four-click U — PASS
+
+4-point U creation, schema-4 point identity, three Flights / two Landings, mirrored U, and rotated U creation / guide behavior were exercised successfully.
+
+### Test 2 — AUTO and elevations — PASS
+
+A 16-riser unequal-run U resolved deterministic 3-Flight allocation with every Flight at least two risers, exact total 16, exact floor-to-floor arrival, and cumulative Landing elevations.
+
+### Test 3 — relocation and Undo / Redo — PASS
+
+START and END endpoint relocation, Shift candidate behavior, valid moves, strict Undo / Redo, ESC / RMB cancel, rotated U and mirrored U passed. Turn 1 / Turn 2 mapped to P1 / P2 and rejected the over-constrained exact-90-degree move atomically. Invalid/cancel paths preserved canonical data and generated state.
+
+### Test 4 — MANUAL rollback — PASS
+
+AUTO -> MANUAL `6,3,7` persisted exactly. Wrong-total MANUAL input, below-two backend validation, and a too-short middle Flight were rejected without state mutation. Final comparison returned:
+
+```text
+T4 ROLLBACK = True
+```
+
+AUTO was then restored successfully.
+
+### Test 5 — Residential U geometry — PASS
+
+Normal and mirrored SLOPED_CLOSED body-only U geometry passed Console ownership and visual review. STEPPED / SLOPED Side Boards, mirrored / REVERSE variants, and STEPPED_CLOSED boards OFF / ON were reviewed without observed large gap, hole, spike, sliver, duplicated physical middle Flight, duplicate transition body, or stale opposite-direction Side Board.
+
+Pure geometry sweep:
+
+```text
+2 routes (normal / mirrored)
+× 2 directions (FORWARD / REVERSE)
+× 2 Side Board modes (STEPPED / SLOPED)
+× 3 reveals (20 / 40 / 60 mm)
+× 3 riser thicknesses (8 / 12 / 18 mm)
+= 72 / 72 PASS
+```
+
+### Test 6 — Reverse and materials — PASS
+
+All five Material roles were populated. REVERSE -> FORWARD -> REVERSE preserved Path, IDs, allocation, Stair ID, Material pointers, Mesh slots and identity Transform while traversal and Landing elevations recomputed correctly.
+
+Representative evidence:
+
+```text
+FORWARD TRAV=[0,1,2] LANDING_Z=[1.05,1.575] FINAL_UPHILL=2
+REVERSE TRAV=[2,1,0] LANDING_Z=[1.75,1.225] FINAL_UPHILL=0
+T6 FINAL: PTS=True IDS=True ALLOC=True STAIR_ID=True MATS=True SLOTS=True XFORM=True
+```
+
+### Test 7 — persistence, regeneration, isolation — PASS
+
+Save -> complete Blender exit -> reopen:
+
+```text
+T7 REOPEN = True DIFF = []
+```
+
+Three repeated Regenerate operations:
+
+```text
+T7 REGEN: MESH=True STATE=True
+```
+
+Final invalid Flight-3 edit:
+
+```text
+T7 INVALID ROLLBACK=True MESH_PTR=True DIFF=[]
+```
+
+The invalid edit produced a normal validation message, no traceback, no visible shape mutation, and preserved the exact existing Mesh datablock pointer.
+
+## 13. Stage 3 intentionally deferred scope
+
+Stage 3 does **not** claim completion of:
+
+- Build 07-D Stage-4 lifecycle / full-regression / practical-placement acceptance
+- final Build 07-D overall acceptance
+- Winder / 廻り段 geometry; that remains Build 07-E scope
+
+## 14. Acceptance conclusion
+
+Build 07-D Stage 1 — **ACCEPTED**.
+
+Build 07-D Stage 2 — **ACCEPTED**.
+
+Build 07-D Stage 3 — **ACCEPTED** at the exact runtime-tested production revision:
+
+```text
+commit ec41d3e5b4c1730f24fb22000762ab2975978afd
+tree   b2c1f3d813ed51cd59028a3d5217c3ce7c4c81c6
+```
+
+Accepted Stage-3 Candidate:
+
+```text
+Japanese_House_Modeler_Build_07_D_Stage3_Candidate_r4.zip
+SIZE    143226 bytes
+SHA256  d6c454a06d97554b9e5d6b306e06896fafa9fd3b2a5572cb6994bb922c6a0c06
+```
+
+Build 07-D overall remains **IN PROGRESS**. The next implementation target is Build 07-D Stage 4: lifecycle / full regression / practical acceptance.
