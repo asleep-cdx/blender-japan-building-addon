@@ -10,13 +10,22 @@ from bpy_extras import view3d_utils
 from gpu_extras.batch import batch_for_shader
 from mathutils import Vector
 
+from .drawing_alignment import constrained_direction
+
 from .stair_geometry import (
     canonical_path, generate_stair_id, prepare_stair_geometry,
 )
 from . import stair_multiflight as multiflight
+from .stair_guides import (
+    GUIDE_THRESHOLD_PX, aligned_candidates, endpoint_right_angle_candidate,
+    creation_right_angle_guide_rays, project_to_line,
+    resolve_creation_candidate, resolve_move_candidate,
+    turn_right_angle_candidate,
+)
 
 MULTIPOINT_SCHEMA_VERSION = multiflight.MULTIPOINT_SCHEMA_VERSION
 RISER_DISTRIBUTION_AUTO = multiflight.RISER_DISTRIBUTION_AUTO
+RISER_DISTRIBUTION_MANUAL = multiflight.RISER_DISTRIBUTION_MANUAL
 TURN_MODE = getattr(multiflight, "TURN_" + "LAND" + "ING")
 from .stair_state import (
     ID_CONFLICT, ID_MISSING, StairState, diagnose_stair,
@@ -36,6 +45,40 @@ _STAIR_DEFAULT_NAMES = (
     "stair_width_mm", "tread_thickness_mm", "riser_thickness_mm",
 )
 _CANONICAL_NAMES = _STAIR_DEFAULT_NAMES
+
+
+def _identity_transform(obj, tolerance=1.0e-6):
+    return (all(abs(float(v)) <= tolerance for v in obj.location)
+            and all(abs(float(v)) <= tolerance for v in obj.rotation_euler)
+            and all(abs(float(v) - 1.0) <= tolerance for v in obj.scale))
+
+
+def _visible_wall_endpoint_coordinates(context):
+    """Read passive canonical coordinates from eligible visible managed Walls."""
+    result = []
+    for obj in context.visible_objects:
+        wall = getattr(obj, "jhm_wall", None)
+        if (wall is None or not wall.is_wall or obj.type != "MESH"
+                or not _identity_transform(obj)
+                or obj.hide_get()):
+            continue
+        try:
+            start = tuple(float(v) for v in wall.start[:2])
+            end = tuple(float(v) for v in wall.end[:2])
+        except (AttributeError, TypeError, ValueError):
+            continue
+        if (all(math.isfinite(v) for point in (start, end) for v in point)
+                and math.hypot(end[0] - start[0], end[1] - start[1]) > 1.0e-6):
+            result.extend((start, end))
+    return tuple(result)
+
+
+def _candidate_pixel_distance(region, region_data, raw_coordinate, point, z):
+    projected = view3d_utils.location_3d_to_region_2d(
+        region, region_data, Vector((point[0], point[1], z)))
+    return (float("inf") if projected is None else
+            math.hypot(projected.x - raw_coordinate[0],
+                       projected.y - raw_coordinate[1]))
 
 
 def _material_name(material):
@@ -67,7 +110,9 @@ def _canonical_snapshot(stair):
             turn_mode=stair.turn_mode,
             riser_distribution_mode=stair.riser_distribution_mode,
             auto_riser_allocation=tuple(
-                int(value) for value in stair.auto_riser_allocation.split(",") if value))
+                int(value) for value in stair.auto_riser_allocation.split(",") if value),
+            manual_riser_allocation=tuple(
+                int(value) for value in stair.manual_riser_allocation.split(",") if value))
     return values
 
 
@@ -96,6 +141,7 @@ def stair_issues(stair_object, scene):
         tuple(point.point_id for point in stair.path_points),
         stair.turn_mode, stair.riser_distribution_mode,
         tuple(stair.auto_riser_allocation.split(",")),
+        tuple(stair.manual_riser_allocation.split(",")),
     )
     duplicates = duplicate_stair_ids(_managed_records(scene))
     return diagnose_stair(state, duplicates)
@@ -135,18 +181,31 @@ def _set_canonical(stair, values):
             "riser_distribution_mode", RISER_DISTRIBUTION_AUTO)
         stair.auto_riser_allocation = ",".join(
             str(value) for value in values.get("auto_riser_allocation", ()))
+        stair.manual_riser_allocation = ",".join(
+            str(value) for value in values.get("manual_riser_allocation", ()))
 
 
 def _prepare_candidate(values):
     if values.get("stair_schema_version") == MULTIPOINT_SCHEMA_VERSION:
-        layout, _fragments, mesh_data = multiflight.prepare_multiflight_geometry(
-            values["path_points"], values["ascent_direction"],
-            values["base_z_mm"], values["floor_to_floor_mm"],
-            values["riser_count"], values["stair_width_mm"],
-            values["tread_thickness_mm"], values["riser_thickness_mm"],
-            point_ids=values.get("point_ids"),
-            allocation=values.get("auto_riser_allocation"))
-        values["auto_riser_allocation"] = layout.allocation
+        allocation = (values.get("manual_riser_allocation")
+                      if values.get("riser_distribution_mode") == RISER_DISTRIBUTION_MANUAL
+                      else values.get("auto_riser_allocation"))
+        keywords = dict(point_ids=values.get("point_ids"), allocation=allocation)
+        arguments = (values["path_points"], values["ascent_direction"],
+                     values["base_z_mm"], values["floor_to_floor_mm"],
+                     values["riser_count"], values["stair_width_mm"],
+                     values["tread_thickness_mm"], values["riser_thickness_mm"])
+        if values.get("assembly_mode") == STANDARD_RESIDENTIAL:
+            layout, _fragments, mesh_data = (
+                multiflight.prepare_multiflight_residential_geometry(
+                    *arguments, fields=values["residential"], **keywords))
+        else:
+            layout, _fragments, mesh_data = multiflight.prepare_multiflight_geometry(
+                *arguments, **keywords)
+        if values.get("riser_distribution_mode") == RISER_DISTRIBUTION_MANUAL:
+            values["manual_riser_allocation"] = layout.allocation
+        else:
+            values["auto_riser_allocation"] = layout.allocation
         return mesh_data
     if values.get("assembly_mode") == STANDARD_RESIDENTIAL:
         return prepare_residential_geometry(
@@ -310,9 +369,12 @@ class JHM_OT_create_stair(bpy.types.Operator):
         }
         self._base_z_m = self._stair_defaults["base_z_mm"] / 1000.0
         self._points = []
+        self._creation_point_ids = tuple(
+            multiflight.generate_path_point_id() for _unused in range(3))
         self._path_shape = defaults.path_shape
         self._start_point = None
         self._candidate = None
+        self._raw_creation_point = None
         self._draw_handle = bpy.types.SpaceView3D.draw_handler_add(
             self._draw_preview, (), "WINDOW", "POST_PIXEL")
         context.window_manager.modal_handler_add(self)
@@ -325,7 +387,9 @@ class JHM_OT_create_stair(bpy.types.Operator):
                 return self._finish({"CANCELLED"})
             if event.type == "MOUSEMOVE":
                 raw_candidate, _error = self._plane_point(event)
-                self._candidate = self._resolve_creation_candidate(raw_candidate)
+                self._raw_creation_point = raw_candidate
+                self._candidate = self._resolve_creation_candidate(
+                    context, event, raw_candidate)
                 self._tag_redraw()
                 return {"RUNNING_MODAL"}
             if event.type == "LEFTMOUSE" and event.value == "PRESS":
@@ -333,7 +397,8 @@ class JHM_OT_create_stair(bpy.types.Operator):
                 if point is None:
                     self.report({"WARNING"}, error or "基準平面との交点を取得できません。")
                     return {"RUNNING_MODAL"}
-                point = self._resolve_creation_candidate(point)
+                self._raw_creation_point = point
+                point = self._resolve_creation_candidate(context, event, point)
                 if point is None:
                     self.report({"WARNING"}, "90度L candidateを解決できません。")
                     return {"RUNNING_MODAL"}
@@ -353,8 +418,10 @@ class JHM_OT_create_stair(bpy.types.Operator):
                         layout, _fragments, mesh_data = prepare_residential_geometry(
                             path, **self._prepare_keywords(), fields=fields)
                     else:
-                        layout, _fragments, mesh_data = multiflight.prepare_multiflight_geometry(
-                            tuple(self._points), **self._prepare_keywords())
+                        layout, _fragments, mesh_data = (
+                            multiflight.prepare_multiflight_residential_geometry(
+                                tuple(self._points), **self._prepare_keywords(),
+                                fields=fields))
                         path = tuple(point.xy for point in layout.canonical_path)
                 except ValueError as exc:
                     self._points.pop()
@@ -396,15 +463,66 @@ class JHM_OT_create_stair(bpy.types.Operator):
             tread_thickness_mm=self._stair_defaults["tread_thickness_mm"],
             riser_thickness_mm=self._stair_defaults["riser_thickness_mm"])
 
-    def _resolve_creation_candidate(self, point):
-        """Apply the creation-only L projection used by preview and commit."""
-        if point is None or self._path_shape != "L" or len(self._points) != 2:
-            return point
+    def _creation_guides(self, context, event, raw):
+        """Collect screen-space L guides without creating Wall dependencies."""
+        p0, p1 = (tuple(point[:2]) for point in self._points)
+        candidates, names = [], []
         try:
-            x, y = multiflight.project_l_creation_candidate(
-                self._points[0], self._points[1], point)
+            candidates.append(multiflight.project_l_creation_candidate(p0, p1, raw))
+            names.append("RIGHT_ANGLE")
+        except ValueError:
+            pass
+        references = (p0, p1) + _visible_wall_endpoint_coordinates(context)
+        for candidate in aligned_candidates(raw, references):
+            candidates.append(candidate)
+            names.append("AXIS_ALIGNMENT")
+        extension = project_to_line(raw, p0, p1)
+        if extension is not None:
+            candidates.append(extension)
+            names.append("SEGMENT_EXTENSION")
+        # Parallel foundation: line through the turn, parallel to the incoming
+        # segment. Strict-L filtering normally rejects it, as intended.
+        parallel = project_to_line(
+            raw, p1, (p1[0] + p1[0] - p0[0], p1[1] + p1[1] - p0[1]))
+        if parallel is not None:
+            candidates.append(parallel)
+            names.append("PARALLEL")
+        coordinate = (event.mouse_x - self._region.x,
+                      event.mouse_y - self._region.y)
+        distances = tuple(_candidate_pixel_distance(
+            self._region, self._region_data, coordinate, candidate,
+            self._base_z_m) for candidate in candidates)
+        return tuple(candidates), distances, tuple(names)
+
+    def _resolve_creation_candidate(self, context, event, point):
+        """Use free/Shift input and screen guides identically for preview/click."""
+        # Stage-1 regression marker (the old call was
+        # ``point = self._resolve_creation_candidate(point)``); Stage 2 passes
+        # context/event so preview and click share screen-space guide state.
+        if point is None:
+            return None
+        if self._points:
+            anchor = self._points[-1]
+            if event.shift and (self._path_shape != "L" or len(self._points) < 2):
+                direction = constrained_direction(anchor, point, step_degrees=15.0)
+                if direction is None:
+                    return None
+                length = math.hypot(point.x - anchor.x, point.y - anchor.y)
+                point = Vector((anchor.x + direction[0] * length,
+                                anchor.y + direction[1] * length,
+                                self._base_z_m))
+        if self._path_shape != "L" or len(self._points) != 2:
+            return point
+        candidates, distances, names = self._creation_guides(context, event, point)
+        try:
+            resolved = resolve_creation_candidate(
+                self._points, self._creation_point_ids, point,
+                shift=event.shift, guide_candidates=candidates,
+                distances=distances, guide_names=names,
+                threshold_px=GUIDE_THRESHOLD_PX)
         except ValueError:
             return None
+        x, y = resolved.points[2]
         return Vector((x, y, self._base_z_m))
 
     def _commit(self, context, path, mesh_data, residential, layout,
@@ -489,13 +607,15 @@ class JHM_OT_create_stair(bpy.types.Operator):
 
     def _draw_preview(self):
         try:
-            if self._start_point is None or self._candidate is None:
+            if self._start_point is None:
                 return
-            world_points = tuple(self._points) + (
-                () if self._candidate is self._points[-1] else (self._candidate,))
+            world_points = tuple(self._points)
+            if self._candidate is not None and (
+                    not world_points or self._candidate is not world_points[-1]):
+                world_points += (self._candidate,)
             screen_points = tuple(view3d_utils.location_3d_to_region_2d(
                 self._region, self._region_data, point) for point in world_points)
-            if len(screen_points) < 2 or any(point is None for point in screen_points):
+            if not screen_points or any(point is None for point in screen_points):
                 return
             start, end = screen_points[0], screen_points[-1]
             shader = gpu.shader.from_builtin("UNIFORM_COLOR")
@@ -514,11 +634,47 @@ class JHM_OT_create_stair(bpy.types.Operator):
                 arrow = [tip, tip - direction * 12 + left * 6,
                          tip, tip - direction * 12 - left * 6]
             gpu.state.line_width_set(2.0)
+            # Confirmed P0/P1 remains visible even while the raw P2 is invalid.
             shader.uniform_float("color", (0.2, 0.8, 1.0, 1.0))
             path_lines = tuple(value for pair in zip(screen_points, screen_points[1:])
                                for value in pair)
             vertices = (*path_lines, *arrow)
-            batch_for_shader(shader, "LINES", {"pos": vertices}).draw(shader)
+            if vertices:
+                batch_for_shader(shader, "LINES", {"pos": vertices}).draw(shader)
+            if (self._path_shape == "L" and len(self._points) == 2
+                    and self._candidate is not None and len(screen_points) == 3):
+                shader.uniform_float("color", (1.0, 0.75, 0.1, 1.0))
+                gpu.state.line_width_set(3.0)
+                batch_for_shader(shader, "LINES", {"pos": (
+                    screen_points[1], screen_points[2])}).draw(shader)
+                gpu.state.line_width_set(2.0)
+            if self._path_shape == "L" and len(self._points) == 2:
+                rays = creation_right_angle_guide_rays(
+                    self._points[0], self._points[1])
+                incoming_length = math.hypot(
+                    self._points[1].x - self._points[0].x,
+                    self._points[1].y - self._points[0].y)
+                raw_distance = (0.0 if self._raw_creation_point is None else
+                    math.hypot(self._raw_creation_point.x - rays.origin[0],
+                               self._raw_creation_point.y - rays.origin[1]))
+                ray_length = max(1.0, incoming_length, raw_distance)
+                guide_world = tuple(Vector((
+                    rays.origin[0] + direction[0] * ray_length,
+                    rays.origin[1] + direction[1] * ray_length,
+                    self._base_z_m)) for direction in (
+                        rays.left_direction, rays.right_direction))
+                origin_screen = view3d_utils.location_3d_to_region_2d(
+                    self._region, self._region_data,
+                    Vector((*rays.origin, self._base_z_m)))
+                guide_screen = tuple(view3d_utils.location_3d_to_region_2d(
+                    self._region, self._region_data, point)
+                                     for point in guide_world)
+                if origin_screen is not None and all(
+                        point is not None for point in guide_screen):
+                    shader.uniform_float("color", (0.2, 0.8, 1.0, 0.55))
+                    batch_for_shader(shader, "LINES", {"pos": (
+                        origin_screen, guide_screen[0],
+                        origin_screen, guide_screen[1])}).draw(shader)
             gpu.state.point_size_set(8.0)
             batch_for_shader(shader, "POINTS", {"pos": screen_points}).draw(shader)
             blf.position(0, start.x + 6, start.y + 6, 0)
@@ -578,7 +734,8 @@ class JHM_OT_edit_stair_dimensions(_StairOperationMixin, bpy.types.Operator):
         for name in _CANONICAL_NAMES:
             if name != "ascent_direction":
                 candidate[name] = getattr(self, name)
-        if candidate.get("stair_schema_version") == MULTIPOINT_SCHEMA_VERSION:
+        if (candidate.get("stair_schema_version") == MULTIPOINT_SCHEMA_VERSION
+                and candidate.get("riser_distribution_mode") == RISER_DISTRIBUTION_AUTO):
             candidate["auto_riser_allocation"] = None
         return self._run_candidate(context, candidate)
 
@@ -593,6 +750,15 @@ class JHM_OT_edit_stair_path(_StairOperationMixin, bpy.types.Operator):
     p0_y_mm: bpy.props.FloatProperty(name="P0 Y (mm)")
     p1_x_mm: bpy.props.FloatProperty(name="P1 X (mm)")
     p1_y_mm: bpy.props.FloatProperty(name="P1 Y (mm)")
+    p2_x_mm: bpy.props.FloatProperty(name="P2 X (mm)")
+    p2_y_mm: bpy.props.FloatProperty(name="P2 Y (mm)")
+
+    def draw(self, _context):
+        count = getattr(self, "_point_count", 2)
+        for index in range(count):
+            row = self.layout.row(align=True)
+            row.prop(self, f"p{index}_x_mm")
+            row.prop(self, f"p{index}_y_mm")
 
     def invoke(self, context, _event):
         obj = self._require_allowed(context)
@@ -601,6 +767,9 @@ class JHM_OT_edit_stair_path(_StairOperationMixin, bpy.types.Operator):
         points = tuple(tuple(point.xy) for point in obj.jhm_stair.path_points)
         self.p0_x_mm, self.p0_y_mm = (value * 1000.0 for value in points[0])
         self.p1_x_mm, self.p1_y_mm = (value * 1000.0 for value in points[1])
+        self._point_count = len(points)
+        if len(points) > 2:
+            self.p2_x_mm, self.p2_y_mm = (value * 1000.0 for value in points[2])
         return context.window_manager.invoke_props_dialog(self)
 
     def execute(self, context):
@@ -608,11 +777,226 @@ class JHM_OT_edit_stair_path(_StairOperationMixin, bpy.types.Operator):
         if obj is None:
             return {"CANCELLED"}
         candidate = _canonical_snapshot(obj.jhm_stair)
-        candidate["path_points"] = (
+        points = [
             (self.p0_x_mm / 1000.0, self.p0_y_mm / 1000.0),
             (self.p1_x_mm / 1000.0, self.p1_y_mm / 1000.0),
-        )
+        ]
+        if candidate.get("stair_schema_version") == MULTIPOINT_SCHEMA_VERSION:
+            points.append((self.p2_x_mm / 1000.0, self.p2_y_mm / 1000.0))
+            if candidate.get("riser_distribution_mode") == RISER_DISTRIBUTION_AUTO:
+                candidate["auto_riser_allocation"] = None
+        candidate["path_points"] = tuple(points)
         return self._run_candidate(context, candidate)
+
+
+class JHM_OT_edit_stair_distribution(_StairOperationMixin, bpy.types.Operator):
+    bl_idname = "jhm.edit_stair_distribution"
+    bl_label = "Riser Distributionを変更"
+    bl_options = {"REGISTER", "UNDO"}
+    operation = "EDIT_DIMENSIONS"
+
+    mode: bpy.props.EnumProperty(name="Riser Distribution", items=(
+        ("AUTO", "AUTO", "Pathから自動配分"),
+        ("MANUAL", "MANUAL", "physical Flightごとの固定配分")))
+    flight_1: bpy.props.IntProperty(name="Flight 1 Risers", min=2)
+    flight_2: bpy.props.IntProperty(name="Flight 2 Risers", min=2)
+
+    def draw(self, _context):
+        self.layout.prop(self, "mode")
+        column = self.layout.column()
+        column.enabled = self.mode == RISER_DISTRIBUTION_MANUAL
+        column.prop(self, "flight_1")
+        column.prop(self, "flight_2")
+        column.label(text=f"Total = {self.flight_1 + self.flight_2} / {self._overall}")
+
+    def invoke(self, context, _event):
+        obj = self._require_allowed(context)
+        if obj is None or obj.jhm_stair.stair_schema_version != 4:
+            return {"CANCELLED"}
+        candidate = _canonical_snapshot(obj.jhm_stair)
+        self.mode = candidate["riser_distribution_mode"]
+        values = multiflight.distribution_edit_initial_allocation(
+            self.mode, candidate.get("auto_riser_allocation"),
+            candidate.get("manual_riser_allocation"))
+        self.flight_1, self.flight_2 = values
+        self._overall = candidate["riser_count"]
+        return context.window_manager.invoke_props_dialog(self)
+
+    def execute(self, context):
+        obj = self._require_allowed(context)
+        if obj is None:
+            return {"CANCELLED"}
+        try:
+            candidate = multiflight.prepare_distribution_edit_candidate(
+                _canonical_snapshot(obj.jhm_stair), self.mode,
+                (self.flight_1, self.flight_2))
+        except ValueError as exc:
+            self.report({"ERROR"}, str(exc))
+            return {"CANCELLED"}
+        return self._run_candidate(context, candidate)
+
+
+class JHM_OT_move_stair_path_point(_StairOperationMixin, bpy.types.Operator):
+    """Relocate any schema-4 Path point without touching Object Transform."""
+    bl_idname = "jhm.move_stair_path_point"
+    bl_label = "階段Path点を移動"
+    bl_options = {"REGISTER", "UNDO"}
+    operation = "EDIT_PATH"
+    point_index: bpy.props.IntProperty(options={"HIDDEN"})
+
+    def invoke(self, context, _event):
+        obj = self._require_allowed(context)
+        if (obj is None or obj.jhm_stair.stair_schema_version != 4
+                or not 0 <= self.point_index < len(obj.jhm_stair.path_points)):
+            return {"CANCELLED"}
+        self._object = obj
+        self._snapshot = _canonical_snapshot(obj.jhm_stair)
+        self._area = context.area
+        self._region = next((r for r in context.area.regions if r.type == "WINDOW"), None)
+        self._region_data = context.space_data.region_3d
+        self._candidate = None
+        self._raw_point = None
+        self._draw_handle = bpy.types.SpaceView3D.draw_handler_add(
+            self._draw_preview, (), "WINDOW", "POST_PIXEL")
+        context.window_manager.modal_handler_add(self)
+        return {"RUNNING_MODAL"}
+
+    def _finish_move(self, result):
+        if getattr(self, "_draw_handle", None) is not None:
+            bpy.types.SpaceView3D.draw_handler_remove(self._draw_handle, "WINDOW")
+            self._draw_handle = None
+        if getattr(self, "_area", None) is not None:
+            self._area.tag_redraw()
+        return result
+
+    def _point(self, event):
+        coordinate = (event.mouse_x - self._region.x, event.mouse_y - self._region.y)
+        origin = view3d_utils.region_2d_to_origin_3d(
+            self._region, self._region_data, coordinate)
+        direction = view3d_utils.region_2d_to_vector_3d(
+            self._region, self._region_data, coordinate)
+        if abs(direction.z) <= _PLANE_EPSILON:
+            return None
+        distance = (self._snapshot["base_z_mm"] / 1000.0 - origin.z) / direction.z
+        if distance < 0.0:
+            return None
+        point = origin + direction * distance
+        return point.x, point.y
+
+    def _guide_candidates(self, context, event, raw):
+        points = self._snapshot["path_points"]
+        index = self.point_index
+        candidates, names = [], []
+        try:
+            candidate = (endpoint_right_angle_candidate(points, index, raw)
+                         if index in (0, len(points) - 1) else
+                         turn_right_angle_candidate(points, raw))
+            candidates.append(candidate)
+            names.append("RIGHT_ANGLE")
+        except ValueError:
+            pass
+        references = tuple(point for i, point in enumerate(points) if i != index)
+        references += _visible_wall_endpoint_coordinates(context)
+        for candidate in aligned_candidates(raw, references):
+            candidates.append(candidate)
+            names.append("AXIS_ALIGNMENT")
+        adjacent = []
+        if index > 0:
+            adjacent.append((points[index - 1], points[index]))
+        if index + 1 < len(points):
+            adjacent.append((points[index], points[index + 1]))
+        for start, end in adjacent:
+            candidate = project_to_line(raw, start, end)
+            if candidate is not None:
+                candidates.append(candidate)
+                names.append("SEGMENT_EXTENSION")
+        # Relevant parallel foundations use every non-adjacent canonical
+        # segment through the canonical primary anchor.
+        anchor_index = 1 if index == 0 else index - 1
+        anchor = points[anchor_index]
+        for start, end in zip(points, points[1:]):
+            vector = end[0] - start[0], end[1] - start[1]
+            candidate = project_to_line(
+                raw, anchor, (anchor[0] + vector[0], anchor[1] + vector[1]))
+            if candidate is not None:
+                candidates.append(candidate)
+                names.append("PARALLEL")
+        coordinate = (event.mouse_x - self._region.x,
+                      event.mouse_y - self._region.y)
+        z = self._snapshot["base_z_mm"] / 1000.0
+        distances = tuple(_candidate_pixel_distance(
+            self._region, self._region_data, coordinate, point, z)
+                          for point in candidates)
+        return tuple(candidates), distances, tuple(names)
+
+    def _draw_preview(self):
+        if self._candidate is None:
+            return
+        try:
+            z = self._snapshot["base_z_mm"] / 1000.0
+            current = tuple(view3d_utils.location_3d_to_region_2d(
+                self._region, self._region_data, Vector((*point, z)))
+                            for point in self._snapshot["path_points"])
+            candidate = tuple(view3d_utils.location_3d_to_region_2d(
+                self._region, self._region_data, Vector((*point, z)))
+                              for point in self._candidate.points)
+            if any(point is None for point in current + candidate):
+                return
+            shader = gpu.shader.from_builtin("UNIFORM_COLOR")
+            shader.bind()
+            gpu.state.line_width_set(2.0)
+            shader.uniform_float("color", (0.45, 0.45, 0.45, 0.9))
+            batch_for_shader(shader, "LINE_STRIP", {"pos": current}).draw(shader)
+            shader.uniform_float("color", (0.1, 0.75, 1.0, 1.0))
+            batch_for_shader(shader, "LINE_STRIP", {"pos": candidate}).draw(shader)
+            moving = candidate[self.point_index]
+            gpu.state.point_size_set(9.0)
+            shader.uniform_float("color", (1.0, 0.75, 0.1, 1.0))
+            batch_for_shader(shader, "POINTS", {"pos": (moving,)}).draw(shader)
+            if self._raw_point is not None:
+                raw = view3d_utils.location_3d_to_region_2d(
+                    self._region, self._region_data,
+                    Vector((*self._raw_point, z)))
+                if raw is not None:
+                    batch_for_shader(shader, "LINES",
+                                     {"pos": (raw, moving)}).draw(shader)
+            blf.position(0, moving.x + 8, moving.y + 8, 0)
+            blf.draw(0, self._candidate.guide)
+        finally:
+            gpu.state.line_width_set(1.0)
+            gpu.state.point_size_set(1.0)
+
+    def modal(self, context, event):
+        if event.type in {"ESC", "RIGHTMOUSE"}:
+            return self._finish_move({"CANCELLED"})
+        if event.type in {"MOUSEMOVE", "LEFTMOUSE"}:
+            raw = self._point(event)
+            if raw is None:
+                return {"RUNNING_MODAL"}
+            self._raw_point = raw
+            guides, distances, names = self._guide_candidates(context, event, raw)
+            try:
+                self._candidate = resolve_move_candidate(
+                    self._snapshot["path_points"], self._snapshot["point_ids"],
+                    self.point_index, raw, shift=event.shift,
+                    guide_candidates=guides, distances=distances,
+                    guide_names=names, threshold_px=GUIDE_THRESHOLD_PX)
+            except ValueError as exc:
+                self._candidate = None
+                if event.type == "LEFTMOUSE":
+                    self.report({"WARNING"}, str(exc))
+                return {"RUNNING_MODAL"}
+            if event.type == "MOUSEMOVE":
+                self._area.tag_redraw()
+                return {"RUNNING_MODAL"}
+            if event.value == "PRESS":
+                candidate = dict(self._snapshot)
+                candidate["path_points"] = self._candidate.points
+                if candidate["riser_distribution_mode"] == RISER_DISTRIBUTION_AUTO:
+                    candidate["auto_riser_allocation"] = None
+                result = self._run_candidate(context, candidate)
+                return self._finish_move(result)
+        return {"RUNNING_MODAL"}
 
 
 class JHM_OT_reverse_stair_ascent(_StairOperationMixin, bpy.types.Operator):
