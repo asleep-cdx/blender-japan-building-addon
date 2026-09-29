@@ -165,4 +165,4 @@ def topology(o=None):
 
 ## 最終記録
 
-各Testについて PASS/FAIL、`.blend`名、Candidate identity、Console出力、必要なスクリーンショットを記録する。Test 1～15がすべてPASSするまでBuild 07-D overallをACCEPTEDへ更新せず、Runtime Candidate ZIP / ACCEPTED ZIPを作成しない。
+Runtime Candidate ZIPは、runtime test開始前にexact PR revisionから作成する。各Testについて PASS/FAIL、`.blend`名、Candidate identity、Console出力、必要なスクリーンショットを記録する。Test 1～15がすべてPASSするまでBuild 07-D overallをACCEPTEDへ更新しない。ACCEPTED ZIP / ACCEPTED_REPO ZIPは、全runtime test PASS後のみ作成する。
