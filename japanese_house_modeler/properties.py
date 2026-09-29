@@ -51,7 +51,8 @@ class JHM_NewStairDefaults(bpy.types.PropertyGroup):
     path_shape: bpy.props.EnumProperty(
         name="Path形状",
         items=(("STRAIGHT", "Straight", "従来の2-click直階段"),
-               ("L", "L", "3-clickの90度L字階段")),
+               ("L", "L", "3-clickの90度L字階段"),
+               ("U", "U", "4-clickの平行反対向きU字階段")),
         default="STRAIGHT")
 
 

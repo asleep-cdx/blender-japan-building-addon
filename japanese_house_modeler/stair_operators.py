@@ -19,6 +19,7 @@ from . import stair_multiflight as multiflight
 from .stair_guides import (
     GUIDE_THRESHOLD_PX, aligned_candidates, endpoint_right_angle_candidate,
     creation_right_angle_guide_rays, project_to_line,
+    move_persistent_guides, move_point_semantic_label,
     resolve_creation_candidate, resolve_move_candidate,
     turn_right_angle_candidate,
 )
@@ -369,9 +370,10 @@ class JHM_OT_create_stair(bpy.types.Operator):
         }
         self._base_z_m = self._stair_defaults["base_z_mm"] / 1000.0
         self._points = []
-        self._creation_point_ids = tuple(
-            multiflight.generate_path_point_id() for _unused in range(3))
         self._path_shape = defaults.path_shape
+        self._creation_point_ids = tuple(
+            multiflight.generate_path_point_id() for _unused in range(
+                4 if self._path_shape == "U" else 3))
         self._start_point = None
         self._candidate = None
         self._raw_creation_point = None
@@ -402,7 +404,7 @@ class JHM_OT_create_stair(bpy.types.Operator):
                 if point is None:
                     self.report({"WARNING"}, "90度L candidateを解決できません。")
                     return {"RUNNING_MODAL"}
-                required = 2 if self._path_shape == "STRAIGHT" else 3
+                required = {"STRAIGHT": 2, "L": 3, "U": 4}[self._path_shape]
                 if not self._points:
                     self._start_point = point
                 self._points.append(point)
@@ -503,7 +505,8 @@ class JHM_OT_create_stair(bpy.types.Operator):
             return None
         if self._points:
             anchor = self._points[-1]
-            if event.shift and (self._path_shape != "L" or len(self._points) < 2):
+            if event.shift and (self._path_shape not in {"L", "U"}
+                                or len(self._points) < 2):
                 direction = constrained_direction(anchor, point, step_degrees=15.0)
                 if direction is None:
                     return None
@@ -511,6 +514,28 @@ class JHM_OT_create_stair(bpy.types.Operator):
                 point = Vector((anchor.x + direction[0] * length,
                                 anchor.y + direction[1] * length,
                                 self._base_z_m))
+        if self._path_shape == "U" and len(self._points) >= 2:
+            previous = self._points[-2]
+            anchor = self._points[-1]
+            axis = (anchor.x - previous.x, anchor.y - previous.y)
+            length = math.hypot(*axis)
+            if length <= 1.0e-6:
+                return None
+            normal = (-axis[1] / length, axis[0] / length)
+            delta = (point.x - anchor.x, point.y - anchor.y)
+            signed = delta[0] * normal[0] + delta[1] * normal[1]
+            if abs(signed) <= 1.0e-6:
+                return None
+            # At P3 prefer the ray opposite the first Flight when the mouse is
+            # ambiguous; projection is in the first-flight local frame.
+            if len(self._points) == 3:
+                first = (self._points[1].x - self._points[0].x,
+                         self._points[1].y - self._points[0].y)
+                candidate = (normal[0] * signed, normal[1] * signed)
+                if candidate[0] * first[0] + candidate[1] * first[1] > 0:
+                    signed = -signed
+            return Vector((anchor.x + normal[0] * signed,
+                           anchor.y + normal[1] * signed, self._base_z_m))
         if self._path_shape != "L" or len(self._points) != 2:
             return point
         candidates, distances, names = self._creation_guides(context, event, point)
@@ -549,7 +574,7 @@ class JHM_OT_create_stair(bpy.types.Operator):
             stair = stair_object.jhm_stair
             stair.is_stair = True
             stair.stair_id = generate_stair_id()
-            schema4 = self._path_shape == "L"
+            schema4 = self._path_shape in {"L", "U"}
             for index, (x, y) in enumerate(path):
                 item = stair.path_points.add()
                 item.xy = (x, y)
@@ -752,6 +777,8 @@ class JHM_OT_edit_stair_path(_StairOperationMixin, bpy.types.Operator):
     p1_y_mm: bpy.props.FloatProperty(name="P1 Y (mm)")
     p2_x_mm: bpy.props.FloatProperty(name="P2 X (mm)")
     p2_y_mm: bpy.props.FloatProperty(name="P2 Y (mm)")
+    p3_x_mm: bpy.props.FloatProperty(name="P3 X (mm)")
+    p3_y_mm: bpy.props.FloatProperty(name="P3 Y (mm)")
 
     def draw(self, _context):
         count = getattr(self, "_point_count", 2)
@@ -770,6 +797,8 @@ class JHM_OT_edit_stair_path(_StairOperationMixin, bpy.types.Operator):
         self._point_count = len(points)
         if len(points) > 2:
             self.p2_x_mm, self.p2_y_mm = (value * 1000.0 for value in points[2])
+        if len(points) > 3:
+            self.p3_x_mm, self.p3_y_mm = (value * 1000.0 for value in points[3])
         return context.window_manager.invoke_props_dialog(self)
 
     def execute(self, context):
@@ -783,6 +812,8 @@ class JHM_OT_edit_stair_path(_StairOperationMixin, bpy.types.Operator):
         ]
         if candidate.get("stair_schema_version") == MULTIPOINT_SCHEMA_VERSION:
             points.append((self.p2_x_mm / 1000.0, self.p2_y_mm / 1000.0))
+            if self._point_count > 3:
+                points.append((self.p3_x_mm / 1000.0, self.p3_y_mm / 1000.0))
             if candidate.get("riser_distribution_mode") == RISER_DISTRIBUTION_AUTO:
                 candidate["auto_riser_allocation"] = None
         candidate["path_points"] = tuple(points)
@@ -800,6 +831,7 @@ class JHM_OT_edit_stair_distribution(_StairOperationMixin, bpy.types.Operator):
         ("MANUAL", "MANUAL", "physical Flightごとの固定配分")))
     flight_1: bpy.props.IntProperty(name="Flight 1 Risers", min=2)
     flight_2: bpy.props.IntProperty(name="Flight 2 Risers", min=2)
+    flight_3: bpy.props.IntProperty(name="Flight 3 Risers", min=2)
 
     def draw(self, _context):
         self.layout.prop(self, "mode")
@@ -807,7 +839,10 @@ class JHM_OT_edit_stair_distribution(_StairOperationMixin, bpy.types.Operator):
         column.enabled = self.mode == RISER_DISTRIBUTION_MANUAL
         column.prop(self, "flight_1")
         column.prop(self, "flight_2")
-        column.label(text=f"Total = {self.flight_1 + self.flight_2} / {self._overall}")
+        if self._flight_count > 2:
+            column.prop(self, "flight_3")
+        total = self.flight_1 + self.flight_2 + (self.flight_3 if self._flight_count > 2 else 0)
+        column.label(text=f"Total = {total} / {self._overall}")
 
     def invoke(self, context, _event):
         obj = self._require_allowed(context)
@@ -818,7 +853,10 @@ class JHM_OT_edit_stair_distribution(_StairOperationMixin, bpy.types.Operator):
         values = multiflight.distribution_edit_initial_allocation(
             self.mode, candidate.get("auto_riser_allocation"),
             candidate.get("manual_riser_allocation"))
-        self.flight_1, self.flight_2 = values
+        self._flight_count = len(values)
+        self.flight_1, self.flight_2 = values[:2]
+        if len(values) > 2:
+            self.flight_3 = values[2]
         self._overall = candidate["riser_count"]
         return context.window_manager.invoke_props_dialog(self)
 
@@ -829,7 +867,8 @@ class JHM_OT_edit_stair_distribution(_StairOperationMixin, bpy.types.Operator):
         try:
             candidate = multiflight.prepare_distribution_edit_candidate(
                 _canonical_snapshot(obj.jhm_stair), self.mode,
-                (self.flight_1, self.flight_2))
+                ((self.flight_1, self.flight_2, self.flight_3)
+                 if self._flight_count > 2 else (self.flight_1, self.flight_2)))
         except ValueError as exc:
             self.report({"ERROR"}, str(exc))
             return {"CANCELLED"}
@@ -856,9 +895,12 @@ class JHM_OT_move_stair_path_point(_StairOperationMixin, bpy.types.Operator):
         self._region_data = context.space_data.region_3d
         self._candidate = None
         self._raw_point = None
+        self._persistent_guides = move_persistent_guides(
+            self._snapshot["path_points"], self.point_index)
         self._draw_handle = bpy.types.SpaceView3D.draw_handler_add(
             self._draw_preview, (), "WINDOW", "POST_PIXEL")
         context.window_manager.modal_handler_add(self)
+        self._area.tag_redraw()
         return {"RUNNING_MODAL"}
 
     def _finish_move(self, result):
@@ -895,6 +937,14 @@ class JHM_OT_move_stair_path_point(_StairOperationMixin, bpy.types.Operator):
             names.append("RIGHT_ANGLE")
         except ValueError:
             pass
+        if index in (0, len(points) - 1):
+            coordinate = (event.mouse_x - self._region.x,
+                          event.mouse_y - self._region.y)
+            z = self._snapshot["base_z_mm"] / 1000.0
+            distances = tuple(_candidate_pixel_distance(
+                self._region, self._region_data, coordinate, point, z)
+                              for point in candidates)
+            return tuple(candidates), distances, tuple(names)
         references = tuple(point for i, point in enumerate(points) if i != index)
         references += _visible_wall_endpoint_coordinates(context)
         for candidate in aligned_candidates(raw, references):
@@ -930,23 +980,49 @@ class JHM_OT_move_stair_path_point(_StairOperationMixin, bpy.types.Operator):
         return tuple(candidates), distances, tuple(names)
 
     def _draw_preview(self):
-        if self._candidate is None:
-            return
         try:
             z = self._snapshot["base_z_mm"] / 1000.0
             current = tuple(view3d_utils.location_3d_to_region_2d(
                 self._region, self._region_data, Vector((*point, z)))
                             for point in self._snapshot["path_points"])
-            candidate = tuple(view3d_utils.location_3d_to_region_2d(
-                self._region, self._region_data, Vector((*point, z)))
-                              for point in self._candidate.points)
-            if any(point is None for point in current + candidate):
+            if any(point is None for point in current):
                 return
             shader = gpu.shader.from_builtin("UNIFORM_COLOR")
             shader.bind()
             gpu.state.line_width_set(2.0)
             shader.uniform_float("color", (0.45, 0.45, 0.45, 0.9))
             batch_for_shader(shader, "LINE_STRIP", {"pos": current}).draw(shader)
+            points = self._snapshot["path_points"]
+            adjacent_lengths = [math.hypot(points[self.point_index][0] - point[0],
+                                           points[self.point_index][1] - point[1])
+                                for index, point in enumerate(points)
+                                if abs(index - self.point_index) == 1]
+            raw_distance = (0.0 if self._raw_point is None else math.hypot(
+                self._raw_point[0] - points[self.point_index][0],
+                self._raw_point[1] - points[self.point_index][1]))
+            length = max((1.0, raw_distance,
+                          *(value * 1.5 for value in adjacent_lengths)))
+            guide_screen = []
+            for guide in self._persistent_guides:
+                for x, y in (guide.origin,
+                             (guide.origin[0] + length * guide.direction[0],
+                              guide.origin[1] + length * guide.direction[1])):
+                    guide_screen.append(view3d_utils.location_3d_to_region_2d(
+                        self._region, self._region_data, Vector((x, y, z))))
+            if guide_screen and all(point is not None for point in guide_screen):
+                shader.uniform_float("color", (0.2, 0.8, 1.0, 0.45))
+                batch_for_shader(shader, "LINES", {"pos": guide_screen}).draw(shader)
+            target = current[self.point_index]
+            gpu.state.point_size_set(7.0)
+            shader.uniform_float("color", (0.2, 0.8, 1.0, 0.9))
+            batch_for_shader(shader, "POINTS", {"pos": (target,)}).draw(shader)
+            if self._candidate is None:
+                return
+            candidate = tuple(view3d_utils.location_3d_to_region_2d(
+                self._region, self._region_data, Vector((*point, z)))
+                              for point in self._candidate.points)
+            if any(point is None for point in candidate):
+                return
             shader.uniform_float("color", (0.1, 0.75, 1.0, 1.0))
             batch_for_shader(shader, "LINE_STRIP", {"pos": candidate}).draw(shader)
             moving = candidate[self.point_index]
@@ -961,7 +1037,8 @@ class JHM_OT_move_stair_path_point(_StairOperationMixin, bpy.types.Operator):
                     batch_for_shader(shader, "LINES",
                                      {"pos": (raw, moving)}).draw(shader)
             blf.position(0, moving.x + 8, moving.y + 8, 0)
-            blf.draw(0, self._candidate.guide)
+            blf.draw(0, move_point_semantic_label(
+                len(self._snapshot["path_points"]), self.point_index))
         finally:
             gpu.state.line_width_set(1.0)
             gpu.state.point_size_set(1.0)
@@ -983,8 +1060,12 @@ class JHM_OT_move_stair_path_point(_StairOperationMixin, bpy.types.Operator):
                     guide_names=names, threshold_px=GUIDE_THRESHOLD_PX)
             except ValueError as exc:
                 self._candidate = None
+                self._area.tag_redraw()
                 if event.type == "LEFTMOUSE":
-                    self.report({"WARNING"}, str(exc))
+                    message = ("この折れ点は他のPath点を固定したままでは90度条件を維持して移動できません。"
+                               if self.point_index not in (0, len(self._snapshot["path_points"]) - 1)
+                               else str(exc))
+                    self.report({"WARNING"}, message)
                 return {"RUNNING_MODAL"}
             if event.type == "MOUSEMOVE":
                 self._area.tag_redraw()
