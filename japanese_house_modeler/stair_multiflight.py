@@ -49,11 +49,25 @@ class FlightLayout:
 
 @dataclass(frozen=True)
 class LandingLayout:
+    canonical_turn_index: int
     turn_point_id: str
     center_xy: tuple
     top_z: float
     thickness: float
+    incoming_flight_index: int
+    outgoing_flight_index: int
+    chirality: str
     material_role: str = "TREAD"
+
+
+@dataclass(frozen=True)
+class TurnContext:
+    turn_index: int
+    landing: LandingLayout
+    incoming_flight: FlightLayout
+    outgoing_flight: FlightLayout
+    cross: float
+    point_id: str
 
 
 @dataclass(frozen=True)
@@ -62,7 +76,7 @@ class MultiFlightLayout:
     traversal_point_ids: tuple
     ascent_direction: str
     flights: tuple
-    landing: LandingLayout
+    landings: tuple
     allocation: tuple
     actual_riser: float
     base_z: float
@@ -70,6 +84,26 @@ class MultiFlightLayout:
     width: float
     tread_thickness: float
     riser_thickness: float
+
+    @property
+    def landing(self):
+        """Stage-2 compatibility view for the one-turn L implementation."""
+        if len(self.landings) != 1:
+            raise AttributeError("multiple-turn layout has no singular landing")
+        return self.landings[0]
+
+    @property
+    def turns(self):
+        by_canonical = {flight.canonical_index: flight for flight in self.flights}
+        return tuple(TurnContext(
+            landing.canonical_turn_index - 1, landing,
+            by_canonical[landing.incoming_flight_index],
+            by_canonical[landing.outgoing_flight_index],
+            (by_canonical[landing.incoming_flight_index].forward[0]
+             * by_canonical[landing.outgoing_flight_index].forward[1]
+             - by_canonical[landing.incoming_flight_index].forward[1]
+             * by_canonical[landing.outgoing_flight_index].forward[0]),
+            landing.turn_point_id) for landing in self.landings)
 
     @property
     def actual_riser_mm(self):
@@ -152,7 +186,9 @@ def prepare_distribution_edit_candidate(snapshot, mode, manual_allocation):
     old_mode = candidate["riser_distribution_mode"]
     if mode == RISER_DISTRIBUTION_MANUAL:
         values = validate_manual_allocation(
-            manual_allocation, candidate["riser_count"])
+            manual_allocation, candidate["riser_count"],
+            (len(candidate["path_points"]) - 1
+             if "path_points" in candidate else len(tuple(manual_allocation))))
         candidate["manual_riser_allocation"] = values
     elif mode == RISER_DISTRIBUTION_AUTO:
         if old_mode == RISER_DISTRIBUTION_MANUAL:
@@ -197,11 +233,9 @@ def project_l_creation_candidate(p0, p1, raw_p2):
 
 
 def canonical_multi_path(points, point_ids=None):
-    """Validate the Stage 1 three-point, right-angle L canonical path."""
-    if points is None or len(points) < 2:
-        raise ValueError("Multi-point Pathには2点以上が必要です。")
-    if len(points) != 3:
-        raise ValueError("Stage 1 L Pathは正確に3点である必要があります。")
+    """Validate an ordered schema-4 N-point orthogonal canonical path."""
+    if points is None or len(points) < 3:
+        raise ValueError("schema 4 Multi-point Pathには3点以上が必要です。")
     converted = []
     for point in points:
         if point is None or len(point) < 2:
@@ -218,11 +252,13 @@ def canonical_multi_path(points, point_ids=None):
             raise ValueError("Pathに重複または短すぎる隣接点があります。")
         vectors.append(vector)
         lengths.append(length)
-    dot = vectors[0][0] * vectors[1][0] + vectors[0][1] * vectors[1][1]
-    cross = vectors[0][0] * vectors[1][1] - vectors[0][1] * vectors[1][0]
-    tolerance = max(lengths[0] * lengths[1] * 1.0e-6, 1.0e-12)
-    if abs(dot) > tolerance or abs(cross) <= tolerance:
-        raise ValueError("Stage 1 Landingは90度のL Turnのみ対応します。")
+    for first, second, la, lb in zip(vectors, vectors[1:], lengths, lengths[1:]):
+        dot = first[0] * second[0] + first[1] * second[1]
+        cross = first[0] * second[1] - first[1] * second[0]
+        tolerance = max(la * lb * 1.0e-6, 1.0e-12)
+        if abs(dot) > tolerance or abs(cross) <= tolerance:
+            raise ValueError("Landingは正確な90度Turnのみ対応します。")
+    _validate_no_self_intersection(converted)
     if point_ids is None:
         ids = tuple(generate_path_point_id() for _ in converted)
     else:
@@ -232,6 +268,35 @@ def canonical_multi_path(points, point_ids=None):
         if len(set(ids)) != len(ids):
             raise ValueError("Path point identityは一意である必要があります。")
     return tuple(PathPoint(identity, xy) for identity, xy in zip(ids, converted))
+
+
+def _validate_no_self_intersection(points):
+    """Reject crossing, touching, or overlapping non-adjacent path segments."""
+    def orientation(a, b, c):
+        return ((b[0] - a[0]) * (c[1] - a[1])
+                - (b[1] - a[1]) * (c[0] - a[0]))
+
+    def on_segment(a, b, p):
+        return (abs(orientation(a, b, p)) <= _EPSILON
+                and min(a[0], b[0]) - _EPSILON <= p[0] <= max(a[0], b[0]) + _EPSILON
+                and min(a[1], b[1]) - _EPSILON <= p[1] <= max(a[1], b[1]) + _EPSILON)
+
+    def intersects(a, b, c, d):
+        oa, ob, oc, od = (orientation(a, b, c), orientation(a, b, d),
+                          orientation(c, d, a), orientation(c, d, b))
+        if ((oa > _EPSILON and ob < -_EPSILON or oa < -_EPSILON and ob > _EPSILON)
+                and (oc > _EPSILON and od < -_EPSILON or oc < -_EPSILON and od > _EPSILON)):
+            return True
+        return ((abs(oa) <= _EPSILON and on_segment(a, b, c))
+                or (abs(ob) <= _EPSILON and on_segment(a, b, d))
+                or (abs(oc) <= _EPSILON and on_segment(c, d, a))
+                or (abs(od) <= _EPSILON and on_segment(c, d, b)))
+
+    segments = tuple(zip(points, points[1:]))
+    for i, (a, b) in enumerate(segments):
+        for j in range(i + 2, len(segments)):
+            if intersects(a, b, *segments[j]):
+                raise ValueError("Pathの非隣接segmentが交差または重複しています。")
 
 
 def auto_distribute_risers(effective_runs, overall_riser_count):
@@ -283,12 +348,15 @@ def resolve_multiflight_layout(points, ascent_direction, base_z_mm,
     riser_thickness = _positive_mm(riser_thickness_mm, "蹴込み板厚")
     raw_lengths = tuple(math.hypot(b.xy[0] - a.xy[0], b.xy[1] - a.xy[1])
                         for a, b in zip(path, path[1:]))
-    effective_runs = tuple(length - width / 2.0 for length in raw_lengths)
+    effective_runs = tuple(
+        length - (width / 2.0 if index > 0 else 0.0)
+        - (width / 2.0 if index < len(raw_lengths) - 1 else 0.0)
+        for index, length in enumerate(raw_lengths))
     if any(value <= _EPSILON for value in effective_runs):
         raise ValueError("Landing cutback後のFlight長が不足しています。")
     resolved = (auto_distribute_risers(effective_runs, riser_count)
                 if allocation is None else tuple(int(value) for value in allocation))
-    if (len(resolved) != 2 or any(value < 2 for value in resolved)
+    if (len(resolved) != len(raw_lengths) or any(value < 2 for value in resolved)
             or sum(resolved) != int(riser_count)):
         raise ValueError("保存されたAUTO蹴上配分が不正です。")
     actual_riser = floor_height / int(riser_count)
@@ -296,10 +364,10 @@ def resolve_multiflight_layout(points, ascent_direction, base_z_mm,
         raise ValueError("踏板厚は実蹴上より小さくする必要があります。")
     if ascent_direction == "FORWARD":
         traversal = path
-        traversal_indices = (0, 1)
+        traversal_indices = tuple(range(len(raw_lengths)))
     elif ascent_direction == "REVERSE":
         traversal = tuple(reversed(path))
-        traversal_indices = (1, 0)
+        traversal_indices = tuple(reversed(range(len(raw_lengths))))
     else:
         raise ValueError("不明な上り方向です。")
     flights, cumulative = [], 0
@@ -314,25 +382,37 @@ def resolve_multiflight_layout(points, ascent_direction, base_z_mm,
         raw_length = math.hypot(raw_dx, raw_dy)
         forward = (raw_dx / raw_length, raw_dy / raw_length)
         flight_start = start.xy
-        flight_end = (end.xy[0] - forward[0] * width / 2.0,
-                      end.xy[1] - forward[1] * width / 2.0)
-        if position == 1:
+        flight_end = end.xy
+        if start.point_id not in (path[0].point_id, path[-1].point_id):
             flight_start = (start.xy[0] + forward[0] * width / 2.0,
                             start.xy[1] + forward[1] * width / 2.0)
-            flight_end = end.xy
+        if end.point_id not in (path[0].point_id, path[-1].point_id):
+            flight_end = (end.xy[0] - forward[0] * width / 2.0,
+                          end.xy[1] - forward[1] * width / 2.0)
         start_z = base_z + cumulative * actual_riser
         cumulative += count
         flights.append(FlightLayout(
             canonical_index, flight_start, flight_end, forward,
             (-forward[1], forward[0]), run, count, count - 1, going,
             start_z, base_z + cumulative * actual_riser, actual_riser))
-    landing_top = flights[0].end_z
-    landing = LandingLayout(path[1].point_id, path[1].xy, landing_top,
-                            tread_thickness)
+    by_canonical = {flight.canonical_index: flight for flight in flights}
+    landings = tuple(LandingLayout(
+        turn_index, path[turn_index].point_id, path[turn_index].xy,
+        (by_canonical[turn_index - 1].end_z if ascent_direction == "FORWARD"
+         else by_canonical[turn_index].end_z), tread_thickness,
+        turn_index - 1, turn_index,
+        "LEFT" if (vectors_cross(path[turn_index - 1].xy, path[turn_index].xy,
+                                  path[turn_index + 1].xy) > 0) else "RIGHT")
+        for turn_index in range(1, len(path) - 1))
     return MultiFlightLayout(
         path, tuple(item.point_id for item in traversal), ascent_direction,
-        tuple(flights), landing, resolved, actual_riser, base_z,
+        tuple(flights), landings, resolved, actual_riser, base_z,
         base_z + floor_height, width, tread_thickness, riser_thickness)
+
+
+def vectors_cross(a, b, c):
+    return ((b[0] - a[0]) * (c[1] - b[1])
+            - (b[1] - a[1]) * (c[0] - b[0]))
 
 
 def _oriented_box(centerline_start, forward, left, width, x0, x1, z0, z1,
@@ -369,17 +449,18 @@ def build_multiflight_fragments(layout):
             fragments.append(_oriented_box(
                 flight.start_xy, flight.forward, flight.left, layout.width,
                 x, x + layout.riser_thickness, bottom, top, "RISER", ordinal))
-        if flight_index == 0:
+    for landing in layout.landings:
             ordinal += 1
             # The right-angle incoming/outgoing axes form the nominal w x w slab.
-            incoming = layout.flights[0].forward
+            incoming = next(f for f in layout.flights
+                            if f.canonical_index == landing.incoming_flight_index).forward
             landing_left = (-incoming[1], incoming[0])
-            center = layout.landing.center_xy
+            center = landing.center_xy
             fragments.append(_oriented_box(
                 center, incoming, landing_left, layout.width,
                 -layout.width / 2.0, layout.width / 2.0,
-                layout.landing.top_z - layout.landing.thickness,
-                layout.landing.top_z, "TREAD", ordinal))
+                landing.top_z - landing.thickness,
+                landing.top_z, "TREAD", ordinal))
     fragments = tuple(fragments)
     validate_mesh_fragments(fragments)
     return fragments
@@ -839,7 +920,7 @@ def _build_landing_underbody_transition(layout, outgoing_local, fields,
     return result
 
 
-def prepare_multiflight_residential_geometry(
+def _prepare_l_residential_geometry(
         points, ascent_direction, base_z_mm, floor_to_floor_mm, riser_count,
         stair_width_mm, tread_thickness_mm, riser_thickness_mm, *,
         point_ids=None, allocation=None, fields=None):
@@ -941,6 +1022,68 @@ def prepare_multiflight_residential_geometry(
         fragments.append(_build_landing_tread_fragment(layout, values, ordinal))
         fragments.append(_build_landing_underbody_transition(
             layout, locals_[1], values, board_bottom, ordinal + 1))
+    fragments = tuple(fragments)
+    validate_mesh_fragments(fragments)
+    return layout, fragments, assemble_stair_mesh(fragments)
+
+
+def prepare_multiflight_residential_geometry(
+        points, ascent_direction, base_z_mm, floor_to_floor_mm, riser_count,
+        stair_width_mm, tread_thickness_mm, riser_thickness_mm, *,
+        point_ids=None, allocation=None, fields=None):
+    """Prepare Residential schema-4 geometry, preserving the accepted L oracle.
+
+    The three-point route deliberately remains byte-for-byte on the Stage-2
+    implementation.  N-point routes give each physical flight one owner and
+    emit each landing once, avoiding duplicated middle-flight repair geometry.
+    """
+    if len(points) == 3:
+        return _prepare_l_residential_geometry(
+            points, ascent_direction, base_z_mm, floor_to_floor_mm, riser_count,
+            stair_width_mm, tread_thickness_mm, riser_thickness_mm,
+            point_ids=point_ids, allocation=allocation, fields=fields)
+    from .stair_residential import ResidentialFields, residential_fields
+    from .stair_residential_geometry import (
+        build_residential_tread_fragments, build_residential_riser_fragments,
+        build_top_arrival_nosing_fragment, build_underbody_fragment,
+        build_side_board_fragment,
+    )
+    values = (ResidentialFields() if fields is None else fields
+              if isinstance(fields, ResidentialFields) else residential_fields(fields))
+    layout = resolve_multiflight_layout(
+        points, ascent_direction, base_z_mm, floor_to_floor_mm, riser_count,
+        stair_width_mm, tread_thickness_mm, riser_thickness_mm,
+        point_ids=point_ids, allocation=allocation)
+    fragments = []
+    for position, flight in enumerate(layout.flights):
+        local = _flight_stair_layout(flight, layout)
+        fragments.extend(build_residential_tread_fragments(local, values))
+        fragments.extend(build_residential_riser_fragments(local, values))
+        fragments.append(build_underbody_fragment(local, values))
+        if values.left_side_board_enabled:
+            fragments.append(build_side_board_fragment(local, "LEFT", values))
+        if values.right_side_board_enabled:
+            fragments.append(build_side_board_fragment(local, "RIGHT", values))
+        if position == len(layout.flights) - 1:
+            cap = build_top_arrival_nosing_fragment(local, values)
+            if cap is not None:
+                fragments.append(cap)
+    by_canonical = {flight.canonical_index: flight for flight in layout.flights}
+    for landing in layout.landings:
+        incoming = by_canonical[landing.incoming_flight_index]
+        fragments.append(_oriented_box(
+            landing.center_xy, incoming.forward, incoming.left, layout.width,
+            -layout.width / 2.0, layout.width / 2.0,
+            landing.top_z - landing.thickness, landing.top_z,
+            "TREAD", len(fragments) + 1))
+        # Independent horizontal closure; unlike a filler block this is only
+        # the configured thin underside skin and leaves no turn-to-turn wedge.
+        underside = float(values.underside_thickness_mm) / _MM_PER_METRE
+        bottom = landing.top_z - landing.thickness - underside
+        fragments.append(_oriented_box(
+            landing.center_xy, incoming.forward, incoming.left, layout.width,
+            -layout.width / 2.0, layout.width / 2.0, bottom,
+            landing.top_z - landing.thickness, "UNDERBODY", len(fragments) + 1))
     fragments = tuple(fragments)
     validate_mesh_fragments(fragments)
     return layout, fragments, assemble_stair_mesh(fragments)

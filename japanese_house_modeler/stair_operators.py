@@ -369,9 +369,10 @@ class JHM_OT_create_stair(bpy.types.Operator):
         }
         self._base_z_m = self._stair_defaults["base_z_mm"] / 1000.0
         self._points = []
-        self._creation_point_ids = tuple(
-            multiflight.generate_path_point_id() for _unused in range(3))
         self._path_shape = defaults.path_shape
+        self._creation_point_ids = tuple(
+            multiflight.generate_path_point_id() for _unused in range(
+                4 if self._path_shape == "U" else 3))
         self._start_point = None
         self._candidate = None
         self._raw_creation_point = None
@@ -402,7 +403,7 @@ class JHM_OT_create_stair(bpy.types.Operator):
                 if point is None:
                     self.report({"WARNING"}, "90度L candidateを解決できません。")
                     return {"RUNNING_MODAL"}
-                required = 2 if self._path_shape == "STRAIGHT" else 3
+                required = {"STRAIGHT": 2, "L": 3, "U": 4}[self._path_shape]
                 if not self._points:
                     self._start_point = point
                 self._points.append(point)
@@ -503,7 +504,8 @@ class JHM_OT_create_stair(bpy.types.Operator):
             return None
         if self._points:
             anchor = self._points[-1]
-            if event.shift and (self._path_shape != "L" or len(self._points) < 2):
+            if event.shift and (self._path_shape not in {"L", "U"}
+                                or len(self._points) < 2):
                 direction = constrained_direction(anchor, point, step_degrees=15.0)
                 if direction is None:
                     return None
@@ -511,6 +513,28 @@ class JHM_OT_create_stair(bpy.types.Operator):
                 point = Vector((anchor.x + direction[0] * length,
                                 anchor.y + direction[1] * length,
                                 self._base_z_m))
+        if self._path_shape == "U" and len(self._points) >= 2:
+            previous = self._points[-2]
+            anchor = self._points[-1]
+            axis = (anchor.x - previous.x, anchor.y - previous.y)
+            length = math.hypot(*axis)
+            if length <= 1.0e-6:
+                return None
+            normal = (-axis[1] / length, axis[0] / length)
+            delta = (point.x - anchor.x, point.y - anchor.y)
+            signed = delta[0] * normal[0] + delta[1] * normal[1]
+            if abs(signed) <= 1.0e-6:
+                return None
+            # At P3 prefer the ray opposite the first Flight when the mouse is
+            # ambiguous; projection is in the first-flight local frame.
+            if len(self._points) == 3:
+                first = (self._points[1].x - self._points[0].x,
+                         self._points[1].y - self._points[0].y)
+                candidate = (normal[0] * signed, normal[1] * signed)
+                if candidate[0] * first[0] + candidate[1] * first[1] > 0:
+                    signed = -signed
+            return Vector((anchor.x + normal[0] * signed,
+                           anchor.y + normal[1] * signed, self._base_z_m))
         if self._path_shape != "L" or len(self._points) != 2:
             return point
         candidates, distances, names = self._creation_guides(context, event, point)
@@ -549,7 +573,7 @@ class JHM_OT_create_stair(bpy.types.Operator):
             stair = stair_object.jhm_stair
             stair.is_stair = True
             stair.stair_id = generate_stair_id()
-            schema4 = self._path_shape == "L"
+            schema4 = self._path_shape in {"L", "U"}
             for index, (x, y) in enumerate(path):
                 item = stair.path_points.add()
                 item.xy = (x, y)
@@ -752,6 +776,8 @@ class JHM_OT_edit_stair_path(_StairOperationMixin, bpy.types.Operator):
     p1_y_mm: bpy.props.FloatProperty(name="P1 Y (mm)")
     p2_x_mm: bpy.props.FloatProperty(name="P2 X (mm)")
     p2_y_mm: bpy.props.FloatProperty(name="P2 Y (mm)")
+    p3_x_mm: bpy.props.FloatProperty(name="P3 X (mm)")
+    p3_y_mm: bpy.props.FloatProperty(name="P3 Y (mm)")
 
     def draw(self, _context):
         count = getattr(self, "_point_count", 2)
@@ -770,6 +796,8 @@ class JHM_OT_edit_stair_path(_StairOperationMixin, bpy.types.Operator):
         self._point_count = len(points)
         if len(points) > 2:
             self.p2_x_mm, self.p2_y_mm = (value * 1000.0 for value in points[2])
+        if len(points) > 3:
+            self.p3_x_mm, self.p3_y_mm = (value * 1000.0 for value in points[3])
         return context.window_manager.invoke_props_dialog(self)
 
     def execute(self, context):
@@ -783,6 +811,8 @@ class JHM_OT_edit_stair_path(_StairOperationMixin, bpy.types.Operator):
         ]
         if candidate.get("stair_schema_version") == MULTIPOINT_SCHEMA_VERSION:
             points.append((self.p2_x_mm / 1000.0, self.p2_y_mm / 1000.0))
+            if self._point_count > 3:
+                points.append((self.p3_x_mm / 1000.0, self.p3_y_mm / 1000.0))
             if candidate.get("riser_distribution_mode") == RISER_DISTRIBUTION_AUTO:
                 candidate["auto_riser_allocation"] = None
         candidate["path_points"] = tuple(points)
@@ -800,6 +830,7 @@ class JHM_OT_edit_stair_distribution(_StairOperationMixin, bpy.types.Operator):
         ("MANUAL", "MANUAL", "physical Flightごとの固定配分")))
     flight_1: bpy.props.IntProperty(name="Flight 1 Risers", min=2)
     flight_2: bpy.props.IntProperty(name="Flight 2 Risers", min=2)
+    flight_3: bpy.props.IntProperty(name="Flight 3 Risers", min=2)
 
     def draw(self, _context):
         self.layout.prop(self, "mode")
@@ -807,7 +838,10 @@ class JHM_OT_edit_stair_distribution(_StairOperationMixin, bpy.types.Operator):
         column.enabled = self.mode == RISER_DISTRIBUTION_MANUAL
         column.prop(self, "flight_1")
         column.prop(self, "flight_2")
-        column.label(text=f"Total = {self.flight_1 + self.flight_2} / {self._overall}")
+        if self._flight_count > 2:
+            column.prop(self, "flight_3")
+        total = self.flight_1 + self.flight_2 + (self.flight_3 if self._flight_count > 2 else 0)
+        column.label(text=f"Total = {total} / {self._overall}")
 
     def invoke(self, context, _event):
         obj = self._require_allowed(context)
@@ -818,7 +852,10 @@ class JHM_OT_edit_stair_distribution(_StairOperationMixin, bpy.types.Operator):
         values = multiflight.distribution_edit_initial_allocation(
             self.mode, candidate.get("auto_riser_allocation"),
             candidate.get("manual_riser_allocation"))
-        self.flight_1, self.flight_2 = values
+        self._flight_count = len(values)
+        self.flight_1, self.flight_2 = values[:2]
+        if len(values) > 2:
+            self.flight_3 = values[2]
         self._overall = candidate["riser_count"]
         return context.window_manager.invoke_props_dialog(self)
 
@@ -829,7 +866,8 @@ class JHM_OT_edit_stair_distribution(_StairOperationMixin, bpy.types.Operator):
         try:
             candidate = multiflight.prepare_distribution_edit_candidate(
                 _canonical_snapshot(obj.jhm_stair), self.mode,
-                (self.flight_1, self.flight_2))
+                ((self.flight_1, self.flight_2, self.flight_3)
+                 if self._flight_count > 2 else (self.flight_1, self.flight_2)))
         except ValueError as exc:
             self.report({"ERROR"}, str(exc))
             return {"CANCELLED"}

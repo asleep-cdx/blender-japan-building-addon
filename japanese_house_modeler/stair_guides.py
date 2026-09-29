@@ -149,6 +149,36 @@ def resolve_move_candidate(points, point_ids, moved_index, raw_point, *,
     original = tuple(tuple(map(float, p[:2])) for p in points)
     anchor = original[move_anchor_index(len(original), moved_index)]
     raw = tuple(map(float, raw_point[:2]))
+    if len(original) > 3:
+        candidates = []
+        if shift:
+            direction = constrained_direction(anchor, raw, step_degrees=15.0)
+            if direction is not None:
+                distance = math.hypot(raw[0] - anchor[0], raw[1] - anchor[1])
+                candidates.append((0.0, (anchor[0] + direction[0] * distance,
+                                         anchor[1] + direction[1] * distance), "SHIFT"))
+        else:
+            candidates.append((0.0, raw, "FREE"))
+            candidates.extend((float(distance), tuple(point[:2]),
+                               tuple(guide_names)[index]
+                               if index < len(tuple(guide_names)) else "ALIGNMENT")
+                              for index, (distance, point) in enumerate(
+                                  zip(distances, guide_candidates))
+                              if float(distance) <= float(threshold_px))
+        valid = []
+        for distance, point, name in candidates:
+            candidate = list(original)
+            candidate[moved_index] = point
+            try:
+                path = canonical_multi_path(candidate, point_ids)
+            except ValueError:
+                continue
+            valid.append((distance, (tuple(p.xy for p in path), name)))
+        selected = select_unambiguous_candidate(valid)
+        if selected is None:
+            raise ValueError("guide candidateが曖昧またはPath全体条件を満たしません。")
+        resolved, guide = selected
+        return MoveCandidate(resolved, tuple(point_ids), moved_index, guide)
     if shift:
         point = (turn_right_angle_candidate(original, raw, shift=True)
                  if moved_index == 1 else
