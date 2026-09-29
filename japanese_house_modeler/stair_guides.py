@@ -23,6 +23,14 @@ class MoveCandidate:
 
 
 @dataclass(frozen=True)
+class MoveGuideLine:
+    """Raw-independent infinite structural guide in canonical world XY."""
+    name: str
+    origin: tuple
+    direction: tuple
+
+
+@dataclass(frozen=True)
 class RightAngleGuideRays:
     """Persistent visual state for the two valid L-creation directions."""
     origin: tuple
@@ -51,23 +59,77 @@ def move_anchor_index(point_count, moved_index):
     return 1 if moved_index == 0 else moved_index - 1
 
 
-def endpoint_right_angle_candidate(points, moved_index, raw_point):
-    """Project START/END onto its mathematically exact 90-degree locus."""
+def endpoint_right_angle_guide_line(points, moved_index):
+    """Return the exact START/END relocation locus for any N-point path."""
     points = tuple(tuple(map(float, p[:2])) for p in points)
-    if len(points) != 3 or moved_index not in (0, 2):
-        raise ValueError("endpoint 90度guideは3点LのSTART/END専用です。")
-    turn = points[1]
-    fixed = points[2] if moved_index == 0 else points[0]
-    axis = (fixed[0] - turn[0], fixed[1] - turn[1])
+    if len(points) < 3 or moved_index not in (0, len(points) - 1):
+        raise ValueError("endpoint 90度guideには3点以上のSTART/ENDが必要です。")
+    if moved_index == 0:
+        turn, fixed = points[1], points[2]
+    else:
+        turn, fixed = points[-2], points[-3]
+    axis = fixed[0] - turn[0], fixed[1] - turn[1]
     length = math.hypot(*axis)
     if length <= 1.0e-6:
         raise ValueError("90度guideの固定Flightが短すぎます。")
-    normal = (-axis[1] / length, axis[0] / length)
+    return MoveGuideLine(
+        "RIGHT_ANGLE", turn, (-axis[1] / length, axis[0] / length))
+
+
+def endpoint_right_angle_candidate(points, moved_index, raw_point):
+    """Project raw input onto the shared endpoint guide-line authority."""
+    line = endpoint_right_angle_guide_line(points, moved_index)
+    turn, normal = line.origin, line.direction
     delta = (float(raw_point[0]) - turn[0], float(raw_point[1]) - turn[1])
     t = delta[0] * normal[0] + delta[1] * normal[1]
     if abs(t) <= 1.0e-6:
         raise ValueError("90度guide candidateが短すぎます。")
     return turn[0] + t * normal[0], turn[1] + t * normal[1]
+
+
+def _line_from_points(name, start, end):
+    dx, dy = end[0] - start[0], end[1] - start[1]
+    length = math.hypot(dx, dy)
+    if length <= 1.0e-6:
+        return None
+    return MoveGuideLine(name, tuple(start), (dx / length, dy / length))
+
+
+def _same_infinite_line(first, second):
+    cross = first.direction[0] * second.direction[1] - first.direction[1] * second.direction[0]
+    delta = second.origin[0] - first.origin[0], second.origin[1] - first.origin[1]
+    offset = delta[0] * first.direction[1] - delta[1] * first.direction[0]
+    return abs(cross) <= 1.0e-9 and abs(offset) <= 1.0e-9
+
+
+def move_persistent_guides(points, moved_index):
+    """Return structural lines available before raw cursor input exists."""
+    points = tuple(tuple(map(float, point[:2])) for point in points)
+    if len(points) < 3 or not 0 <= moved_index < len(points):
+        raise ValueError("persistent guideのPath point indexが不正です。")
+    guides = []
+    if moved_index in (0, len(points) - 1):
+        guides.append(endpoint_right_angle_guide_line(points, moved_index))
+    for neighbor in (moved_index - 1, moved_index + 1):
+        if 0 <= neighbor < len(points):
+            line = _line_from_points(
+                "SEGMENT_EXTENSION", points[moved_index], points[neighbor])
+            if line is not None:
+                guides.append(line)
+    anchor_index = move_anchor_index(len(points), moved_index)
+    anchor = points[anchor_index]
+    for start, end in zip(points, points[1:]):
+        line = _line_from_points("PARALLEL", anchor,
+                                 (anchor[0] + end[0] - start[0],
+                                  anchor[1] + end[1] - start[1]))
+        if line is not None:
+            guides.append(line)
+    unique = []
+    for guide in guides:
+        if any(_same_infinite_line(guide, saved) for saved in unique):
+            continue
+        unique.append(guide)
+    return tuple(unique)
 
 
 def turn_right_angle_candidate(points, raw_point, *, shift=False):
@@ -119,21 +181,17 @@ def project_to_line(raw_point, line_start, line_end):
 def endpoint_shift_candidate(points, moved_index, raw_point):
     """Solve endpoint Shift and exact-90 simultaneously, never sequentially."""
     points = tuple(tuple(map(float, p[:2])) for p in points)
-    if len(points) != 3 or moved_index not in (0, 2):
-        raise ValueError("Endpoint Shiftは3点LのSTART/END専用です。")
-    anchor = points[1]
+    if len(points) < 3 or moved_index not in (0, len(points) - 1):
+        raise ValueError("Endpoint Shiftには3点以上のSTART/ENDが必要です。")
+    line = endpoint_right_angle_guide_line(points, moved_index)
+    anchor = line.origin
     direction = constrained_direction(anchor, raw_point, step_degrees=15.0)
     if direction is None:
         raise ValueError("Shift方向を解決できません。")
-    fixed = points[2] if moved_index == 0 else points[0]
-    fixed_axis = fixed[0] - anchor[0], fixed[1] - anchor[1]
-    fixed_length = math.hypot(*fixed_axis)
-    if fixed_length <= 1.0e-6:
-        raise ValueError("90度条件の固定Flightが短すぎます。")
     # The rounded ray itself must be the 90-degree locus.  Reprojection after
     # rounding would violate the explicit Shift contract.
-    if abs(direction[0] * fixed_axis[0] + direction[1] * fixed_axis[1]) \
-            > fixed_length * 1.0e-6:
+    if abs(direction[0] * line.direction[1]
+           - direction[1] * line.direction[0]) > 1.0e-6:
         raise ValueError("Shift 15度とLanding 90度を同時に満たせません。")
     length = math.hypot(float(raw_point[0]) - anchor[0],
                         float(raw_point[1]) - anchor[1])
@@ -173,9 +231,16 @@ def resolve_move_candidate(points, point_ids, moved_index, raw_point, *,
                 path = canonical_multi_path(candidate, point_ids)
             except ValueError:
                 continue
-            valid.append((distance, (tuple(p.xy for p in path), name)))
+            resolved = tuple(p.xy for p in path)
+            if any(math.hypot(resolved[moved_index][0] - saved[1][0][moved_index][0],
+                              resolved[moved_index][1] - saved[1][0][moved_index][1])
+                   <= 1.0e-9 for saved in valid):
+                continue
+            valid.append((distance, (resolved, name)))
         selected = select_unambiguous_candidate(valid)
         if selected is None:
+            if moved_index not in (0, len(original) - 1):
+                raise ValueError("この折れ点は他のPath点を固定したままでは90度条件を維持して移動できません。")
             raise ValueError("guide candidateが曖昧またはPath全体条件を満たしません。")
         resolved, guide = selected
         return MoveCandidate(resolved, tuple(point_ids), moved_index, guide)

@@ -1,5 +1,5 @@
 """Build 07-D Stage 3 N-flight/U pure production contracts."""
-import pathlib, sys, types, unittest
+import math, pathlib, sys, types, unittest
 ROOT = pathlib.Path(__file__).parents[1]
 package = types.ModuleType("japanese_house_modeler")
 package.__path__ = [str(ROOT / "japanese_house_modeler")]
@@ -12,9 +12,70 @@ from japanese_house_modeler.stair_multiflight import (
     prepare_multiflight_geometry, prepare_multiflight_residential_geometry,
     resolve_multiflight_layout, switch_distribution_mode, validate_manual_allocation)
 from japanese_house_modeler.stair_residential import ResidentialFields
+from japanese_house_modeler.stair_guides import (
+    GUIDE_THRESHOLD_PX, endpoint_right_angle_candidate,
+    endpoint_right_angle_guide_line, move_persistent_guides,
+    resolve_move_candidate)
 
 U=((0,0),(3,0),(3,1.8),(0,1.8)); IDS=("p0","p1","p2","p3")
 ARGS=(U,"FORWARD",0,2800,16,900,30,12)
+
+GUIDE_U=((0,0),(0,3),(3,3),(3,0))
+
+class GuideTests(unittest.TestCase):
+    def test_endpoint_lines_exist_without_raw_and_are_symmetric(self):
+        start=endpoint_right_angle_guide_line(GUIDE_U,0)
+        end=endpoint_right_angle_guide_line(GUIDE_U,3)
+        self.assertEqual(start.origin,(0.,3.)); self.assertEqual(end.origin,(3.,3.))
+        self.assertAlmostEqual(abs(start.direction[1]),1.0)
+        self.assertAlmostEqual(abs(end.direction[1]),1.0)
+        self.assertAlmostEqual(start.direction[0],0.0); self.assertAlmostEqual(end.direction[0],0.0)
+        self.assertTrue(any(g.name=="RIGHT_ANGLE" for g in move_persistent_guides(GUIDE_U,0)))
+        self.assertTrue(any(g.name=="RIGHT_ANGLE" for g in move_persistent_guides(GUIDE_U,3)))
+    def test_endpoint_projection_is_canonical_and_retains_ids(self):
+        for index,raw in ((0,(-.2,-1.0)),(3,(3.2,-1.0))):
+            projected=endpoint_right_angle_candidate(GUIDE_U,index,raw)
+            candidate=resolve_move_candidate(
+                GUIDE_U,IDS,index,raw,shift=False,
+                guide_candidates=(projected,),distances=(2.0,),
+                guide_names=("RIGHT_ANGLE",))
+            self.assertEqual(candidate.point_ids,IDS); self.assertEqual(len(candidate.points),4)
+            self.assertEqual(candidate.guide,"RIGHT_ANGLE")
+            self.assertNotEqual(candidate.points[index],GUIDE_U[index])
+            self.assertEqual(candidate.points[:index]+candidate.points[index+1:],
+                             GUIDE_U[:index]+GUIDE_U[index+1:])
+            canonical_multi_path(candidate.points,IDS)
+    def test_snap_threshold_does_not_change_persistent_line(self):
+        raw=(-.2,-1.0); projected=endpoint_right_angle_candidate(GUIDE_U,0,raw)
+        guides=move_persistent_guides(GUIDE_U,0)
+        self.assertTrue(guides)
+        resolve_move_candidate(GUIDE_U,IDS,0,raw,guide_candidates=(projected,),
+                               distances=(GUIDE_THRESHOLD_PX,),guide_names=("RIGHT_ANGLE",))
+        with self.assertRaises(ValueError):
+            resolve_move_candidate(GUIDE_U,IDS,0,raw,guide_candidates=(projected,),
+                                   distances=(GUIDE_THRESHOLD_PX+.01,),guide_names=("RIGHT_ANGLE",))
+        self.assertEqual(guides,move_persistent_guides(GUIDE_U,0))
+    def test_rotated_and_mirrored_endpoint_guides(self):
+        angle=math.radians(30); c,s=math.cos(angle),math.sin(angle)
+        rotate=lambda p:(p[0]*c-p[1]*s,p[0]*s+p[1]*c)
+        for points in (tuple(map(rotate,GUIDE_U)),
+                       ((0,0),(0,3),(-3,3),(-3,0))):
+            for index in (0,3):
+                line=endpoint_right_angle_guide_line(points,index)
+                candidate=endpoint_right_angle_candidate(
+                    points,index,(points[index][0]+line.direction[0],
+                                  points[index][1]+line.direction[1]))
+                updated=list(points); updated[index]=candidate
+                canonical_multi_path(updated,IDS)
+    def test_interior_turn_remains_strict_and_changes_no_neighbor(self):
+        original=tuple(GUIDE_U)
+        for index in (1,2):
+            with self.assertRaisesRegex(ValueError,"他のPath点"):
+                resolve_move_candidate(
+                    original,IDS,index,(1,2),shift=False,
+                    guide_candidates=((1,3),),distances=(1,),
+                    guide_names=("PARALLEL",))
+            self.assertEqual(original,GUIDE_U)
 
 class CanonicalTests(unittest.TestCase):
     def test_u_identity_and_turns(self):

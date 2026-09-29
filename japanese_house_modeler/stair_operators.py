@@ -19,7 +19,7 @@ from . import stair_multiflight as multiflight
 from .stair_guides import (
     GUIDE_THRESHOLD_PX, aligned_candidates, endpoint_right_angle_candidate,
     creation_right_angle_guide_rays, project_to_line,
-    resolve_creation_candidate, resolve_move_candidate,
+    move_persistent_guides, resolve_creation_candidate, resolve_move_candidate,
     turn_right_angle_candidate,
 )
 
@@ -894,9 +894,12 @@ class JHM_OT_move_stair_path_point(_StairOperationMixin, bpy.types.Operator):
         self._region_data = context.space_data.region_3d
         self._candidate = None
         self._raw_point = None
+        self._persistent_guides = move_persistent_guides(
+            self._snapshot["path_points"], self.point_index)
         self._draw_handle = bpy.types.SpaceView3D.draw_handler_add(
             self._draw_preview, (), "WINDOW", "POST_PIXEL")
         context.window_manager.modal_handler_add(self)
+        self._area.tag_redraw()
         return {"RUNNING_MODAL"}
 
     def _finish_move(self, result):
@@ -968,23 +971,49 @@ class JHM_OT_move_stair_path_point(_StairOperationMixin, bpy.types.Operator):
         return tuple(candidates), distances, tuple(names)
 
     def _draw_preview(self):
-        if self._candidate is None:
-            return
         try:
             z = self._snapshot["base_z_mm"] / 1000.0
             current = tuple(view3d_utils.location_3d_to_region_2d(
                 self._region, self._region_data, Vector((*point, z)))
                             for point in self._snapshot["path_points"])
-            candidate = tuple(view3d_utils.location_3d_to_region_2d(
-                self._region, self._region_data, Vector((*point, z)))
-                              for point in self._candidate.points)
-            if any(point is None for point in current + candidate):
+            if any(point is None for point in current):
                 return
             shader = gpu.shader.from_builtin("UNIFORM_COLOR")
             shader.bind()
             gpu.state.line_width_set(2.0)
             shader.uniform_float("color", (0.45, 0.45, 0.45, 0.9))
             batch_for_shader(shader, "LINE_STRIP", {"pos": current}).draw(shader)
+            points = self._snapshot["path_points"]
+            adjacent_lengths = [math.hypot(points[self.point_index][0] - point[0],
+                                           points[self.point_index][1] - point[1])
+                                for index, point in enumerate(points)
+                                if abs(index - self.point_index) == 1]
+            raw_distance = (0.0 if self._raw_point is None else math.hypot(
+                self._raw_point[0] - points[self.point_index][0],
+                self._raw_point[1] - points[self.point_index][1]))
+            length = max((1.0, raw_distance,
+                          *(value * 1.5 for value in adjacent_lengths)))
+            guide_screen = []
+            for guide in self._persistent_guides:
+                for sign in (-1.0, 1.0):
+                    world = Vector((guide.origin[0] + sign * length * guide.direction[0],
+                                    guide.origin[1] + sign * length * guide.direction[1], z))
+                    guide_screen.append(view3d_utils.location_3d_to_region_2d(
+                        self._region, self._region_data, world))
+            if guide_screen and all(point is not None for point in guide_screen):
+                shader.uniform_float("color", (0.2, 0.8, 1.0, 0.45))
+                batch_for_shader(shader, "LINES", {"pos": guide_screen}).draw(shader)
+            target = current[self.point_index]
+            gpu.state.point_size_set(7.0)
+            shader.uniform_float("color", (0.2, 0.8, 1.0, 0.9))
+            batch_for_shader(shader, "POINTS", {"pos": (target,)}).draw(shader)
+            if self._candidate is None:
+                return
+            candidate = tuple(view3d_utils.location_3d_to_region_2d(
+                self._region, self._region_data, Vector((*point, z)))
+                              for point in self._candidate.points)
+            if any(point is None for point in candidate):
+                return
             shader.uniform_float("color", (0.1, 0.75, 1.0, 1.0))
             batch_for_shader(shader, "LINE_STRIP", {"pos": candidate}).draw(shader)
             moving = candidate[self.point_index]
@@ -1021,8 +1050,12 @@ class JHM_OT_move_stair_path_point(_StairOperationMixin, bpy.types.Operator):
                     guide_names=names, threshold_px=GUIDE_THRESHOLD_PX)
             except ValueError as exc:
                 self._candidate = None
+                self._area.tag_redraw()
                 if event.type == "LEFTMOUSE":
-                    self.report({"WARNING"}, str(exc))
+                    message = ("この折れ点は他のPath点を固定したままでは90度条件を維持して移動できません。"
+                               if self.point_index not in (0, len(self._snapshot["path_points"]) - 1)
+                               else str(exc))
+                    self.report({"WARNING"}, message)
                 return {"RUNNING_MODAL"}
             if event.type == "MOUSEMOVE":
                 self._area.tag_redraw()
