@@ -1,6 +1,6 @@
 # Japanese House Modeler — Development Roadmap
 
-最終更新: 2026-09-27
+最終更新: 2026-09-30
 
 この文書は、Blender 5.2 LTS 向け **Japanese House Modeler / 日本住宅モデラー** の今後の開発順序と、各Buildをまたいで維持する設計方針をまとめたロードマップである。
 
@@ -59,18 +59,21 @@
 - **Build 07-B overall — ACCEPTED**
 - **Build 07-C — ACCEPTED**
 - **Build 07-C overall — ACCEPTED**
-- **Build 07-D — NEXT / SPECIFICATION FINAL**
-- Current accepted add-on version: **0.7.2**
-- Build 07-C final identification: `Build 07-C: Sloped Closed Underside + Straight Stair Finish Variants`
+- **Build 07-D — ACCEPTED**
+- **Build 07-D overall — ACCEPTED**
+- **Build 07-E — NEXT / SPECIFICATION PLANNING**
+- **Build 07-F — HOLD after 07-E**
+- **Build 07-G — HOLD / OPTIONAL BACKLOG**
+- Current accepted add-on version: **0.7.3**
+- Build 07-D final identification: `Build 07-D: Multi-point Path + L/U + Landing`
 
-現時点で、Wall System、Finish Attachment Foundation、Baseboard、Crown Moulding、standalone Managed Stair Core、Standard Residential Straight Stair、および07-C Straight Stair Finish Variantsまでの基盤が成立している。
+現時点で、Wall System、Finish Attachment Foundation、Baseboard、Crown Moulding、standalone Managed Stair Core、Standard Residential Straight Stair、07-C Straight Stair Finish Variants、および07-D Multi-point L/U + Landingまでの基盤が成立している。
 
-07-C完了後のpractical checkpointで直線住宅階段としての実用性を確認し、次の主要開発は **Build 07-D — Multi-point Path + L / U + Landing** とすることを決定した。
+07-D完了後の次の主要開発は **Build 07-E — Winder / 廻り段 + arbitrary-angle Turn / Landing extension** とする。
 
-Build 07では、07-A〜07-Fを階段システムの主要本線として段階的に開発する。
-ただし開発順は固定ではなく、**07-E完了時点で実用性・残作業・他機能との優先順位を再評価し、必要に応じて08/09との順序を見直せる**。
+Build 07は07-Eを一般住宅の直線＋折れ曲がり階段の主要ゴールとし、07-E Acceptance後はいったん07-F / 07-Gを保留して08-A / 08-Bへ進む。08-B完了後、既知問題 8.5 のFinish endpoint mismatchを修正してから、Wall / Finish / Floor / Ceiling / Stair / Voidを使う早期一室Core統合試験を実施する。
 
-07-Gは任意のディテール拡張であり、Build 07本体の必須完了条件には含めない。
+Door / Window / Boolean / Finish Exclusionを含む完全な一室統合試験はBuild 09 minimal完了後にも実施する。
 
 ---
 
@@ -86,16 +89,18 @@ Build 07では、07-A〜07-Fを階段システムの主要本線として段階�
 | **07-A** | Stair Core + Top-view 2-point Straight Stair | **DONE / ACCEPTED** |
 | **07-B** | Standard Residential Straight Stair + Stepped Closed Underside + Side Boards | **DONE / ACCEPTED** |
 | **07-C** | Sloped Closed Underside + Straight Stair Finish Variants | **DONE / ACCEPTED** |
-| **07-D** | Multi-point Path + L/U + Landing | **NEXT / SPECIFICATION FINAL** |
-| **07-E** | Winder / 廻り段 | Planned |
-| **07-F** | Open / Support Variants | Planned |
-| **07-G** | Optional Stair Detail Expansion | Optional / Backlog |
-| **08-A** | Minimal Room / Boundary + Floor | Planned |
-| **08-B** | Ceiling + 吹抜け / 穴の基本 | Planned |
+| **07-D** | Multi-point Path + L/U + Landing | **DONE / ACCEPTED** |
+| **07-E** | Winder / 廻り段 + arbitrary-angle Turn / Landing | **NEXT** |
+| **07-F** | Open / Support Variants | **HOLD after 07-E** |
+| **07-G** | Optional Stair Detail Expansion | **HOLD / Optional Backlog** |
+| **08-A** | Minimal Room / Boundary + Floor | Planned after 07-E |
+| **08-B** | Ceiling + 吹抜け / 穴の基本 | Planned after 08-A |
+| **8.5 Correction** | Closed Wall layout Finish endpoint mismatch修正 | Planned after 08-B |
+| **Integration Core** | Wall / Finish / Floor / Ceiling / Stair / Void 一室Core統合試験 | Planned after 8.5 Correction |
 | **09-A** | Window / Door Asset Root + Wall Anchor | Planned |
 | **09-B** | Live Boolean Cutter | Planned |
 | **09-C** | Finish Exclusion連携 | Planned |
-| **Integration 1** | 一室を最初から最後まで制作する実務統合試験 | Planned |
+| **Integration 1** | Door / Windowを含む一室フル実務統合試験 | Planned after 09 minimal |
 | **10** | Production Hardening / UX / Compatibility / Full Regression | Planned |
 
 ---
@@ -144,34 +149,33 @@ Floor / CeilingはBlender標準機能で比較的容易に手作業代替でき�
 また、本プロジェクトのStairは **Wall / Floor / Roomを必須参照としないstandalone Managed Object** とする。
 そのため、Floor / Room実装を待たずに階段システムを進められる。
 
-## 5.3 Build 07を当面優先する理由
+## 5.3 07-E後に08へ進む理由
 
-現時点では、ユーザーの制作負担と階段機能への優先度を踏まえ、07-A〜07-Fを優先する。
+07-DでMulti-point L/U + LandingまでAcceptance済みとなった。次の07-Eで一般住宅に多いWinder / 廻り段と、変形住宅へ対応するarbitrary-angle Turn / Landingを追加すれば、住宅階段本線として十分な実用チェックができる段階に達する。
 
-これは「チャット記憶を維持するため」に順序を固定するという意味ではない。
-設計意図の保持は `ROADMAP.md`、各 `BUILD_07_*_SPECIFICATION.md`、Acceptance Recordが担う。
-
-旧Roadmapの `07-A2` は独立Buildとしては廃止する。
-その目的だった「Stair CoreがRiserあり直階段へ固定されていないこと」の確認は、07-Aの内部Architecture testへ統合する。
-
-Build 07の進行中も、以下のチェックポイントで順序を再評価できる。
+そのため07-E後は07-F / 07-Gを一旦保留し、**一室統合試験を早期に実施するため08-A / 08-Bを優先**する。
 
 ```text
-07-C 完了
+07-D ACCEPTED
 ↓
-直線住宅階段としての実用性確認
+07-E Winder + arbitrary-angle Turn / Landing
 ↓
-07-Dへ進むことを決定済み
-
-07-E 完了
+一般住宅階段としてpractical checkpoint
 ↓
-一般住宅の折れ曲がり階段としての実用性確認
+07-F / 07-G HOLD
 ↓
-必要なら 08 / 09 との優先順位を再評価
+08-A Room / Boundary + Floor
+↓
+08-B Ceiling + Void / Hole
+↓
+Known Issue 8.5 correction
+↓
+Integration Core
 ```
 
-07-Cおよび07-Eでは、正式なIntegration 1を待たず、**手作業で用意したWall / Floor相当の簡易シーンへStairを配置して、小規模な住宅パース実用確認**を行う。
-これは新しいBuild番号を増やさず、各BuildのAcceptance runtime testの一部として扱う。
+Integration CoreはDoor / Window完成を待たず、Wall / Finish / Floor / Ceiling / Stair / Voidの主要Foundationを一室で組み合わせ、Architecture上の問題を早く発見するための試験とする。
+
+07-E Acceptanceでは、正式なIntegration Coreを待たず、手作業で用意したWall / Floor相当の簡易シーンへStairを配置して小規模な住宅パース実用確認を行う。
 
 ---
 
@@ -438,7 +442,7 @@ Build 06-C overallはAcceptance済み。
 
 ## 8.5 Known Issue — Finish endpoint mismatch on closed Wall layout
 
-**Status: OPEN / correction deferred**
+**Status: OPEN / correction planned after 08-B**
 
 Build 06-C acceptance後、**閉じたWall配置に沿って作成したBaseboard / Crown**で、端部付近の突出・不足が報告されている。
 
@@ -462,9 +466,9 @@ closed Wall topologyとの関係
 
 画像だけから原因を断定しない。
 
-**このRoadmap更新では修正しない。**
+**このRoadmap更新では修正自体は行わない。** 修正タイミングを08-B完了後、Integration Core開始前に置く。
 
-Build 06-C Acceptance Recordは受入時点の履歴として保持し、後日Correction Build / maintenance workとして原因調査・修正・regression testを行う。
+Build 06-C Acceptance Recordは受入時点の履歴として保持し、Correction / maintenance workとして原因調査・修正・regression testを行う。
 
 調査時には可能な限り以下を保存する。
 
@@ -613,7 +617,7 @@ Wall作成に近いPath指定を主操作とする。
 
 ただし、Pathだけでは曲がり部分の広さ・Landing / Winderの選択・Winder段数等を一意に決められない。
 
-したがって将来のMulti-point Stairでは、
+したがってMulti-point Stairでは、
 
 ```text
 Path geometry
@@ -688,49 +692,33 @@ Upper Floor finished top surface Z
 住宅階段では、上階Floorの階段開口端にも最終段の段鼻に相当する縁・見切りが付く場合がある。
 この **upper-floor edge nosing / trim** は、独立踏板のnosingとは別の接続ディテールとして扱う。
 
-07-AではFloor edge nosing自体は生成しない。
+07-AではFloor edge nosing自体を生成しない。
 将来のFloor–Stair connectionで、上階Floor端部へ段鼻相当の納まりを追加できる余地を残す。
 
 ## 12.3 Path contract
 
 Stair pathはcanonical dataとして保持する。
 
-07-Aでは2点のみをproduction対応する。
+07-Aでは2点から開始し、07-Dでschema-4 Multi-point Pathをproduction対応した。
 
 ```text
 path_points
 ├ Point 0 = START
-└ Point 1 = END
+├ intermediate TURN points...
+└ Point N = END
 ```
-
-将来07-D以降では複数点へ拡張する。
-
-重要：
-
-> 07-Aを `start + end` 専用の別データモデルとして作らず、最初からPathの2点版として扱う。
 
 PathのSTART / ENDは**クリックした描画順**を表し、高さ方向とは分離する。
 
 ```text
 P0 / START = first clicked point
-P1 / END   = second clicked point
+Pn / END   = last clicked point
 
-ascent_direction = FORWARD  -> P0からP1へ上る
-ascent_direction = REVERSE  -> P1からP0へ上る
+ascent_direction = FORWARD  -> P0からPnへ上る
+ascent_direction = REVERSE  -> PnからP0へ上る
 ```
 
-07-Aのcreation defaultは `FORWARD` としてよいが、上り方向を反転できるcanonical contractを持つ。
-
-これにより将来のFloor接続はSTART / END名ではなく、
-
-```text
-lower arrival side
-upper arrival side
-```
-
-へ結び付けられる。
-
-線の意味、線長の測定基準、最初の蹴上位置、最終到達位置は07-A Specificationで明文化する。
+07-D AcceptanceではL/Uのproduction Turnはexact ±90° Landingとした。07-EでこのTurn foundationをWinderとarbitrary-angle Landingへ拡張する。
 
 ## 12.4 Internal model must not depend on preset names
 
@@ -778,7 +766,6 @@ actual_riser = 175 mm
 independent_tread_count = 15
 ```
 
-どれを入力値とし、どれを導出するかは07-A Specificationで決定する。
 矛盾する固定入力を許可しない。
 
 ## 12.6 Part-generation architecture
@@ -811,7 +798,7 @@ Part generators
 これは「必ず1 Mesh」または「必ず複数Mesh」を意味しない。
 各BuildのSpecificationで、管理上最も安全なMesh構成を選択できる。
 
-Build 07-Aでは、既存JHM architectureとの整合とlifecycle単純化のため、**1 Managed Stair = 1 Managed Mesh Object** を採用する。
+Build 07-A〜07-Dでは、既存JHM architectureとの整合とlifecycle単純化のため、**1 Managed Stair = 1 Managed Mesh Object** を採用している。
 
 ただし、Tread / Riser / Underside / Side Board等のPart Generator責務は分離し、将来必要になった場合にcanonical Stair modelを壊さずMesh構成を拡張できること。
 
@@ -854,37 +841,9 @@ Managed状態の生成geometryを直接編集した結果をcanonical Stairへ�
 
 ### Early Core extensibility check
 
-07-Aの段階で、**Riser board generatorを使用しなくても、段配置計算とTread生成が成立することを内部試験で確認する。**
+07-Aの段階で、**Riser board generatorを使用しなくても、段配置計算とTread生成が成立することを内部試験で確認した。**
 
 これはユーザー向け `Riser OFF` 機能の先行実装ではない。
-
-目的は、
-
-```text
-step placement
-!=
-riser-board existence
-```
-
-を早期に保証することである。
-
-### Recommended internal stages
-
-```text
-Stage 1
-Canonical Stair + Top-view 2-point creation
-
-Stage 2
-Riser / tread calculation + basic tread/riser geometry
-
-Stage 3
-Dimension edit + regeneration + invalid-input handling
-
-Stage 4
-Undo/Redo + Save/Reopen + Editable Mesh + regression
-```
-
-07-Aでは stepped/sloped underside final form、side boards、user-facing Riser OFF、L/U、landing、winder、anti-slip groove、separate nosing、advanced support variants を必須にしない。
 
 ## 12.9 Build 07-B — Standard Residential Straight Stair
 
@@ -923,21 +882,7 @@ Undo/Redo + Save/Reopen + Editable Mesh + regression
 
 > 同じ位置へTread裏面と追加Underside板を二重生成することを要求しているのではない。
 
-どの生成部材が水平面・縦面・端部を担うかは、07-B Specificationで断面図を用いて確定する。
-
-07-B Specificationでは、少なくとも以下を図で定義する。
-
-```text
-Case A: left side board ON / right side board ON
-Case B: left only
-Case C: right only
-Case D: both OFF
-```
-
-各Caseについて、underside closure、lateral closure、stair start closure、stair end closure、Tread / Riser / Side Boardとの役割分担を明示する。
-
 逆さヒナ段系の化粧側板は、階段本体側面全体を自動的に閉じる部材とはみなさない。
-側面閉鎖範囲は07-B Specificationで別途決定する。
 
 ### 07-B correction guardrail — closed body
 
@@ -986,109 +931,254 @@ Open / support / ささら・力桁系の露出構成は 07-F の別系統とす
 
 07-C Acceptanceで、手作業で用意した簡易Wall / Floor相当シーンへの配置、placement、visible proportion、side-board appearance、stepped / sloped underside usability、Material、Mesh conversionを確認した。
 
-このcheckpointの結果、08 / 09へ切り替えず、**07-D Multi-point Path + L / U + Landingへ進む**ことを決定した。
+このcheckpointの結果、08 / 09へ切り替えず、07-D Multi-point Path + L / U + Landingへ進み、07-DはAcceptance済みとなった。
 
 ## 12.11 Build 07-D — Multi-point Path + L / U + Landing
 
-**Status: NEXT / SPECIFICATION FINAL**
+**Status: ACCEPTED**
 
-Implementation authorityは `BUILD_07_D_SPECIFICATION.md` とする。
+Implementation authorityは `BUILD_07_D_SPECIFICATION.md`、受入結果は `BUILD_07_D_ACCEPTANCE_RECORD.md` を正とする。
 
-主要機能：
+Acceptance済み主要機能：
 
 - start + intermediate turn points + end
 - L-shaped path
-- U-shaped path / コの字 foundation
+- U-shaped path / コの字
 - multiple straight flights
-- Landing turn
+- exact ±90° Landing turn
 - whole Stair = one Managed Stair
 - consistent total floor-to-floor
 - Riser Distribution `AUTO / MANUAL`
 - path edit / regeneration
-- START / END / every intermediate TURN mouse relocation
-- Shift **15°** angle constraint
+- START / END / intermediate TURN mouse relocation
+- Shift **15°** angle constraint foundation
 - X/Y / extension / 90° / parallel alignment guides
-- 07-E Winderへ拡張可能な Turn foundation
+- 07-Eへ拡張可能な Turn foundation
+- Save / reopen / Undo / Redo / Repair / Finalize / Delete / Material / topology regression
 
-### Multi-point Path interaction contract
+07-Dではworld-spaceのStair配置自体は斜め方向へ作成可能だが、production Landing turnはexact ±90°に限定した。arbitrary-angle Landing / Winderは07-Eへ送る。
 
-07-Dでは、Wall作成に近いトップビュー操作をStairのMulti-point Pathへ拡張する。
+既存07-D Landingは07-E導入時に勝手にWinderへ変更しない。
 
-作成時：
+## 12.12 Build 07-E — Winder / 廻り段 + arbitrary-angle Turn / Landing
 
-- P0 = START、必要なintermediate turn points、Pn = ENDを順番にクリックして1つのcanonical Pathを作る。
-- 次のPath segmentを指定するとき、**Shiftで15°刻みの角度拘束**を提供する。
-- Shift角度拘束は既存Wallの `constrained_direction(..., step_degrees=15.0)` と同じ数学的意味を使用し、Stair専用の別丸め規則を作らない。
-- 一般住宅のL/Uを作りやすくするため、world X/Yだけでなく既存segmentに対する90° / parallel / extension guideを提供する。
+**Status: NEXT / SPECIFICATION PLANNING**
 
-作成後：
+07-Eは階段Buildの主要本命とし、07-DのMulti-point / Turn foundationを拡張して一般的な住宅の廻り階段と、変形住宅の90°以外の折れ曲がり階段をproduction対応する。
 
-- **START / ENDだけでなく、すべてのintermediate Path pointを個別にマウスで再配置できることを07-Dの必須要件とする。**
-- U字Pathが P0=START, P1/P2=TURN, P3=END の場合、P0〜P3をそれぞれ移動して形状を修正できること。
-- point移動はObject Transformではなくcanonical `path_points[]` のXYを更新し、影響するFlight / Landing / derived geometryをtransactionalに再計算・再生成する。
-- Shift 15°拘束とalignment guideはpoint移動でも使用する。
-- invalid / too-short segment等を生む移動はpartial commitせず拒否またはrollbackする。
-- 数値によるPath座標編集は精密入力手段として維持し、マウス編集と同じcanonical Pathを更新する。
-
-### Riser Distribution
-
-Defaultは `AUTO`。
-
-- overall riser countを維持する。
-- 各Flightのeffective runを基準にdeterministicに整数配分する。
-- Path変更時はAUTO再配分する。
-
-`MANUAL`ではユーザーがFlightごとのriser countを指定する。
-
-- 合計はoverall riser countと一致必須。
-- Path変更でも指定値を保持する。
-- invalidになった場合は勝手に補正せずcommitを拒否する。
-- AUTO→MANUAL時は現在のAUTO配分を初期値として引き継ぐ。
-
-複数点Pathを単なる複数の独立直階段として実装しない。
-
-07-DのturnはLanding。07-Eでは同じPath / Turn foundationへWinderを追加する。既存07-D Landingを07-E導入時に勝手にWinderへ変更しない。
-
-## 12.12 Build 07-E — Winder / 廻り段
-
-主要機能：
+### Primary production scope
 
 - 90° Winder
-- 180° Winder
+- 180° Winder / U-turn combination
+- arbitrary-angle Turn foundation
+- arbitrary-angle Landing
+- arbitrary-angle Winder where geometry is valid
 - inner / outer tread geometry
-- minimum geometry safeguards
-- riser distribution including turns
-- L / U path combination
+- riser distribution including Winder steps
+- L / U / multi-turn path combination
 - side-board continuation at Winder
+- STEPPED_CLOSED continuation
+- **continuous SLOPED_CLOSED Winder soffit**
+- Material / Reverse / persistence / lifecycle compatibility
 
-Pathの折れ点だけでWinder形状・turn area・winder step countを勝手に決めない。
-必要なturn parameterをcanonical dataとして持つ。
+### Winder pattern UX
 
-07-E Specificationで対応する組み合わせを明示する。
-
-最終的に、
+住宅用途の基本Winder patternとして、少なくとも以下をUIで選択できる方向とする。
 
 ```text
-straight flight
-→ winder
-→ straight flight
-→ winder
-→ straight flight
+90° Winder
+├ 2段廻り
+├ 3段廻り
+├ 4段廻り
+├ BF-1
+└ BF-2
 ```
 
-を1つのManaged Stairとして扱えること。
+2段 / 3段 / 4段はstandard patternとして扱う。BF-1 / BF-2は均等角分割とは異なる住宅用の分割familyとして別pattern identityを持たせる。
 
-新規住宅階段のturn UXは、07-E完成後に **Winderをdefault、LandingをUI選択可能** とする方向を基本案とする。ただし07-Dで保存済みのLandingは互換性のため保持する。
+UIは文字Dropdownだけでなく、小さな平面サムネイル / iconによるpattern選択を優先候補とする。06-C Profile Thumbnail UIの経験を再利用できるが、詳細UIは07-E Specificationで決める。
 
-**07-E完了時点を、一般的な直線＋折れ曲がり住宅階段の主要ゴールとする。**
+U字 / 180°では各Turnへ個別patternを設定できる設計を優先する。
+
+例：
+
+```text
+Turn 1 = 2段廻り
+Turn 2 = 3段廻り
+```
+
+または
+
+```text
+Turn 1 = BF-1
+Turn 2 = 3段廻り
+```
+
+のように組み合わせ、U字用の全組み合わせを別presetとして大量登録しない。
+
+### Equal-angle subdivision as standard baseline
+
+standard Winderでは、Turn角 `theta` とWinder段数 `n` から**等角分割を基本baseline**として使用できる設計とする。
+
+例：
+
+```text
+90° / 2段 = 45° per division
+90° / 3段 = 30° per division
+90° / 4段 = 22.5° per division
+
+180° / 2段 = 90° per division
+180° / 3段 = 60° per division
+180° / 4段 = 45° per division
+180° / 5段 = 36° per division
+180° / 6段 = 30° per division
+```
+
+ただし、**すべてのWinderを等角分割へ固定しない。** BF-1 / BF-2や将来のcustom partitionは別のpartition ruleを持てること。
+
+`winder_step_count` と `winder_partition_rule` を意味上分離し、単に「3段だから必ず30°」というhard-coded generatorにしない。
+
+### Arbitrary-angle Turn / Landing contract
+
+07-EではTurnを90°専用ロジックから一般化する。
+
+```text
+incoming segment direction
++
+outgoing segment direction
+↓
+signed turn angle theta
+```
+
+を解決し、そのTurnへ `LANDING` / `WINDER` modeを適用する。
+
+Shift 15°拘束はマウス操作の便利機能として維持するが、**production Turn角そのものを15°刻みに限定しない。** 数値Path編集や自由なPath geometryから45°以外、60°以外、その他の有効な斜めTurnも扱えるArchitectureとする。
+
+これにより変形住宅で、例えば45° / 60° / 75° / 105°等に限らないoblique Landingを表現できる方向とする。
+
+既存07-D exact-90 Landingは互換性のためそのまま保持する。
+
+### Width / legacy-house policy
+
+07-Eの生成可否を、現行法規や参考図の固定寸法へhard-codeしない。
+
+特に、
+
+- stair width 900 mmを前提にしない
+- 750 / 800 mm等へ幅変更しただけでWinder生成を拒否しない
+- 参考図にある300 mm / 150 mm / 85 mm等をproduction geometryの絶対minimumとして固定しない
+- 古い木造住宅の狭いWinderや変形階段も、数学的に成立する限りモデリング可能な方向とする
+
+本Addonは法規適合判定ソフトではない。将来optional validationを追加する余地は残すが、07-Eのcore geometry生成では「現行法規寸法を満たさないから生成不可」としない。
+
+### Geometry safeguards
+
+一方で、数学的・Mesh的に成立しないgeometryは明示的に拒否または警告する。
+
+最低限の対象候補：
+
+- tread polygon self-intersection
+- adjacent Winder tread overlap
+- zero / negative area face
+- non-finite coordinate
+- degenerate edge / collapsed turn region
+- impossible offset intersection
+- Side Board / closed-underbody generationが成立しない局所geometry
+- Path segmentが短すぎて必要なTurn geometryを配置できない状態
+
+「狭い」だけを理由に拒否しない。法規寸法とgeometry validityを分離する。
+
+狭すぎる踏面等をUI warningとして表示する場合も、07-E Specificationでwarningとhard rejectionを明確に分ける。
+
+### Continuous sloped underside at Winder
+
+07-D LandingではFlight slopeの間に水平Landing undersideが入った。
+
+07-E Winderの `SLOPED_CLOSED` はLandingの水平plateauを挟まず、Winder step elevationの進行に合わせて、
+
+```text
+Lower Flight sloped soffit
+        ↓
+Winder continuous / turning soffit
+        ↓
+Upper Flight sloped soffit
+```
+
+として連続するclosed undersideをproduction targetとする。
+
+これはTurn全体が必ず1枚の平面になることを意味しない。平面方向が曲がるため、必要なpiecewise surfaceで構成してよいが、**高さ進行と見た目として勾配下面が途切れず、Landingのような不必要な水平段差を入れない**ことを重視する。
+
+07-B / 07-CのCLOSED invariantは維持し、下方からTread裏・Riser裏・内部空洞を露出させない。
+
+### Side Board continuation
+
+Winder部分のSide Boardも、各Flight端へ局所patchを足す方式だけに依存せず、Turnを含む連続境界とstep elevationから導出できる設計を優先する。
+
+特にStage 3では、07-D Stage 2で苦労したLanding underside / Side Board終端の局所修正を繰り返さないよう、Winder専用のboundary / soffit / Side Board ownershipを先に明文化する。
+
+### Canonical Turn data
+
+Path折れ点だけからWinder形状・turn area・winder step countを勝手に決めない。
+
+07-E Specificationでは少なくとも概念上、Turnごとに以下を保持する方向で検討する。
+
+```text
+TurnState
+├ turn_point_id / turn index
+├ turn_mode = LANDING / WINDER
+├ signed_turn_angle (derived or validated)
+├ winder_step_count
+├ winder_pattern / partition_rule
+├ turn_region parameters
+└ future optional validation metadata
+```
+
+canonical field名とschema migrationはSpecificationで確定する。
+
+### Recommended internal stages
+
+07-Dで下面・Side Boardの調整が長期化した経験から、07-Eでは平面Winder geometryと下面仕上げを同一Stageへ詰め込みすぎない。
+
+```text
+Stage 1
+Turn canonical foundation
++ arbitrary-angle Turn resolver
++ 90° standard 2/3/4-step Winder top geometry
+
+Stage 2
+BF-1 / BF-2
++ per-Turn pattern
++ 180° / U combinations
++ arbitrary-angle Landing / Winder
++ Winder riser distribution
+
+Stage 3
+STEPPED_CLOSED
++ continuous SLOPED_CLOSED Winder soffit
++ Side Board continuation
++ Material / Reverse geometry
+
+Stage 4
+Save/Reopen
++ Undo/Redo
++ rollback / Repair
++ Finalize / Delete
++ prior Straight/Landing regression
++ practical residential placement
++ final topology / visual acceptance
+```
+
+Stage構成はSpecification draftingで調整可能だが、**上から見た廻り段Geometryを先にAcceptance可能な状態へ近づけ、その後に下面・側板へ集中する**方針を優先する。
 
 ### Practical checkpoint after 07-E
 
-07-E Acceptanceでは、実際の住宅に近い簡易シーンへ straight stair / L-U stair / Winder stair を配置し、平面配置・視覚寸法・使い勝手を確認する。
+07-E Acceptanceでは、実際の住宅に近い簡易シーンへ Straight / L-U Landing / Winder / oblique Landing を配置し、平面配置・視覚寸法・狭い住宅寸法での生成・使い勝手を確認する。
 
-ここで08 / 09との優先順位を再評価できる。
+07-E Acceptance後はいったん07-F / 07-Gを保留し、08-A / 08-Bへ進む。
 
 ## 12.13 Build 07-F — Open / Support Variants
+
+**Status: HOLD after 07-E**
 
 対象候補：
 
@@ -1103,11 +1193,13 @@ straight flight
 
 「スケルトン階段」という単一presetへ内部モデルを固定しない。
 
-対応するPath / Turn / Support / Undersideの組み合わせは07-F Specificationで明示する。
+対応するPath / Turn / Support / Undersideの組み合わせは将来07-F Specificationで明示する。
 
-**07-F完了をBuild 07 Stair System本体の完了目標とする。**
+07-E完了後は一室統合試験を早期に実施するため07-Fを保留し、08-A / 08-Bを優先する。07-Fは削除ではなく、Integration Coreや実制作で必要性を再評価して再開できるBacklogとする。
 
 ## 12.14 Build 07-G — Optional Detail Expansion
+
+**Status: HOLD / OPTIONAL BACKLOG**
 
 07-GはBuild 07本体の必須完了条件ではない。
 
@@ -1123,7 +1215,7 @@ straight flight
 - decorative trim
 - other production-use details
 
-07-Gは必要性に応じて08/09以降へ延期できる。
+07-Gは08/09以降へ延期する。
 
 ## 12.15 Build 07 quality / scope guards
 
@@ -1190,6 +1282,18 @@ Roomは自動認識だけに依存しない。
 
 過剰なBIM ceiling systemにはしない。
 
+## 15.3 Post-08-B checkpoint
+
+08-B Acceptance後は次の順で進める。
+
+```text
+Known Issue 8.5 correction
+↓
+Integration Core
+```
+
+Integration Core開始前に、閉じたWall layoutでBaseboard / CrownのFinish endpointが一致しない問題を調査・修正し、必要なregression testを追加する。
+
 ---
 
 # 16. Build 09 — Window / Door system
@@ -1255,9 +1359,63 @@ OpeningとFinishの連携ではWall上の水平区間だけでなく、**Opening
 
 ---
 
-# 17. Integration 1 — One-room production test
+# 17. One-room integration tests
 
-Build 07 Stair System mainline + 08 minimal + 09 minimalが揃った後、必ず実施する。
+## 17.1 Integration Core — early one-room test
+
+実施タイミング：
+
+```text
+07-E ACCEPTED
+↓
+08-A ACCEPTED
+↓
+08-B ACCEPTED
+↓
+Known Issue 8.5 correction
+↓
+Integration Core
+```
+
+目的はDoor / Window完成を待たず、主要Foundationをなるべく早く一室へ統合してArchitecture上の問題を発見すること。
+
+対象例：
+
+```text
+一室
+├ Wall
+├ Baseboard
+├ Crown
+├ Floor
+├ Ceiling
+├ Stair
+└ Void / Hole
+```
+
+主な試験項目：
+
+- closed Wall layout
+- Baseboard / Crown endpoint closure
+- Wall寸法変更
+- Wall endpoint移動
+- Wall split
+- Floor / Ceiling維持
+- Stair placement
+- Stair upper arrival / Floor relationship
+- Stair / Void coordination
+- Material維持
+- Save
+- Blender終了
+- Reopen
+- Regenerate
+- Editable Mesh conversion
+- 一部を通常Blender編集へ移行
+
+この試験で見つかったFoundation問題は、Door / Window実装を始める前に修正する価値が高いものを優先する。
+
+## 17.2 Integration 1 — full one-room production test
+
+Build 09 minimalまで揃った後、Door / Window / Boolean / Finish Exclusionを含む完全版を実施する。
 
 対象例：
 
@@ -1293,22 +1451,23 @@ LDKの一角
 - Editable Mesh conversion
 - 一部を通常Blender編集へ移行
 
-Build 07はstandalone Stairとして成立させるが、Integration 1では住宅全体の他Foundationと接続した場合のArchitectureを確認する。
+Build 07はstandalone Stairとして成立させるが、Integrationでは住宅全体の他Foundationと接続した場合のArchitectureを確認する。
 
 ---
 
 # 18. Build 07 ordering checkpoints
 
-旧Roadmapの「07-A / 07-A2 → 08/09 → Integration 1 → 07-B/C/D」という分断順序は廃止する。
+旧Roadmapの「07-A / 07-A2 → 08/09 → Integration 1 → 07-B/C/D」という分断順序は廃止済み。
 
-現時点では07-A〜07-Fを優先するが、順序を永久固定しない。
+現在のcheckpoint：
 
-再評価ポイント：
+- **07-C完了時**：直線住宅階段の実用性を確認し07-Dへ進むことを決定、完了済み。
+- **07-D完了時**：Multi-point L/U + LandingのAcceptance完了。07-E Winder / arbitrary-angle Turnへ進む。
+- **07-E完了時**：一般住宅の折れ曲がり階段としてpractical checkpointを行い、07-F / 07-Gを保留して08-A / 08-Bへ進む。
+- **08-B完了時**：Known Issue 8.5を修正後、Integration Coreを実施する。
+- **Integration Core完了時**：Foundation問題を整理し、09 minimalへ進む。
 
-- **07-C完了時**：checkpoint完了。直線住宅階段の実用性を確認し、**07-Dへ進むことを決定済み**。
-- **07-E完了時**：L/U、Landing、Winderを含む一般住宅階段としての実用性を確認し、08 / 09との優先順位を再評価する。
-
-07-GはOptional Backlogであり、07-F完了後ただちに実装する必要はない。
+07-F / 07-Gは削除ではなくHOLD / Backlogであり、Integration結果や実制作上の必要性に応じて再開できる。
 
 ---
 
@@ -1408,27 +1567,27 @@ Roadmap変更は許可するが、Accepted historyは消さない。
 07-A  ACCEPTED
 07-B  ACCEPTED
 07-C  ACCEPTED
+07-D  ACCEPTED
 ```
 
 次：
 
 ```text
-07-D Multi-point Path
-     + L / U
-     + Landing
+07-E Winder / 廻り段
+     + 2 / 3 / 4-step standard patterns
+     + BF-1 / BF-2
+     + 90° / 180° combinations
+     + arbitrary-angle Landing / Turn foundation
+     + continuous SLOPED_CLOSED Winder soffit
 ```
 
 状態遷移：
 
 ```text
-07-C ACCEPTED → 07-D NEXT
+07-D ACCEPTED → 07-E NEXT
 ```
 
-07-D implementation authority:
-
-```text
-BUILD_07_D_SPECIFICATION.md
-```
+07-E Specificationはこれから作成する。07-E完成後は07-F / 07-GをHOLDし、08-A / 08-Bへ進む。
 
 ---
 
@@ -1451,30 +1610,34 @@ Crown
     ↓
 07-C Sloped Underside / Straight Finish Variants
     ↓
-[07-C practical checkpoint completed → proceed 07-D]
+07-D Multi-point L/U + Landing [ACCEPTED]
     ↓
-07-D Multi-point L/U + Landing
+07-E Winder + arbitrary-angle Turn / Landing
     ↓
-07-E Winder
+[07-E practical checkpoint]
     ↓
-[practical checkpoint / order review]
+07-F / 07-G HOLD
     ↓
-07-F Open / Support Variants
+08-A Minimal Room / Boundary + Floor
     ↓
-08 Minimal Room / Floor / Ceiling
+08-B Ceiling + Void / Hole
+    ↓
+Known Issue 8.5 Finish endpoint correction
+    ↓
+Integration Core
     ↓
 09 Window / Door Anchor + Boolean + Finish Exclusion
     ↓
-One-room Production Integration Test
+Integration 1 full one-room production test
     ↓
 Production Hardening
 ```
 
-07-G Detail ExpansionはOptional Backlogとして、本線の適切な位置へ挿入できる。
+Build 07の住宅階段mainlineの主要ゴールは07-Eとする。07-F Open / Support Variantsと07-G Detail ExpansionはBacklogとして保持し、Integration結果や実制作上の必要性から再開時期を決める。
 
 Build 07の中心目標は、
 
-> **Wall / Floor / Roomに必須依存せず、トップビューでPathを描き、日本住宅の直線・折れ曲がり階段を1つのManaged Stairとして生成・編集できること**
+> **Wall / Floor / Roomに必須依存せず、トップビューでPathを描き、日本住宅の直線・折れ曲がり・廻り・変形角度の階段を1つのManaged Stairとして生成・編集できること**
 
 である。
 
