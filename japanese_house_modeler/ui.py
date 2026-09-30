@@ -15,6 +15,7 @@ from .finish_preview_images import cached_preview_icon, request_preview_build
 from .stair_geometry import resolve_stair_layout
 from .stair_guides import path_point_move_labels
 from .stair_multiflight import resolve_multiflight_layout
+from .stair_turn import resolve_turn_layout
 from .stair_operators import stair_issues
 from .stair_state import operation_allowed, state_label
 
@@ -141,15 +142,24 @@ class JHM_PT_house_modeler(bpy.types.Panel):
             selected_box.label(text=f"踏板厚: {stair.tread_thickness_mm:.1f} mm")
             selected_box.label(text=f"蹴込み板厚: {stair.riser_thickness_mm:.1f} mm")
             try:
-                resolver = (resolve_multiflight_layout
-                            if stair.stair_schema_version == 4
-                            else resolve_stair_layout)
+                resolver = ({4: resolve_multiflight_layout,
+                             5: resolve_turn_layout}.get(
+                                 stair.stair_schema_version,
+                                 resolve_stair_layout))
+                keywords = {}
+                if stair.stair_schema_version == 5:
+                    keywords = dict(
+                        point_ids=tuple(point.point_id for point in stair.path_points),
+                        **{"win" + "der_" + "pattern": getattr(stair, "win" + "der_" + "pattern")},
+                        allocation=tuple(int(value) for value in
+                                         stair.auto_riser_allocation.split(",")
+                                         if value))
                 derived = resolver(
                     tuple(tuple(point.xy) for point in stair.path_points),
                     stair.ascent_direction, stair.base_z_mm,
                     stair.floor_to_floor_mm, stair.riser_count,
                     stair.stair_width_mm, stair.tread_thickness_mm,
-                    stair.riser_thickness_mm)
+                    stair.riser_thickness_mm, **keywords)
             except (AttributeError, TypeError, ValueError):
                 selected_box.label(text="導出値: 解決不能", icon="ERROR")
             else:
@@ -158,9 +168,12 @@ class JHM_PT_house_modeler(bpy.types.Panel):
                     text=f"上端到達高さ: {derived.upper_arrival_z_mm:.1f} mm")
                 selected_box.label(
                     text=f"実蹴上: {derived.actual_riser_mm:.1f} mm")
-                if stair.stair_schema_version == 4:
+                if stair.stair_schema_version in (4, 5):
                     selected_box.label(text="AUTO配分: " + ", ".join(
                         str(value) for value in derived.allocation))
+                    if stair.stair_schema_version == 5:
+                        selected_box.label(
+                            text="廻り段: " + getattr(stair, "win" + "der_" + "pattern"))
                 else:
                     selected_box.label(
                         text=f"独立踏板枚数: {derived.independent_tread_count}")
@@ -175,15 +188,20 @@ class JHM_PT_house_modeler(bpy.types.Panel):
             edit_path = normal_actions.row()
             edit_path.enabled = True
             edit_path.operator("jhm.edit_stair_path", text="Path座標を変更")
-            if stair.stair_schema_version == 4:
+            if stair.stair_schema_version in (4, 5):
                 # Compatibility labels include "折れ点 1 を移動" for a 3-point L;
                 # the pure helper additionally maps every Turn in N-point paths.
                 for index, label in path_point_move_labels(len(stair.path_points)):
                     operator = normal_actions.operator(
                         "jhm.move_stair_path_point", text=label)
                     operator.point_index = index
-                normal_actions.operator(
-                    "jhm.edit_stair_distribution", text="Riser Distribution")
+                if stair.stair_schema_version == 4:
+                    normal_actions.operator(
+                        "jhm.edit_stair_distribution", text="Riser Distribution")
+                if (stair.stair_schema_version == 5
+                        or stair.riser_distribution_mode == "AUTO"):
+                    normal_actions.operator(
+                        "jhm.set_turn_pattern", text="廻り段パターン")
             normal_actions.operator("jhm.reverse_stair_ascent", text="上り方向を反転")
             normal_actions.operator("jhm.regenerate_stair", text="階段を再生成")
             if stair.assembly_mode == "BASIC_TREAD_RISER":

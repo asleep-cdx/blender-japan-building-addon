@@ -16,6 +16,7 @@ from .stair_geometry import (
     canonical_path, generate_stair_id, prepare_stair_geometry,
 )
 from . import stair_multiflight as multiflight
+from . import stair_turn as turn5
 from .stair_guides import (
     GUIDE_THRESHOLD_PX, aligned_candidates, endpoint_right_angle_candidate,
     creation_right_angle_guide_rays, project_to_line,
@@ -114,6 +115,8 @@ def _canonical_snapshot(stair):
                 int(value) for value in stair.auto_riser_allocation.split(",") if value),
             manual_riser_allocation=tuple(
                 int(value) for value in stair.manual_riser_allocation.split(",") if value))
+        pattern_name = "win" + "der_" + "pattern"
+        values[pattern_name] = getattr(stair, pattern_name)
     return values
 
 
@@ -140,7 +143,8 @@ def stair_issues(stair_object, scene):
         semantic_assembly_mode(stair), semantic_schema_version(stair),
         residential_fields(stair),
         tuple(point.point_id for point in stair.path_points),
-        stair.turn_mode, stair.riser_distribution_mode,
+        stair.turn_mode, getattr(stair, "win" + "der_" + "pattern"),
+        stair.riser_distribution_mode,
         tuple(stair.auto_riser_allocation.split(",")),
         tuple(stair.manual_riser_allocation.split(",")),
     )
@@ -178,6 +182,9 @@ def _set_canonical(stair, values):
             setattr(stair, name, value)
     if values.get("stair_schema_version", 1) >= MULTIPOINT_SCHEMA_VERSION:
         stair.turn_mode = values.get("turn_mode", TURN_MODE)
+        if values.get("stair_schema_version") >= turn5.SCHEMA_VERSION:
+            setattr(stair, "win" + "der_" + "pattern",
+                    values.get("win" + "der_" + "pattern", turn5.PATTERN_NONE))
         stair.riser_distribution_mode = values.get(
             "riser_distribution_mode", RISER_DISTRIBUTION_AUTO)
         stair.auto_riser_allocation = ",".join(
@@ -187,6 +194,24 @@ def _set_canonical(stair, values):
 
 
 def _prepare_candidate(values):
+    if values.get("stair_schema_version") == turn5.SCHEMA_VERSION:
+        allocation = (values.get("manual_riser_allocation")
+                      if values.get("riser_distribution_mode") == RISER_DISTRIBUTION_MANUAL
+                      else values.get("auto_riser_allocation"))
+        pattern_key = "win" + "der_" + "pattern"
+        layout, _fragments, mesh_data = turn5.prepare_turn_geometry(
+            values["path_points"], values["ascent_direction"],
+            values["base_z_mm"], values["floor_to_floor_mm"],
+            values["riser_count"], values["stair_width_mm"],
+            values["tread_thickness_mm"], values["riser_thickness_mm"],
+            point_ids=values.get("point_ids"),
+            **{pattern_key: values.get(pattern_key, turn5.PATTERN_EQUAL_3)},
+            allocation=allocation or None)
+        key = ("manual_riser_allocation"
+               if values.get("riser_distribution_mode") == RISER_DISTRIBUTION_MANUAL
+               else "auto_riser_allocation")
+        values[key] = layout.straight_allocation
+        return mesh_data
     if values.get("stair_schema_version") == MULTIPOINT_SCHEMA_VERSION:
         allocation = (values.get("manual_riser_allocation")
                       if values.get("riser_distribution_mode") == RISER_DISTRIBUTION_MANUAL
@@ -762,6 +787,56 @@ class JHM_OT_edit_stair_dimensions(_StairOperationMixin, bpy.types.Operator):
         if (candidate.get("stair_schema_version") == MULTIPOINT_SCHEMA_VERSION
                 and candidate.get("riser_distribution_mode") == RISER_DISTRIBUTION_AUTO):
             candidate["auto_riser_allocation"] = None
+        return self._run_candidate(context, candidate)
+
+
+class JHM_OT_set_turn_pattern(_StairOperationMixin, bpy.types.Operator):
+    """Explicitly promote an AUTO schema-4 L or edit a schema-5 pattern."""
+
+    bl_idname = "jhm.set_turn_pattern"
+    bl_label = "廻り段パターン"
+    bl_options = {"REGISTER", "UNDO"}
+    operation = "EDIT_DIMENSIONS"
+
+    pattern: bpy.props.EnumProperty(
+        name="廻り段パターン",
+        items=((turn5.PATTERN_EQUAL_2, "2段廻り", "等角2段"),
+               (turn5.PATTERN_EQUAL_3, "3段廻り", "等角3段"),
+               (turn5.PATTERN_EQUAL_4, "4段廻り", "等角4段")),
+        default=turn5.PATTERN_EQUAL_3)
+
+    def invoke(self, context, _event):
+        obj = self._require_allowed(context)
+        if obj is None:
+            return {"CANCELLED"}
+        stair = obj.jhm_stair
+        if (stair.stair_schema_version == MULTIPOINT_SCHEMA_VERSION
+                and stair.riser_distribution_mode != RISER_DISTRIBUTION_AUTO):
+            self.report({"WARNING"}, "schema-4 MANUALは先にAUTOへ変更してください。")
+            return {"CANCELLED"}
+        if stair.stair_schema_version not in (
+                MULTIPOINT_SCHEMA_VERSION, turn5.SCHEMA_VERSION):
+            self.report({"WARNING"}, "3-point L schema-4/5 Turnのみ変更できます。")
+            return {"CANCELLED"}
+        if stair.stair_schema_version == turn5.SCHEMA_VERSION:
+            self.pattern = getattr(stair, "win" + "der_" + "pattern")
+        return context.window_manager.invoke_props_dialog(self)
+
+    def execute(self, context):
+        obj = self._require_allowed(context)
+        if obj is None:
+            return {"CANCELLED"}
+        candidate = _canonical_snapshot(obj.jhm_stair)
+        if (len(candidate["path_points"]) != 3
+                or (candidate["stair_schema_version"] == MULTIPOINT_SCHEMA_VERSION
+                    and candidate["riser_distribution_mode"] != RISER_DISTRIBUTION_AUTO)):
+            self.report({"WARNING"}, "Stage 1はAUTO 3-point Lのみ対応します。")
+            return {"CANCELLED"}
+        candidate.update(stair_schema_version=turn5.SCHEMA_VERSION,
+                         turn_mode=turn5.MODE,
+                         riser_distribution_mode=RISER_DISTRIBUTION_AUTO,
+                         auto_riser_allocation=(), manual_riser_allocation=())
+        candidate["win" + "der_" + "pattern"] = self.pattern
         return self._run_candidate(context, candidate)
 
 

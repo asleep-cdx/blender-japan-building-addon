@@ -8,6 +8,9 @@ from .stair_multiflight import (
     RISER_DISTRIBUTION_MANUAL, TURN_LANDING,
     resolve_multiflight_layout,
 )
+from .stair_winder import (
+    WINDER_SCHEMA_VERSION, TURN_WINDER, resolve_winder_layout,
+)
 from .stair_residential import (
     BASIC_TREAD_RISER, STANDARD_RESIDENTIAL, ResidentialFields,
     validate_mode_data, validate_nosing_board_compatibility,
@@ -58,6 +61,7 @@ class StairState:
     residential: ResidentialFields = ResidentialFields()
     point_ids: tuple = ()
     turn_mode: str = ""
+    winder_pattern: str = "NONE"
     riser_distribution_mode: str = ""
     auto_riser_allocation: tuple = ()
     manual_riser_allocation: tuple = ()
@@ -92,7 +96,22 @@ def diagnose_stair(state, duplicate_ids=()):
         issues.append(ID_CONFLICT)
     layout = None
     try:
-        if state.stair_schema_version == MULTIPOINT_SCHEMA_VERSION:
+        if state.stair_schema_version == WINDER_SCHEMA_VERSION:
+            if state.turn_mode != TURN_WINDER:
+                raise ValueError("schema 5 Turn modeが不正です。")
+            if state.riser_distribution_mode not in (
+                    RISER_DISTRIBUTION_AUTO, RISER_DISTRIBUTION_MANUAL):
+                raise ValueError("schema 5 Riser Distribution modeが不正です。")
+            allocation = (state.manual_riser_allocation
+                          if state.riser_distribution_mode == RISER_DISTRIBUTION_MANUAL
+                          else state.auto_riser_allocation)
+            layout = resolve_winder_layout(
+                state.path_points, state.ascent_direction, state.base_z_mm,
+                state.floor_to_floor_mm, state.riser_count,
+                state.stair_width_mm, state.tread_thickness_mm,
+                state.riser_thickness_mm, point_ids=state.point_ids,
+                winder_pattern=state.winder_pattern, allocation=allocation)
+        elif state.stair_schema_version == MULTIPOINT_SCHEMA_VERSION:
             if state.turn_mode != TURN_LANDING:
                 raise ValueError("schema 4 Turn modeが不正です。")
             if state.riser_distribution_mode not in (
