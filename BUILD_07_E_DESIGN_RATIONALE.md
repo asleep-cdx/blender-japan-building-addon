@@ -1,707 +1,255 @@
 # BUILD 07-E — DESIGN RATIONALE / GEOMETRY CONTRACT NOTES
 ## 日本住宅モデラー — Winder / 廻り段 + Arbitrary-angle Turn / Landing
 
-> **Status: REVIEW COMPANION / THIRD-PARTY REVIEW PENDING**  
+> **Status: FINAL COMPANION / NON-AUTHORITY**  
 > Date: 2026-09-30  
-> Companion to `BUILD_07_E_SPECIFICATION.md`. This document records **why** the 07-E requirements exist and explains the geometry contract in repository text so implementation and third-party review do not depend on reference images. The Specification remains the future implementation authority after it is promoted to `FINAL / IMPLEMENTATION AUTHORITY`.
+> Companion to `BUILD_07_E_SPECIFICATION.md`.
+>
+> This document explains **why** the 07-E requirements exist and records the design history. The single production implementation authority is the FINAL `BUILD_07_E_SPECIFICATION.md`. If wording here is less specific or differs from the Specification, the Specification wins.
 
 ---
 
-# 1. Why this document exists
+# 1. Why 07-E exists
 
-Build 07-E is the main production target for ordinary Japanese residential turning stairs. It also has to support renovation visualization of older houses, where an existing stair may be narrower, tighter, steeper, or less regular than a present-day new-build stair.
+Build 07-E is the main turning-stair target for ordinary Japanese residential work and renovation visualization.
 
-The typical project need is:
+Typical use：
 
 ```text
 existing old house
 ↓
-structure / stair remains in place
+structure / stair remains
 ↓
 wall / floor / finish is renovated
 ↓
-existing stair remains visible in the presentation
+stair remains visible in presentation
 ↓
-JHM must reproduce that existing stair
+JHM must reproduce the existing stair
 ```
 
-Therefore two requirements have equal importance:
+Therefore two goals have equal importance：
 
-1. Generate common residential Winder / 廻り段 geometry predictably.
-2. Do **not** reject an existing old-house stair merely because its dimensions do not satisfy a current legal / recommended dimension.
+1. common Winder / 廻り段 geometry must be predictable;
+2. an existing old-house stair must not become unmodelable merely because it is narrower, tighter or less regular than a present-day recommendation.
 
-JHM is a Blender modeling aid for renovation visualization, not a building-code compliance engine.
+JHM is a Blender modeling aid, not a building-code compliance engine.
 
 ---
 
 # 2. Reference-image policy
 
-Reference images supplied during design discussion are useful for identifying desired pattern families, but they are **not implementation authority**.
+Reference images helped identify desired pattern families, but they are not implementation authority.
 
-Normative rule:
+> **Codex must be able to implement 07-E from repository text alone.**
 
-> **Codex implementation must be possible from repository text alone. No production algorithm may require looking at an external or chat-attached image to infer geometry.**
-
-Therefore:
-
-- `2段廻り`, `3段廻り`, `4段廻り`, `BF-1`, `BF-2` are user-facing pattern identities;
-- exact geometry is defined by vectors, line intersections and partition fractions;
-- no legal or industry-standard expansion of `BF` is assumed by JHM;
-- thumbnails/icons are UI aids only;
-- if an image and the final text contract disagree, the final text contract wins.
+The final Specification defines geometry by vectors, intersections, event ownership, surface stations and face ownership. Thumbnails/icons are UI aids only.
 
 ---
 
-# 3. Major design decisions and reasons
+# 3. Main design decisions
 
-## 3.1 2 / 3 / 4 equal-angle patterns
+## 3.1 Equal-angle patterns use one general rule
 
-These are understandable residential presets but are generated from one rule:
-
-```text
-fraction f_j = j / n
-j = 1 ... n-1
-```
-
-Thus `3段` is not internally synonymous with `30°`; a 72° Turn with 3 Winder treads becomes `24° × 3` automatically.
-
-## 3.2 BF-1 / BF-2 are separate partition rules
-
-The requested BF family is asymmetric. Therefore:
+User-facing 2 / 3 / 4-step Winder presets are generated from fractions, not separate meshes.
 
 ```text
-winder_step_count
-!=
-winder_partition_rule
+f_j = j/n
 ```
 
-For JHM normalized 90° production:
+Thus a 3-step 72° Turn becomes 24° × 3; `3段` is not internally hard-coded as `30°`.
+
+## 3.2 BF is a separate pattern family
+
+BF is asymmetric and therefore cannot be represented merely by an equal-step count.
+
+JHM normalized production：
 
 ```text
-BF_1 fractions = [2/3]  -> 60°, 30°
-BF_2 fractions = [1/3]  -> 30°, 60°
+BF_1 = [2/3] -> 60°,30° at an exact 90° Turn
+BF_2 = [1/3] -> 30°,60° at an exact 90° Turn
 ```
 
-Both contain 2 Winder treads and 1 internal division boundary.
+In the FINAL schema-5 contract, `winder_pattern` is the single persistent authority; `step_count` and partition rule are derived from it. They remain meaningfully distinct concepts even though they are not independent saved authorities.
 
-## 3.3 Arbitrary-angle Landing belongs in 07-E
+## 3.3 Existing 07-D identity is reused
 
-07-D accepts exact ±90° Landing turns. Existing houses can turn by 47°, 63°, 82°, etc. Therefore the angle is derived from Path geometry instead of selected from an angle table.
+A Turn is anchored by the accepted persistent interior `path_point_id`. 07-E does not create a second independent persistent Turn UUID merely to duplicate the same identity.
 
-## 3.4 Shift 15° is an interaction aid only
+## 3.4 Arbitrary-angle Landing belongs in 07-E
 
-```text
-Shift 15° = convenient drawing constraint
-Turn angle = derived from Path
-```
+Existing houses may turn at 47°, 63°, 82° and other angles. Therefore angle comes from Path geometry. Shift 15° remains only a drawing convenience.
 
-A free/numeric 63° Path is not invalid because 63 is not a multiple of 15.
-
-## 3.5 Compact U needs a dedicated derived classification
-
-A common 180° residential Winder may have zero ordinary straight tread between its two quarter-turn regions. Treating every Path segment as a normal Flight would falsely reject this as a short middle Flight.
-
-The accepted 07-D Path points and both Turn IDs remain canonical. A `Composite U Winder Group` may exist only as derived geometry state.
-
-## 3.6 Winder SLOPED_CLOSED is not a Landing underside
-
-A Landing is horizontal and may have a horizontal underside transition. A Winder continues rising through the turn. Therefore its closed sloped soffit must continue vertically through the turn rather than insert a horizontal plateau.
-
----
-
-# 4. Common generalized Turn frame
-
-For an interior canonical Path point:
-
-```text
-T      = P_i
-P_prev = P_(i-1)
-P_next = P_(i+1)
-
-a = normalize(T - P_prev)
-b = normalize(P_next - T)
-```
-
-Signed turn angle:
-
-```text
-theta = atan2(cross2(a, b), dot(a, b))
-```
-
-Project XY convention:
-
-```text
-theta > 0 = left turn
-theta < 0 = right turn
-```
-
-Define:
-
-```text
-s = sign(theta)
-left_normal(d) = (-d.y, d.x)
-inside_normal_in  = s * left_normal(a)
-inside_normal_out = s * left_normal(b)
-```
-
-For stair width `w`:
-
-```text
-incoming inside : T + (w/2) * inside_normal_in  + lambda * a
-incoming outside: T - (w/2) * inside_normal_in  + lambda * a
-
-outgoing inside : T + (w/2) * inside_normal_out + mu * b
-outgoing outside: T - (w/2) * inside_normal_out + mu * b
-```
-
-Resolve:
-
-```text
-I = intersection(incoming inside, outgoing inside)
-O = intersection(incoming outside, outgoing outside)
-
-E_in  = I - w * inside_normal_in
-E_out = I - w * inside_normal_out
-```
-
-Turn envelope:
-
-```text
-I -> E_in -> O -> E_out -> I
-```
-
-This same envelope is used for:
-
-- arbitrary-angle Landing;
-- equal-angle Winder;
-- 90° BF Winder.
-
-Exact 90° / equal width reduces to the accepted 07-D nominal `w × w` Landing footprint.
-
-For ordinary symmetric equal-width cases, the centerline cutback magnitude is:
-
-```text
-d = (w/2) * tan(abs(theta)/2)
-```
-
-This is a geometry relationship, not a legal minimum.
-
----
-
-# 5. Numerical singularity rule
-
-07-E must not impose a building-code angle table.
-
-A Turn may be rejected when it is numerically/geometrically singular, for example:
-
-- incoming/outgoing segment has near-zero length;
-- theta is too close to 0° for a distinct stable Turn cell;
-- theta is too close to ±180° for a stable single-Turn miter;
-- required line intersections are non-finite;
-- required cutback consumes more Path length than available.
-
-Any `eps_length`, `eps_area`, or `eps_angle` is a **numerical tolerance**, not a residential-code threshold.
-
----
-
-# 6. Equal-angle Winder exact construction
-
-From the Turn frame:
-
-```text
-r0 = normalize(E_in  - I)
-r1 = normalize(E_out - I)
-```
-
-For `n` Winder treads:
-
-```text
-fractions = [j/n for j in 1 ... n-1]
-```
-
-For each `f`:
-
-```text
-r_f = rotate(r0, f * theta)
-R_f(t) = I + t * r_f, t > 0
-```
-
-Intersect the ray with the outer chain:
-
-```text
-E_in -> O -> E_out
-```
-
-Choose the nearest valid positive intersection `Q_f`. The segment `I -> Q_f` is a division boundary. Split the Turn envelope into ordered simple tread polygons.
-
-Production fractions:
-
-```text
-EQUAL_2 = [1/2]
-EQUAL_3 = [1/3, 2/3]
-EQUAL_4 = [1/4, 1/2, 3/4]
-```
-
-Exact 90° therefore gives:
-
-```text
-2 steps = 45° + 45°
-3 steps = 30° + 30° + 30°
-4 steps = 22.5° × 4
-```
-
----
-
-# 7. JHM normalized BF-1 / BF-2
-
-BF-1 / BF-2 are project-defined normalized residential pattern identities, not claims about an external legal standard.
-
-07-E BF support is restricted to approximately/exactly 90° single Turns using the project geometry tolerance.
-
-```text
-BF_1 fractions = [2/3]
-→ 60°, 30°
-
-BF_2 fractions = [1/3]
-→ 30°, 60°
-```
-
-Construction uses the same ray / outer-chain algorithm as the equal-angle family.
-
-Left/right uses signed theta. No separate mirrored mesh generator is required.
-
-`REVERSE` does not change BF_1 into BF_2. Plan subdivision remains fixed; only ascent/elevation traversal reverses.
-
----
-
-# 8. U / overall 180° mapping
-
-Canonical authority remains per Turn:
+## 3.5 Production U remains two Turns
 
 ```text
 P0 -> P1 -> P2 -> P3
        T1    T2
 ```
 
-Turn 1 and Turn 2 are independently configurable.
+Overall 180° U geometry is a combination of two persistent Turn anchors. Per-Turn patterns such as `EQUAL_2 + EQUAL_3` or `BF_1 + BF_2` are supported. A derived Compact-U group does not replace the two canonical Turn anchors.
 
-Examples:
+## 3.6 Compact U needs a zero-middle-run classification
 
-```text
-EQUAL_2 + EQUAL_3
-BF_1 + EQUAL_3
-BF_1 + BF_2
-```
+Many residential switchbacks have no ordinary straight tread between the two turning regions. Treating every middle Path segment as a normal Flight would falsely reject such stairs.
 
-For compact U, two reference asymmetric families are:
+The `R_mid` classification exists to distinguish separated U, compact U and real overlap without using a legal-like width gate.
 
-```text
-Turn 1 = BF_1
-Turn 2 = BF_2
-→ 60°, 30°, 30°, 60°
+## 3.7 RiseEvents are explicit
 
-Turn 1 = BF_2
-Turn 2 = BF_1
-→ 30°, 60°, 60°, 30°
-```
-
-These are convenience interpretations only; storage remains individual Turn assignments.
-
----
-
-# 9. Compact U exact rule
-
-Two consecutive Turn anchors:
-
-```text
-T1 = P_i
-T2 = P_(i+1)
-L_mid = length(T2 - T1)
-```
-
-Resolve each Turn envelope from the same actual stair width.
-
-```text
-d1 = Turn1 exit cutback on middle segment
-d2 = Turn2 entry cutback on middle segment
-R_mid = L_mid - d1 - d2
-```
-
-Classification:
-
-```text
-R_mid > +eps_length
-    = SEPARATED_U
-
-abs(R_mid) <= eps_length
-    = COMPACT_U
-    = zero ordinary middle straight run
-
-R_mid < -eps_length
-    = INVALID_OVERLAP
-```
-
-For exact 90° + 90° equal-width turns:
-
-```text
-d1 = w/2
-d2 = w/2
-COMPACT_U when L_mid ~= w
-```
-
-Therefore the rule scales naturally:
-
-```text
-w=900 -> compact separation ~=900 mm
-w=750 -> compact separation ~=750 mm
-w=650 -> compact separation ~=650 mm
-```
-
-There is no 900mm hard-coded compact-U requirement.
-
-`COMPACT_U` keeps both canonical Turn IDs and point IDs, owns zero ordinary middle straight tread/rise events, and allows a derived composite generator only for geometry.
-
----
-
-# 10. Arbitrary-angle Landing
-
-The Landing walking polygon is the same generalized Turn envelope:
-
-```text
-Landing = [I, E_in, O, E_out]
-```
-
-with normalized winding.
-
-```text
-entry = I -> E_in
-exit  = I -> E_out
-outer chain = E_in -> O -> E_out
-```
-
-Thus exact 90° returns the accepted square, while 47°, 63°, 82°, etc. use the same algorithm. There is no separate angle-specific Landing generator.
-
----
-
-# 11. Arbitrary-angle Winder
-
-Arbitrary-angle Winder uses:
-
-```text
-same generalized Turn envelope
-+
-EQUAL_ANGLE partition
-```
-
-Example:
-
-```text
-theta = 63°
-step count = 3
-→ 21° + 21° + 21°
-```
-
-BF is not generalized to arbitrary theta in 07-E.
-
----
-
-# 12. Exact RiseEvent ownership
-
-This section is critical because schema 5 can mix Landing and Winder Turns.
-
-```text
-N = overall_riser_count
-h = floor_to_floor / N
-```
-
-Every physical rise event has exactly one destination owner:
-
-```text
-STRAIGHT_TREAD
-LANDING_ARRIVAL
-WINDER_TREAD
-UPPER_ARRIVAL
-```
-
-Rules:
-
-1. Each independent straight tread owns the rise immediately before that tread.
-2. Each `LANDING` Turn walking surface owns one `LANDING_ARRIVAL` rise event.
-3. Each Winder tread owns one rise event immediately before that tread.
-4. Upper floor arrival owns one final rise event.
-5. No event may be owned twice.
-
-Let:
-
-```text
-S = independent straight tread events
-L = LANDING_ARRIVAL events
-W = Winder tread events
-N = overall riser count
-```
-
-Authority:
+Landing and Winder surfaces participate in the vertical sequence rather than being plan-only decoration.
 
 ```text
 S + L + W + 1 = N
 ```
 
-Examples:
+This avoids double-counting at component boundaries and makes schema-4 -> schema-5 migration reviewable.
 
-```text
-Straight, N=16:
-S=15, L=0, W=0 -> 15+0+0+1=16
+## 3.8 Nominal cells and physical finish solids are separate
 
-L with one Landing, N=16:
-S=14, L=1, W=0 -> 14+1+0+1=16
+A nominal Winder partition must cover the Turn envelope without positive-area overlap. Physical treads may intentionally overlap in XY projection because nosing and rear support exist at different Z ranges.
 
-U with two Landings, N=16:
-S=13, L=2, W=0 -> 13+2+0+1=16
-
-L with 3-step Winder, N=16:
-S=12, L=0, W=3 -> 12+0+3+1=16
-```
-
-A zero-run Compact-U middle region owns zero straight tread events and zero rise events.
+This distinction prevents normal nosing geometry from being incorrectly rejected as a plan-overlap error.
 
 ---
 
-# 13. AUTO allocation rationale
+# 4. Why the old-house width guard is strict
 
-Resolve in this order:
+A renovation presentation may need to reproduce an existing stair without rebuilding its structure. Therefore 07-E prohibits hidden legal-like minimum gates in：
 
-```text
-1. overall N
-2. Turn modes
-3. W = total Winder tread count
-4. L = count of LANDING Turns
-5. reserve 1 final UPPER_ARRIVAL event
-6. straight tread budget = N - W - L - 1
-7. resolve positive straight runs
-8. deterministic integer apportionment
-9. build ordered RiseEvents
-10. geometry validation
-11. atomic commit
-```
+- geometry validation;
+- RNA property ranges;
+- UI clamping;
+- presets.
 
-A zero effective straight run receives zero straight tread events.
+Required regression samples include 900 / 800 / 750 / 700 / 650mm, but 650mm is **not** a production lower bound.
 
-This keeps Landing, Winder and final arrival ownership explicit instead of hiding them inside mesh-generation code.
+A geometry-valid narrow stair may warn; it must not be rejected merely for being narrow.
 
 ---
 
-# 14. MANUAL migration rationale
+# 5. Why SLOPED_CLOSED required extra design review
 
-Existing schema-4 MANUAL allocations were defined around Landing/Flight semantics. Changing a Landing to a Winder changes vertical ownership.
+A Winder keeps rising while its plan direction changes. A Landing-style horizontal underside plateau is therefore not the intended result.
 
-Therefore 07-E does not silently rewrite those user counts.
+The first draft used a singular pivot-spine idea. Third-party review found two concrete problems：
 
-Conservative production rule:
+- an EQUAL_3 center cell could omit the outer corner `O`;
+- triangulating a changing-Z point pivot could create an unintended large vertical triangle.
 
-```text
-schema-4 MANUAL
-+
-LANDING -> WINDER request
-↓
-reject with clear message
-↓
-user explicitly switches to AUTO
-↓
-convert to schema 5 Winder
-↓
-user may switch schema-5 result to MANUAL
-```
+The accepted FINAL solution therefore：
 
-This is safer than inventing an unreviewed redistribution.
+1. preserves every outer-chain vertex, including `Q1 -> O -> Q2`;
+2. inserts geometry-only stations without adding RiseEvents;
+3. uses a finite pivot-relief core derived from physical riser thickness and numerical epsilon;
+4. creates only a localized high-side pivot closure;
+5. forces all faces sharing an edge to share the same subdivision points, preventing T-junctions;
+6. keeps this construction limited to schema-5 Winder SLOPED_CLOSED so accepted Straight/Landing geometry is not rewritten.
+
+This is why the final underbody contract is more explicit than the original planning note.
 
 ---
 
-# 15. Old-house / narrow-stair hard guardrail
+# 6. Why STEPPED_CLOSED has a Winder-specific formula
 
-This is a project requirement, not an optional preference.
+Accepted 07-C Straight geometry contains straight-profile-specific horizontal offsets and terminal behavior. Reusing that exact XZ algorithm on a radial/turning footprint would be artificial.
 
-The geometry gate, RNA property ranges, UI clamping and presets must not reject solely because:
-
-```text
-stair_width < 900 mm
-stair_width < 800 mm
-stair_width < 750 mm
-```
-
-Nor may the design-reference values such as 300 / 150 / 85 mm become universal generation minima.
-
-Do not introduce hidden equivalents such as:
+The FINAL Winder rule instead interprets the same `closed_body_depth` meaning at cell level：
 
 ```text
-MIN_LEGAL_STAIR_WIDTH = 750
-MIN_LEGAL_WINDER_TREAD = ...
+Z_soffit_j = max(base_z, tread_top_j - closed_body_depth)
 ```
 
-Reject actual geometry failure, for example:
-
-- non-finite / non-positive Turn envelope;
-- self-intersecting tread polygon;
-- positive-area overlap;
-- walking-surface gap;
-- zero/near-zero geometry beyond numerical epsilon;
-- failed partition intersection;
-- Turn overlap;
-- Path self-intersection;
-- required cutback exceeding available segment geometry.
-
-If geometry remains valid, a very narrow or tight old-house configuration may warn but should generate.
-
-Required regression widths include:
-
-```text
-900
-800
-750
-700
-650 mm
-```
-
-If an existing property-level minimum prevents such a representative valid case from even being entered, the range may be corrected without changing the project default width. The future default-width change itself remains outside 07-E.
+This is a schema-5 Winder extension, not a replacement for accepted 07-C Straight generation.
 
 ---
 
-# 16. SLOPED_CLOSED rationale
+# 7. Why Compact-U Side Board is one shared family
 
-A Winder changes plan direction while continuing vertical progression.
+Generating two independent coincident center boards and then rejecting their collision would make Compact U unreliable, especially in narrow existing houses.
 
-Authority:
+The FINAL contract therefore solves a seam-local `(s,z)` profile first, then creates one `SHARED_CENTER_BOARD` family. It may contain multiple closed components if required.
+
+Important design choices：
+
+- lower edge comes from `underside_mode`;
+- upper edge comes from `side_board_mode` and walking/reveal authority;
+- point-only profile contact is not welded;
+- shared thickness is centered on the center seam;
+- only actual 3D overlap with TREAD/RISER/UNDERBODY is trimmed;
+- ordinary/shared board ends use a deterministic butt joint, not an implicit miter or transition invented by the implementer.
+
+---
+
+# 8. Why Side Board upper/lower modes remain independent
+
+Accepted 07-C already established：
 
 ```text
-lower straight soffit boundary
-↓
-ordered Winder lower-surface stations
-↓
-upper straight soffit boundary
+underside_mode  -> lower Side Board boundary
+side_board_mode -> upper / visible Side Board boundary
 ```
 
-Requirements:
-
-- C0 continuity at both joins;
-- continued elevation progression through the Winder;
-- no horizontal Landing plateau through a Winder;
-- piecewise planar / triangulated surface is allowed;
-- C1 tangent continuity is not required in 07-E;
-- no cavity, giant filler prism, or duplicate positive-volume body;
-- same Path / width / RiseEvent authority as the top geometry.
-
-This is intentionally Stage 3 work after top-plan acceptance.
+07-E preserves that architecture. A SLOPED board upper edge is derived from walking-surface/reveal progression; it is not simply copied from the SLOPED underbody height.
 
 ---
 
-# 17. Side Board rationale
-
-Winder Side Boards derive from the same resolved inside/outside Turn boundaries and elevation sequence.
-
-Do not patch a visually plausible disconnected board onto the turn.
-
-Requirements:
-
-- stable physical left/right side;
-- no unexpected Reverse side-swap;
-- outer board follows the outer Turn chain;
-- inner board may be trimmed/segmented around a tight pivot;
-- Flight/Winder joins share exact derived positions;
-- Compact-U center boards are checked for collision.
-
----
-
-# 18. Alternatives considered and rejected
-
-1. **Hard-code a separate mesh per pattern** — duplicates logic and blocks arbitrary-angle reuse.
-2. **Use `3段=30°` as the model** — confuses step count with partition rule.
-3. **Reject below a legal-like width** — conflicts with renovation modeling of old houses.
-4. **Treat every U middle segment as a normal Flight** — falsely rejects Compact U.
-5. **Replace two U Turns with one fake 180° Turn** — breaks accepted point/Turn identity architecture.
-6. **Separate 45°/60°/90° Landing generators** — does not support arbitrary existing-house geometry.
-7. **Use reference images as coding instructions** — ambiguous and not durable repository authority.
-8. **Solve top, underside and Side Board simultaneously** — repeats the 07-D debugging problem.
-
----
-
-# 19. Why Stage order is deliberate
+# 9. Why Stage order is deliberate
 
 ```text
 Stage 1
-canonical Turn + 90° EQUAL L Winder
+canonical Turn / RiseEvent / 90° EQUAL L Winder
 ↓
 Stage 2
-BF + U / Compact U + arbitrary-angle Landing/Winder
+BF / U / Compact U / arbitrary-angle
 ↓
 Stage 3
-closed underside + Side Board
+STEPPED_CLOSED / SLOPED_CLOSED / Side Board
 ↓
 Stage 4
-lifecycle + regression + practical acceptance
+lifecycle / regression / practical acceptance
 ```
 
-This isolates plan errors from finish-surface errors and preserves a clear runtime acceptance boundary between them.
+07-D showed that debugging plan geometry, underside and Side Board simultaneously creates long correction loops. 07-E deliberately accepts the top/vertical foundation first and adds finish geometry afterward.
 
 ---
 
-# 20. Third-party review checklist
+# 10. Review history
 
-Reviewer should read:
+07-E received three repository-based third-party reviews：
 
 ```text
-ROADMAP.md
-BUILD_07_D_SPECIFICATION.md
-BUILD_07_D_ACCEPTANCE_RECORD.md
-BUILD_07_E_SPECIFICATION.md
-BUILD_07_E_DESIGN_RATIONALE.md
-DEVELOPMENT_WORKFLOW.md
+Review 1: REVISE GEOMETRY CONTRACT
+Review 2: REVISE GEOMETRY CONTRACT AGAIN
+Review 3: ACCEPT WITH CLARIFICATIONS
 ```
 
-Questions:
+Those reviews led to explicit rules for：
 
-- Does schema-5 preserve accepted schema-1/2/3/4 without silent migration?
-- Is the generalized Turn frame mathematically consistent for left/right and oblique turns?
-- Does exact 90° reduce to the accepted 07-D square Landing?
-- Are Winder step count and partition rule separated correctly?
-- Are BF_1/BF_2 reproducible from text alone?
-- Is BF left/right/Reverse behavior unambiguous?
-- Is Compact-U `R_mid` classification sufficient?
-- Is arbitrary-angle Landing free of angle-specific hard-coding?
-- Is `S + L + W + 1 = N` complete for mixed Landing/Winder stairs?
-- Is schema-4 MANUAL -> WINDER conversion safely handled?
-- Can validator/property/UI rules accidentally become hidden building-code gates?
-- Are 700/650mm geometry-valid old-house cases modelable?
-- Are numerical epsilons clearly distinct from legal-like minima?
-- Is Winder SLOPED_CLOSED continuity defined strongly enough?
-- Are Side Boards derived from the same Turn geometry rather than patched afterward?
-- Is Stage separation sufficient to avoid the 07-D underside-debugging problem?
-- Are any requirements unnecessarily expensive relative to the renovation-visualization goal?
-- Are there contradictions among Roadmap, 07-D accepted contracts and 07-E proposed contracts?
+- deterministic straight allocation;
+- RiseEvent ownership;
+- schema migration;
+- nominal vs physical geometry;
+- outer-corner preservation;
+- finite pivot relief;
+- Compact-U shared SLOPED height;
+- Winder STEPPED_CLOSED Z;
+- Side Board shared-center profile / trim / butt-joint rules;
+- full-finish narrow-width regression fixtures.
 
-Reviewer should identify the exact section/invariant behind each recommendation.
+Historical review/revision documents remain in the repository for auditability. They are not separate implementation authorities after this FINAL Specification.
 
 ---
 
-# 21. Items intentionally outside 07-E
+# 11. Intentional non-scope
 
-Do not mix in unless a direct blocker is found:
+07-E does not absorb：
 
-- default stair width change from 900mm to a future project default such as 750mm;
-- general Stair panel compacting / collapsible UI redesign;
-- broad unrelated UX cleanup;
-- Riser OFF / Underside NONE / support variants (07-F);
-- optional tread-detail expansion (07-G);
-- Floor / Room dependency (08);
-- Door / Window integration (09).
+- future project default width change (for example 900 -> 750mm);
+- broad Stair panel compacting/collapsible UI redesign;
+- Riser OFF / open/support variants (07-F);
+- optional detail expansion (07-G);
+- Floor/Room dependency (08);
+- Door/Window integration (09);
+- building-code compliance judgment.
 
----
-
-# 22. Review-to-FINAL rule
-
-Before `BUILD_07_E_SPECIFICATION.md` becomes `FINAL / IMPLEMENTATION AUTHORITY`:
-
-1. third-party review is completed;
-2. accepted review changes are incorporated;
-3. this rationale and the Specification are checked for contradictions;
-4. all production geometry can be implemented from repository text without reference images;
-5. legal-sounding dimensions are confirmed not to be core generation thresholds;
-6. only then is the Specification status changed to FINAL and Codex Stage 1 implementation instructed.
+Keeping these separate reduces regression risk while 07-E completes the core turning-stair geometry.
