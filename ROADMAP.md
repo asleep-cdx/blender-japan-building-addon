@@ -61,15 +61,16 @@
 - **Build 07-C overall — ACCEPTED**
 - **Build 07-D — ACCEPTED**
 - **Build 07-D overall — ACCEPTED**
-- **Build 07-E — NEXT / SPECIFICATION PLANNING**
+- **Build 07-E — NEXT / SPECIFICATION FINAL / IMPLEMENTATION NEXT**
 - **Build 07-F — HOLD after 07-E**
 - **Build 07-G — HOLD / OPTIONAL BACKLOG**
 - Current accepted add-on version: **0.7.3**
 - Build 07-D final identification: `Build 07-D: Multi-point Path + L/U + Landing`
+- Build 07-E Specification: **FINAL / IMPLEMENTATION AUTHORITY**
 
 現時点で、Wall System、Finish Attachment Foundation、Baseboard、Crown Moulding、standalone Managed Stair Core、Standard Residential Straight Stair、07-C Straight Stair Finish Variants、および07-D Multi-point L/U + Landingまでの基盤が成立している。
 
-07-D完了後の次の主要開発は **Build 07-E — Winder / 廻り段 + arbitrary-angle Turn / Landing extension** とする。
+07-D完了後の次の主要開発は **Build 07-E — Winder / 廻り段 + arbitrary-angle Turn / Landing extension** とし、仕様書は第三者レビュー3回を経てFINAL化済み。次はCodexによるStage 1 implementationへ進む。
 
 Build 07は07-Eを一般住宅の直線＋折れ曲がり階段の主要ゴールとし、07-E Acceptance後はいったん07-F / 07-Gを保留して08-A / 08-Bへ進む。08-B完了後、既知問題 8.5 のFinish endpoint mismatchを修正してから、Wall / Finish / Floor / Ceiling / Stair / Voidを使う早期一室Core統合試験を実施する。
 
@@ -90,7 +91,7 @@ Door / Window / Boolean / Finish Exclusionを含む完全な一室統合試験�
 | **07-B** | Standard Residential Straight Stair + Stepped Closed Underside + Side Boards | **DONE / ACCEPTED** |
 | **07-C** | Sloped Closed Underside + Straight Stair Finish Variants | **DONE / ACCEPTED** |
 | **07-D** | Multi-point Path + L/U + Landing | **DONE / ACCEPTED** |
-| **07-E** | Winder / 廻り段 + arbitrary-angle Turn / Landing | **NEXT** |
+| **07-E** | Winder / 廻り段 + arbitrary-angle Turn / Landing | **NEXT / SPEC FINAL** |
 | **07-F** | Open / Support Variants | **HOLD after 07-E** |
 | **07-G** | Optional Stair Detail Expansion | **HOLD / Optional Backlog** |
 | **08-A** | Minimal Room / Boundary + Floor | Planned after 07-E |
@@ -962,28 +963,30 @@ Acceptance済み主要機能：
 
 ## 12.12 Build 07-E — Winder / 廻り段 + arbitrary-angle Turn / Landing
 
-**Status: NEXT / SPECIFICATION PLANNING**
+**Status: NEXT / SPECIFICATION FINAL / IMPLEMENTATION NEXT**
+
+Implementation authority：`BUILD_07_E_SPECIFICATION.md` — **FINAL / IMPLEMENTATION AUTHORITY**。
 
 07-Eは階段Buildの主要本命とし、07-DのMulti-point / Turn foundationを拡張して一般的な住宅の廻り階段と、変形住宅の90°以外の折れ曲がり階段をproduction対応する。
 
 ### Primary production scope
 
 - 90° Winder
-- 180° Winder / U-turn combination
+- overall 180° U-turn as **two persistent Turn combination**
 - arbitrary-angle Turn foundation
 - arbitrary-angle Landing
-- arbitrary-angle Winder where geometry is valid
+- arbitrary-angle equal-angle Winder where geometry is valid
 - inner / outer tread geometry
-- riser distribution including Winder steps
-- L / U / multi-turn path combination
-- side-board continuation at Winder
+- RiseEvent / riser distribution including Winder steps
+- 3-point L / 4-point U production scope
+- Side Board continuation at Winder
 - STEPPED_CLOSED continuation
 - **continuous SLOPED_CLOSED Winder soffit**
 - Material / Reverse / persistence / lifecycle compatibility
 
 ### Winder pattern UX
 
-住宅用途の基本Winder patternとして、少なくとも以下をUIで選択できる方向とする。
+住宅用途の基本Winder pattern：
 
 ```text
 90° Winder
@@ -994,169 +997,159 @@ Acceptance済み主要機能：
 └ BF-2
 ```
 
-2段 / 3段 / 4段はstandard patternとして扱う。BF-1 / BF-2は均等角分割とは異なる住宅用の分割familyとして別pattern identityを持たせる。
+UIでは小さなplan thumbnail/iconを優先候補とするが、画像はgeometry authorityではない。
 
-UIは文字Dropdownだけでなく、小さな平面サムネイル / iconによるpattern選択を優先候補とする。06-C Profile Thumbnail UIの経験を再利用できるが、詳細UIは07-E Specificationで決める。
-
-U字 / 180°では各Turnへ個別patternを設定できる設計を優先する。
-
-例：
+U字では各Turnへ個別patternを設定する。
 
 ```text
-Turn 1 = 2段廻り
-Turn 2 = 3段廻り
+Turn 1 = EQUAL_2
+Turn 2 = EQUAL_3
 ```
 
-または
+または：
 
 ```text
-Turn 1 = BF-1
-Turn 2 = 3段廻り
+Turn 1 = BF_1
+Turn 2 = EQUAL_3
 ```
 
-のように組み合わせ、U字用の全組み合わせを別presetとして大量登録しない。
+U字用全組合せを別persistent presetとして大量登録しない。
 
-### Equal-angle subdivision as standard baseline
+### Equal-angle subdivision baseline
 
-standard Winderでは、Turn角 `theta` とWinder段数 `n` から**等角分割を基本baseline**として使用できる設計とする。
-
-例：
+Single Turnのstandard Winderは、Turn角 `theta` とpatternから等角fractionを導出する。
 
 ```text
-90° / 2段 = 45° per division
-90° / 3段 = 30° per division
-90° / 4段 = 22.5° per division
+90° / EQUAL_2 = 45° + 45°
+90° / EQUAL_3 = 30° + 30° + 30°
+90° / EQUAL_4 = 22.5° × 4
 
-180° / 2段 = 90° per division
-180° / 3段 = 60° per division
-180° / 4段 = 45° per division
-180° / 5段 = 36° per division
-180° / 6段 = 30° per division
+63° / EQUAL_3 = 21° + 21° + 21°
 ```
 
-ただし、**すべてのWinderを等角分割へ固定しない。** BF-1 / BF-2や将来のcustom partitionは別のpartition ruleを持てること。
+**Roadmap上のsingle-Turn数学例と07-E production Uを混同しない。**
 
-`winder_step_count` と `winder_partition_rule` を意味上分離し、単に「3段だから必ず30°」というhard-coded generatorにしない。
+Genericな「180°を1つのTurnとして2段/3段/…へ等角分割する」式は数学的には記述できるが、**07-E production Acceptanceの約束ではない**。07-Eのoverall 180° Uは、existing 4-point Path上の**2つのpersistent Turn**へ個別patternを割り当てて構成する。
+
+したがって、07-Eは「total 2-step single-180° U」や「total 3-step single-180° U」を必須機能としない。
+
+### Canonical Turn authority
+
+07-E schema-5：
+
+```text
+TurnState
+├ path_point_id        # persistent Turn identity authority
+├ turn_mode            LANDING / WINDER
+└ winder_pattern       NONE / EQUAL_2 / EQUAL_3 / EQUAL_4 / BF_1 / BF_2
+```
+
+Derived：
+
+```text
+signed_turn_angle
+winder_step_count
+winder_partition_rule
+```
+
+独立persistent `turn_id`を重複作成せず、`winder_pattern`をsingle canonical pattern authorityとする。
 
 ### Arbitrary-angle Turn / Landing contract
 
-07-EではTurnを90°専用ロジックから一般化する。
-
 ```text
-incoming segment direction
+incoming direction
 +
-outgoing segment direction
+outgoing direction
 ↓
-signed turn angle theta
+signed theta
 ```
 
-を解決し、そのTurnへ `LANDING` / `WINDER` modeを適用する。
+を解決し、`LANDING` / `WINDER`を適用する。
 
-Shift 15°拘束はマウス操作の便利機能として維持するが、**production Turn角そのものを15°刻みに限定しない。** 数値Path編集や自由なPath geometryから45°以外、60°以外、その他の有効な斜めTurnも扱えるArchitectureとする。
+Shift15°はinteraction aidのみ。Production Turn angleは15°刻みに限定しない。
 
-これにより変形住宅で、例えば45° / 60° / 75° / 105°等に限らないoblique Landingを表現できる方向とする。
-
-既存07-D exact-90 Landingは互換性のためそのまま保持する。
+既存07-D exact-90 Landingはschema-4 compatibilityとして保持する。
 
 ### Width / legacy-house policy
 
-07-Eの生成可否を、現行法規や参考図の固定寸法へhard-codeしない。
+07-Eの生成可否を現行法規や参考図の固定寸法へhard-codeしない。
 
-特に、
+- width900mm前提にしない
+- 750 / 700 / 650mm等をwidth aloneで拒否しない
+- 300 / 150 / 85mm等をuniversal minimumにしない
+- validator / RNA range / UI clamp / presetにlegal-like hidden gateを入れない
+- 650mmは回帰fixtureでありproduction minimumではない
 
-- stair width 900 mmを前提にしない
-- 750 / 800 mm等へ幅変更しただけでWinder生成を拒否しない
-- 参考図にある300 mm / 150 mm / 85 mm等をproduction geometryの絶対minimumとして固定しない
-- 古い木造住宅の狭いWinderや変形階段も、数学的に成立する限りモデリング可能な方向とする
-
-本Addonは法規適合判定ソフトではない。将来optional validationを追加する余地は残すが、07-Eのcore geometry生成では「現行法規寸法を満たさないから生成不可」としない。
+本Addonは法規適合判定ソフトではない。
 
 ### Geometry safeguards
 
-一方で、数学的・Mesh的に成立しないgeometryは明示的に拒否または警告する。
+Rejectはactual geometry / mesh failureに基づく。
 
-最低限の対象候補：
+例：
 
-- tread polygon self-intersection
-- adjacent Winder tread overlap
-- zero / negative area face
-- non-finite coordinate
-- degenerate edge / collapsed turn region
-- impossible offset intersection
-- Side Board / closed-underbody generationが成立しない局所geometry
-- Path segmentが短すぎて必要なTurn geometryを配置できない状態
+- non-finite intersection
+- self-intersection
+- non-positive nominal cell
+- partition failure
+- required cutback exceeding Path
+- Turn overlap
+- physical finish intersection that cannot be validly trimmed
+- underbody/tread penetration
 
-「狭い」だけを理由に拒否しない。法規寸法とgeometry validityを分離する。
+Failure classは`GEOMETRY_INVALID / SCOPE_UNSUPPORTED / ADVISORY_ONLY`を区別する。
 
-狭すぎる踏面等をUI warningとして表示する場合も、07-E Specificationでwarningとhard rejectionを明確に分ける。
-
-### Continuous sloped underside at Winder
-
-07-D LandingではFlight slopeの間に水平Landing undersideが入った。
-
-07-E Winderの `SLOPED_CLOSED` はLandingの水平plateauを挟まず、Winder step elevationの進行に合わせて、
+### Continuous SLOPED_CLOSED at Winder
 
 ```text
 Lower Flight sloped soffit
         ↓
-Winder continuous / turning soffit
+Winder continuous turning soffit
         ↓
 Upper Flight sloped soffit
 ```
 
-として連続するclosed undersideをproduction targetとする。
+Winderではhorizontal Landing plateauを入れない。
 
-これはTurn全体が必ず1枚の平面になることを意味しない。平面方向が曲がるため、必要なpiecewise surfaceで構成してよいが、**高さ進行と見た目として勾配下面が途切れず、Landingのような不必要な水平段差を入れない**ことを重視する。
+第三者reviewを経て、FINAL contractは：
 
-07-B / 07-CのCLOSED invariantは維持し、下方からTread裏・Riser裏・内部空洞を露出させない。
+- complete outer-chain preservation (`Q1 -> O -> Q2`等)
+- finite pivot-relief core
+- local high-side pivot closure
+- no T-junction shared-edge subdivision
+- Compact-U event-group shared Z
+
+をtext-onlyで定義した。
 
 ### Side Board continuation
 
-Winder部分のSide Boardも、各Flight端へ局所patchを足す方式だけに依存せず、Turnを含む連続境界とstep elevationから導出できる設計を優先する。
-
-特にStage 3では、07-D Stage 2で苦労したLanding underside / Side Board終端の局所修正を繰り返さないよう、Winder専用のboundary / soffit / Side Board ownershipを先に明文化する。
-
-### Canonical Turn data
-
-Path折れ点だけからWinder形状・turn area・winder step countを勝手に決めない。
-
-07-E Specificationでは少なくとも概念上、Turnごとに以下を保持する方向で検討する。
+07-C accepted independenceを維持：
 
 ```text
-TurnState
-├ turn_point_id / turn index
-├ turn_mode = LANDING / WINDER
-├ signed_turn_angle (derived or validated)
-├ winder_step_count
-├ winder_pattern / partition_rule
-├ turn_region parameters
-└ future optional validation metadata
+underside_mode  -> lower Side Board boundary
+side_board_mode -> upper Side Board boundary
 ```
 
-canonical field名とschema migrationはSpecificationで確定する。
+Compact U中央では2枚を衝突させず、shared-center profile / symmetric thickness / actual 3D trim / deterministic butt jointを使用する。
 
-### Recommended internal stages
-
-07-Dで下面・Side Boardの調整が長期化した経験から、07-Eでは平面Winder geometryと下面仕上げを同一Stageへ詰め込みすぎない。
+### Final Stage structure
 
 ```text
 Stage 1
-Turn canonical foundation
-+ arbitrary-angle Turn resolver
-+ 90° standard 2/3/4-step Winder top geometry
+schema-5 Turn / RiseEvent foundation
++ 90° EQUAL_2/3/4 L Winder top geometry
 
 Stage 2
 BF-1 / BF-2
-+ per-Turn pattern
-+ 180° / U combinations
++ per-Turn U / Compact U
 + arbitrary-angle Landing / Winder
-+ Winder riser distribution
++ schema migration / physical finish integration
 
 Stage 3
 STEPPED_CLOSED
-+ continuous SLOPED_CLOSED Winder soffit
-+ Side Board continuation
-+ Material / Reverse geometry
++ continuous SLOPED_CLOSED finite pivot relief
++ ordinary Side Board
++ Compact-U shared Side Board
 
 Stage 4
 Save/Reopen
@@ -1168,11 +1161,11 @@ Save/Reopen
 + final topology / visual acceptance
 ```
 
-Stage構成はSpecification draftingで調整可能だが、**上から見た廻り段Geometryを先にAcceptance可能な状態へ近づけ、その後に下面・側板へ集中する**方針を優先する。
+上面・RiseEvent Geometryを先にAcceptance可能な状態へ近づけ、その後に下面・側板へ集中する。
 
 ### Practical checkpoint after 07-E
 
-07-E Acceptanceでは、実際の住宅に近い簡易シーンへ Straight / L-U Landing / Winder / oblique Landing を配置し、平面配置・視覚寸法・狭い住宅寸法での生成・使い勝手を確認する。
+07-E Acceptanceでは実住宅に近い簡易sceneへStraight / L-U Landing / Winder / oblique Landingを配置し、狭い住宅寸法を含む実用確認を行う。
 
 07-E Acceptance後はいったん07-F / 07-Gを保留し、08-A / 08-Bへ進む。
 
@@ -1463,6 +1456,7 @@ Build 07はstandalone Stairとして成立させるが、Integrationでは住宅
 
 - **07-C完了時**：直線住宅階段の実用性を確認し07-Dへ進むことを決定、完了済み。
 - **07-D完了時**：Multi-point L/U + LandingのAcceptance完了。07-E Winder / arbitrary-angle Turnへ進む。
+- **07-E仕様FINAL時**：第三者レビューを反映し、Codex Stage 1 implementationへ進む。
 - **07-E完了時**：一般住宅の折れ曲がり階段としてpractical checkpointを行い、07-F / 07-Gを保留して08-A / 08-Bへ進む。
 - **08-B完了時**：Known Issue 8.5を修正後、Integration Coreを実施する。
 - **Integration Core完了時**：Foundation問題を整理し、09 minimalへ進む。
@@ -1568,26 +1562,28 @@ Roadmap変更は許可するが、Accepted historyは消さない。
 07-B  ACCEPTED
 07-C  ACCEPTED
 07-D  ACCEPTED
+07-E  SPECIFICATION FINAL
 ```
 
 次：
 
 ```text
-07-E Winder / 廻り段
-     + 2 / 3 / 4-step standard patterns
-     + BF-1 / BF-2
-     + 90° / 180° combinations
-     + arbitrary-angle Landing / Turn foundation
-     + continuous SLOPED_CLOSED Winder soffit
+07-E Stage 1 implementation
+     + schema-5 Turn identity / pattern authority
+     + exact RiseEvent allocation
+     + 90° L EQUAL_2 / EQUAL_3 / EQUAL_4 Winder
+     + text-only reviewed geometry contract
 ```
 
 状態遷移：
 
 ```text
-07-D ACCEPTED → 07-E NEXT
+07-D ACCEPTED
+→ 07-E SPECIFICATION FINAL
+→ 07-E STAGE 1 IMPLEMENTATION NEXT
 ```
 
-07-E Specificationはこれから作成する。07-E完成後は07-F / 07-GをHOLDし、08-A / 08-Bへ進む。
+07-E完成後は07-F / 07-GをHOLDし、08-A / 08-Bへ進む。
 
 ---
 
@@ -1612,7 +1608,7 @@ Crown
     ↓
 07-D Multi-point L/U + Landing [ACCEPTED]
     ↓
-07-E Winder + arbitrary-angle Turn / Landing
+07-E Winder + arbitrary-angle Turn / Landing [SPEC FINAL / NEXT]
     ↓
 [07-E practical checkpoint]
     ↓
