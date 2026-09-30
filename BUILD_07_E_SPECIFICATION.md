@@ -22,7 +22,7 @@ Build 07-E は、Build 07-D までに成立した Straight / L / U / Multi-point
 5. BF-1 / BF-2 を均等角分割とは別の住宅用 asymmetric pattern family として提供する。
 6. Turn angle を exact 90°限定から一般化し、valid な arbitrary-angle Landing を production 対応する。
 7. valid な arbitrary-angle Winder を、少なくとも `EQUAL_ANGLE` partition で production 対応する。
-8. Winder step を含む overall riser / height distribution を Stair 全体で一貫させる。
+8. Landing / Winderを含む overall riser / height distribution を Stair 全体で一貫させる。
 9. `STEPPED_CLOSED` / `SLOPED_CLOSED` / Side Board を Winderへ継続し、とくに `SLOPED_CLOSED` は水平Landing plateauを挟まない連続した廻り下面を作る。
 10. 07-E完了時点で一般住宅の直線＋折れ曲がり階段の主要ゴールとし、07-F / 07-Gを保留して08-A / 08-Bへ進める状態にする。
 
@@ -549,7 +549,7 @@ Physical plan subdivisionは同じ。Elevation / ascent traversalだけを反転
 
 ### 15.1 Widthを法規風minimumでrejectしない
 
-Core geometry validatorは、次の理由だけでrejectしてはならない：
+Core geometry validator、RNA property range、UI clamping、preset validationのいずれも、次の理由だけでWinder生成を拒否してはならない：
 
 ```text
 stair_width < 900 mm
@@ -573,6 +573,8 @@ MIN_LEGAL_WINDER_TREAD = ...
 ```
 
 07-E coreはlegal compliance engineではない。
+
+既存property-level minimumが650mm等のold-house representative testを入力不能にしている場合は、法規判定を追加するのではなく、positive finite geometryを許すために必要な最小限のrange correctionを07-E scope内で行ってよい。ただしdefault widthの変更は07-E scope外。
 
 ### 15.2 Width変更時
 
@@ -660,7 +662,7 @@ Warningはlegal pass/fail判定ではない。
 
 ## 17. Exact rise-event ownership
 
-Winderはplan decorationではなく、actual vertical sequenceへ参加する。
+Landing / Winderはplan decorationではなくactual vertical sequenceへ参加する。
 
 ```text
 N = overall_riser_count
@@ -673,6 +675,7 @@ Every rise event has exactly one destination owner：
 
 ```text
 STRAIGHT_TREAD
+LANDING_ARRIVAL
 WINDER_TREAD
 UPPER_ARRIVAL
 ```
@@ -680,52 +683,66 @@ UPPER_ARRIVAL
 Rules：
 
 1. independent straight treadは、そのtread直前のrise eventを1つ所有する。
-2. each Winder treadは、そのWinder tread直前のrise eventを1つ所有する。
-3. Upper floor arrivalはfinal rise eventを1つ所有する。
-4. 同じeventをFlightとWinderで二重countしない。
-5. Winder treadはplan-onlyではなく必ずvertical sequenceに参加する。
+2. each `LANDING` Turnのwalking surfaceは、そのLandingへ到達するrise eventを1つ所有する。
+3. each Winder treadは、そのWinder tread直前のrise eventを1つ所有する。
+4. Upper floor arrivalはfinal rise eventを1つ所有する。
+5. 同じeventをFlight / Landing / Winderで二重countしない。
+6. Winder treadはplan-onlyではなく必ずvertical sequenceに参加する。
 
 Let：
 
 ```text
 S = total independent straight-tread events
-W = total Winder tread count across all Turns
-N = overall riser_count
+L = total LANDING_ARRIVAL events
+W = total Winder tread count across all WINDER Turns
+N = overall_riser_count
 ```
 
 Invariant：
 
 ```text
-S + W + 1 = N
+S + L + W + 1 = N
 ```
 
 `+1`はfinal upper-arrival rise。
 
-Equivalent component form：
+### 17.1 Compatibility examples
+
+Straight only：
 
 ```text
-sum(straight_region rise events)
-+
-sum(winder_step_count)
-=
-N
+N=16
+S=15, L=0, W=0
+15 + 0 + 0 + 1 = 16
 ```
 
-ただしfinal straight regionのrise-event countはupper-arrival eventを含む。
-
-### 17.1 Straight region ownership
-
-Non-final positive straight region：
+07-D-style L with one Landing：
 
 ```text
-rise events = number of independent straight treads
+N=16
+S=14, L=1, W=0
+14 + 1 + 0 + 1 = 16
 ```
 
-Final straight region：
+07-D-style U with two Landings：
 
 ```text
-rise events = independent straight treads + 1 upper-arrival event
+N=16
+S=13, L=2, W=0
+13 + 2 + 0 + 1 = 16
 ```
+
+L with 3-step Winder：
+
+```text
+N=16
+S=12, L=0, W=3
+12 + 0 + 3 + 1 = 16
+```
+
+### 17.2 Straight region ownership
+
+Ordinary independent straight tread：1 event。
 
 Compact-U zero ordinary middle run：
 
@@ -734,7 +751,9 @@ Compact-U zero ordinary middle run：
 0 rise events
 ```
 
-このownershipがtread elevations / riser boardsのauthorityである。
+Final `UPPER_ARRIVAL`はseparate ownerであり、WinderやLanding countへ混ぜない。
+
+このownershipがtread/landing elevations / riser boardsのauthorityである。
 
 ---
 
@@ -744,27 +763,29 @@ Resolve order：
 
 ```text
 1. overall N
-2. all Winder patterns and W = sum(winder_step_count)
-3. reserve 1 final UPPER_ARRIVAL event
-4. straight independent-tread budget = N - W - 1
-5. resolve effective positive straight runs
-6. deterministic integer apportionment across those runs
-7. add final UPPER_ARRIVAL event to final Flight ownership
-8. validate going / turn / body / board candidate
-9. atomic commit
+2. resolve all Turn modes
+3. W = sum(winder_step_count for WINDER turns)
+4. L = count(LANDING turns)
+5. reserve 1 final UPPER_ARRIVAL event
+6. straight independent-tread budget = N - W - L - 1
+7. resolve effective positive straight runs
+8. deterministic integer apportionment of straight tread events
+9. derive component elevations from ordered RiseEvents
+10. validate going / turn / body / board candidate
+11. atomic commit
 ```
 
 Zero effective straight runは0 straight tread eventsを受け取る。
 
 ```text
-N - W - 1 < 0
+N - W - L - 1 < 0
 ```
 
 ならreject。
 
 Allocatorはdeterministic。Tieはcanonical Path / component orderで解決する。
 
-Path / width / Turn pattern変更時はcandidate全体を再解決し、sum invariantを満たした場合だけcommitする。
+Path / width / Turn mode / Winder pattern変更時はcandidate全体を再解決し、`S + L + W + 1 = N`を満たした場合だけcommitする。
 
 ---
 
@@ -774,7 +795,7 @@ Path / width / Turn pattern変更時はcandidate全体を再解決し、sum inva
 
 Existing schema-4 MANUAL allocation semanticを、LandingをWinderへ変えるだけでsilent reinterpretしてはならない。
 
-Winder tread eventsを追加しながら旧Flight countsをそのまま維持するとriseがdouble-countされ得る。
+Landing arrival eventをWinder tread eventsへ置き換えるとcomponent ownershipが変わるため、旧Flight countsをsilent preserveしながらWinder countsを追加するとdouble-count / redistributionが起こり得る。
 
 Initial 07-E conservative production rule：
 
@@ -798,14 +819,16 @@ user may switch resulting schema-5 state to MANUAL
 
 schema-5 MANUALでは：
 
+- Turn modeを保持する。
+- LANDING Turnは1 `LANDING_ARRIVAL` eventを固定所有する。
 - Winder pattern / step countはuser選択を保持する。
-- straight-region component allocationをexplicitに保持する。
-- total rise-event invariantを必須とする。
+- straight-region tread-event allocationをexplicitに保持する。
+- `S + L + W + 1 = N`を必須とする。
 - invalid totalを勝手に補正しない。
 - Path/width変更でallocationがinvalidになったらtransactionをreject / rollbackする。
 - AUTO→MANUAL時はcurrent resolved schema-5 component allocationを初期値にする。
 
-UI wordingは既存07-Dと整合させつつ、schema-5で「Winder step count」と「straight allocation」が別authorityであることを曖昧にしない。
+UI wordingは既存07-Dと整合させつつ、schema-5でLanding arrival / Winder step / straight allocationが別ownershipであることを曖昧にしない。
 
 ---
 
@@ -836,13 +859,11 @@ Turn 1 = BF_1
 Turn 2 = EQUAL_3
 ```
 
-この方式でU用全組み合わせを別presetとして大量登録しない。
+LANDING / WINDER混在もcanonical上許可する。各TurnのmodeがRiseEvent ownershipを決める。
 
-2/3/4 per-Turn combinationにより、overall 180°側では4,5,6,7,8等のWinder tread countを自然に構成できる。
+2/3/4 per-Turn combinationにより、both-Winder Uではoverall 4,5,6,7,8等のWinder tread countを自然に構成できる。
 
 ### 20.1 BF U reference families
-
-Convenience interpretation：
 
 ```text
 U BF-family 1
@@ -856,7 +877,7 @@ Turn 2 = BF_1
 aggregate = 30°, 60°, 60°, 30°
 ```
 
-Canonical storageはあくまでindividual Turn assignments。
+Canonical storageはindividual Turn assignments。
 
 ---
 
@@ -874,13 +895,13 @@ L_mid = length(T2 - T1)
 
 各Turn envelopeをsame stair widthから独立解決する。
 
-Turn 1がmiddle segment上で消費するexit cutback：
+Turn 1 middle-side exit cutback：
 
 ```text
 d1 = exit_cutback_on_middle_segment
 ```
 
-Turn 2がmiddle segment上で消費するentry cutback：
+Turn 2 middle-side entry cutback：
 
 ```text
 d2 = entry_cutback_on_middle_segment
@@ -918,7 +939,7 @@ d2 = w/2
 COMPACT_U when L_mid ~= w
 ```
 
-よってactual widthへscaleする：
+Actual widthへscale：
 
 ```text
 w=900 mm -> compact middle separation ~=900 mm
@@ -941,7 +962,7 @@ w=650 mm -> compact middle separation ~=650 mm
 
 `R_mid > eps_length`ならresidual runをordinary straight regionとして扱う。
 
-Actual lengthとallocationが成立するかをvalidationし、Winderをsilent stretchしてinvalid allocationを隠さない。
+Actual lengthとallocationが成立するかvalidationし、Winderをsilent stretchしてinvalid allocationを隠さない。
 
 ### 21.3 INVALID_OVERLAP
 
@@ -954,8 +975,6 @@ Actual lengthとallocationが成立するかをvalidationし、Winderをsilent s
 ## 22. Arbitrary-angle Landing — exact polygon rule
 
 Arbitrary-angle `LANDING`はSection 10と同じTurn envelopeを使用する。
-
-Walking surface：
 
 ```text
 Landing polygon = [I, E_in, O, E_out]
@@ -976,7 +995,7 @@ Properties：
 - exact 90° / equal widthでaccepted nominal `w × w` 07-D Landingへ還元。
 - arbitrary angleはcorridor geometryから導出し、fixed squareを無理に回転しない。
 - 47° / 63° / 82°等もsame algorithm。
-- Landing top Zはconstantで07-D cumulative-rise semanticsを継承。
+- Landing top Zはその`LANDING_ARRIVAL` RiseEvent destination elevationでconstant。
 - walking surface Material=`TREAD`、closed body/underside=`UNDERSIDE`。
 - required cutbackがadjacent Path lengthを超えたらatomic reject。
 
@@ -1010,7 +1029,7 @@ Arbitrary-angle Winderでも：
 - ordered simple tread polygons
 - no positive-area overlap
 - no self-intersection
-- exact rise sequence
+- exact RiseEvent sequence
 - closure-valid underside / board in supported Stage
 
 を満たす。
@@ -1039,12 +1058,12 @@ Existing schema-4 Landingはload時にnew defaultの影響を受けない。
 
 ### 24.1 Thumbnail / icon minimum
 
-Pattern selectionは文字labelだけでもcanonical correctnessを損なわないが、production UIでは小さなplan icon/thumbnailを優先する。
+Production UIでは小さなplan icon/thumbnailを優先する。
 
 Minimum：
 
-- EQUAL_2/3/4はSection 13のfractionから同じnormalized 90°turn iconを描けること。
-- BF_1/BF_2はSection 14のfractionから描けること。
+- EQUAL_2/3/4はSection 13のfractionsからnormalized 90° iconを生成/描画できる。
+- BF_1/BF_2はSection 14のfractionsから生成/描画できる。
 - icon image自体をgeometry authorityとして保存しない。
 - external reference image fileをruntime dependencyにしない。
 - 06-C thumbnail architectureを参考にしてよいがCustom Profile libraryへ混在させない。
@@ -1062,7 +1081,7 @@ Winder treadはTurn envelope内のordered polygonとして生成する。
 - each Winder tread top elevationはRiseEvent sequenceからexactに決定。
 - adjacent tread間のvertical Riser boardを生成。
 - tread front overhang / basic front-edge treatmentはgeometryが成立する範囲で07-C contractを適用。
-- inner regionでnosingがself-intersect / reverseする場合はsupported geometry ruleで処理できなければatomic reject。
+- inner regionでnosingがself-intersect / reverseする場合はsupported ruleで処理できなければatomic reject。
 - Winder front edgeはstep boundary / progressionから決定し、Straightの単一local X axisをTurn全体へ流用しない。
 
 ---
@@ -1179,7 +1198,7 @@ FORWARD: P0 -> ... -> Pn
 REVERSE: Pn -> ... -> P0
 ```
 
-Winder plan footprintはsame XY routeを使用し、elevation sequenceを反転する。
+Winder plan footprintはsame XY routeを使用し、RiseEvent/elevation sequenceを反転する。
 
 BF/equal-angle pattern identityはReverseだけで変更しない。
 
@@ -1250,7 +1269,7 @@ Scene mutation前に最低限prepare：
 - Winder tread polygons
 - RiseEvent ownership / allocation
 - effective straight runs
-- Tread/Riser
+- Tread/Riser/Landing
 - supported CLOSED underside
 - Side Board
 - Material slot plan
@@ -1288,7 +1307,7 @@ Geometry missing / transform changedはsame valid canonicalから再生成。
 
 Duplicate IDはStair IDだけを変更。
 
-Repair時にWinder step count / pattern / Path / Materials / allocationsを保持する。
+Repair時にTurn mode / Winder count / pattern / Path / Materials / allocationsを保持する。
 
 ---
 
@@ -1355,7 +1374,7 @@ Wall / Finish / floor-like unrelated objectsをmutationしない。
 - Winder分割線がTurn外周へ正しく交差しません
 - Winder踏板が自己交差しています
 - 隣接するTurn領域が重複しています
-- このMANUAL配分ではWinder段数を含む総蹴上数が一致しません
+- このMANUAL配分ではLanding/Winderを含む総蹴上数が一致しません
 - schema-4 MANUAL LandingをWinderへ変更する前にAUTOへ切り替えてください
 - このBF patternは90°Turn用です
 
@@ -1435,7 +1454,7 @@ Implementation：
 
 - BF_1 / BF_2 fractions exactly as Section 14
 - generated thumbnail/icon selection from normalized rules
-- Turn 1 / Turn 2 independent pattern
+- Turn 1 / Turn 2 independent mode/pattern
 - U / overall 180° combination
 - BF U reference combinations
 - exact Compact-U `R_mid` resolver
@@ -1444,7 +1463,7 @@ Implementation：
 - arbitrary-angle `EQUAL_ANGLE` Winder
 - free-angle point relocation
 - Shift 15° remains convenience only
-- AUTO schema-5 full allocation
+- AUTO schema-5 full allocation including Landing/Winder events
 - schema-4 MANUAL conversion guard
 - schema-5 MANUAL component allocation
 - deterministic multi-turn regeneration
@@ -1455,6 +1474,7 @@ Implementation：
 - BF left/right mirror
 - BF identity stable across Reverse
 - U 2+3 / BF_1+3 / BF_1+BF_2 examples
+- mixed LANDING/WINDER representative
 - Compact U no false short-middle-flight reject
 - separated U remains valid
 - Turn 1 / Turn 2 individual edit
@@ -1475,7 +1495,7 @@ Implementation：
 
 - STEPPED_CLOSED Winder continuation
 - continuous SLOPED_CLOSED Winder soffit
-- Flight ↔ Winder ↔ Flight closure
+- Flight ↔ Landing/Winder ↔ Flight closure
 - compact U underside
 - STEPPED Side Board continuation
 - SLOPED Side Board continuation
@@ -1487,7 +1507,8 @@ Implementation：
 
 ### Stage 3 runtime focus
 
-- SLOPED_CLOSEDにhorizontal Landing plateauが残らない
+- SLOPED_CLOSED Winderにhorizontal Landing plateauが残らない
+- actual LANDING Turnではhorizontal Landing undersideを維持
 - visible slope progression continuous through Winder
 - no cavity / spike / giant filler prism / duplicate positive-volume body
 - inside/outside board no side-swap
@@ -1508,6 +1529,7 @@ Final acceptance must cover：
 - schema-5 L / U / arbitrary-angle persistence
 - EQUAL_2/3/4 + BF persistence
 - AUTO / MANUAL persistence
+- mixed LANDING/WINDER RiseEvent invariant
 - schema-4 MANUAL migration guard
 - Undo / Redo
 - invalid rollback
@@ -1550,16 +1572,16 @@ Pure/testable logicをBlender modal codeから分離する。
 - Reverse pattern identity stability
 - tread polygon simple / area / coverage / overlap
 - width-independent scaling
-- RiseEvent ownership
-- `S + W + 1 = N`
-- AUTO allocation with fixed Winder counts
+- no RNA/UI legal-like width gate
+- RiseEvent ownership including LANDING_ARRIVAL
+- `S + L + W + 1 = N`
+- AUTO allocation with Landing + Winder reservations
 - schema-4 MANUAL conversion rejection
 - schema-5 MANUAL validation
 - Compact-U `R_mid` classification
 - arbitrary-angle Landing polygon
 - arbitrary-angle equal-angle Winder
 - numerical singularity handling
-- no legal-like width gate
 - schema compatibility
 - deterministic geometry
 
@@ -1595,7 +1617,7 @@ then Console
 
 Winder tread shape / BF pattern / arbitrary Landing polygon / Compact U / underside continuity / Side Board joinは目視必要。
 
-Canonical pattern / IDs / angle / allocations / topology / MaterialsはConsole evidenceを主とする。
+Canonical pattern / IDs / angle / RiseEvents / allocations / topology / MaterialsはConsole evidenceを主とする。
 
 Runtime testsは一度に大量提示せず、Development WorkflowどおりTest単位でPASS/FAILを判断する。
 
@@ -1613,10 +1635,10 @@ Runtime testsは一度に大量提示せず、Development WorkflowどおりTest�
 6. Arbitrary-angle Landingをsingle generalized envelope algorithmで生成できる。
 7. Arbitrary-angle `EQUAL_ANGLE` Winderをrepresentative caseで生成できる。
 8. Shift 15°はinteraction aidのままで、production angle restrictionにならない。
-9. Width 900/800/750/700/650でgeometry-valid caseはwidth aloneでrejectされない。
+9. Width 900/800/750/700/650でgeometry-valid caseはvalidator / property range / UI clampのいずれでもwidth aloneでrejectされない。
 10. 300/150/85等のreference dimensionsをcore reject thresholdへhard-codeしない。
 11. Invalid geometryはclear error + atomic rollbackする。
-12. Winderを含むRiseEvent ownershipがdouble-countせず、overall rise invariantがexact。
+12. RiseEvent ownershipがdouble-countせず、Straight/Landing/Winder/Upper Arrivalを含め`S + L + W + 1 = N`がexact。
 13. schema-4 MANUAL Landingをsilent redistributionでWinderへ変換しない。
 14. `SLOPED_CLOSED`がWinder through-turnでhorizontal Landing plateauなしのcontinuous closed soffitとなる。
 15. `STEPPED_CLOSED` / Side BoardもWinderで重大なgap / spike / cavity / side-swapを作らない。
@@ -1650,9 +1672,9 @@ Review questions：
 - BF left/right / Reverse contractに曖昧さがないか。
 - Compact U `R_mid` classificationは十分か。
 - arbitrary-angle Landingがangle-specific special caseなしで定義されているか。
-- RiseEvent ownershipにdouble-count / missing eventがないか。
+- `S + L + W + 1 = N` RiseEvent ownershipにdouble-count / missing eventがないか。
 - schema-4 MANUAL→WINDERのconservative ruleが安全か。
-- validatorがhidden building-code gateになり得る箇所がないか。
+- validator / RNA property / UI clampがhidden building-code gateになり得る箇所がないか。
 - width 700/650mmのvalid old-house caseをmodelできるか。
 - numerical epsilonとlegal-like thresholdが明確に分離されているか。
 - SLOPED_CLOSED contractはLanding-like plateau再発を防ぐのに十分か。
@@ -1673,7 +1695,7 @@ Reviewerはexact section/invariantを示して改善案を出すことを期待�
 2. 指摘を仕様へ採用 / 非採用判断し、必要な修正をrepositoryへ反映する。
 3. `BUILD_07_E_DESIGN_RATIONALE.md`と本Specificationの矛盾をなくす。
 4. Reference imageなしで全production geometry ruleがtext-onlyに再現可能であることを再確認する。
-5. legal-sounding numeric valuesがcore geometry gateへ紛れ込んでいないことを確認する。
+5. legal-sounding numeric valuesがvalidator / property range / UI clampを含むcore geometry gateへ紛れ込んでいないことを確認する。
 6. Statusを`FINAL / IMPLEMENTATION AUTHORITY`へ変更する。
 7. その後に初めてCodex Stage 1 implementation instructionを作成する。
 
