@@ -16,8 +16,9 @@ from japanese_house_modeler.stair_multiflight import prepare_multiflight_geometr
 from japanese_house_modeler.stair_winder import (
     EPS_LENGTH, WINDER_EQUAL_2, WINDER_EQUAL_3, WINDER_EQUAL_4,
     allocate_straight_events, equal_pattern_fractions, polygon_area,
-    prepare_winder_geometry, resolve_nominal_cells, resolve_turn_frame,
-    resolve_winder_layout, signed_turn_angle,
+    physical_cell_boundaries, prepare_winder_geometry, resolve_nominal_cells,
+    resolve_turn_frame, resolve_winder_layout, resolve_winder_riser_plan,
+    signed_turn_angle,
 )
 
 
@@ -160,6 +161,100 @@ class ProductionAndCompatibilityTests(unittest.TestCase):
             POINTS, "REVERSE", *ARGS[2:], point_ids=IDS,
             winder_pattern=WINDER_EQUAL_3)[2]
         self.assertGreater(len(reverse_mesh.vertices), 0)
+
+    def test_reverse_first_riser_owns_canonical_exit_boundary(self):
+        layout = resolve_winder_layout(
+            POINTS, "REVERSE", *ARGS[2:], point_ids=IDS,
+            winder_pattern=WINDER_EQUAL_3)
+        first = physical_cell_boundaries(
+            tuple(reversed(layout.cells))[0], "REVERSE",
+            layout.turn.inner_pivot)
+        self.assertEqual(first.front[1], layout.turn.exit_outer)
+        self.assertEqual(first.rear[1], layout.cells[-1].polygon[1])
+
+    def test_reverse_internal_riser_ownership_follows_destination_order(self):
+        layout = resolve_winder_layout(
+            POINTS, "REVERSE", *ARGS[2:], point_ids=IDS,
+            winder_pattern=WINDER_EQUAL_4)
+        traversed = tuple(reversed(layout.cells))
+        boundaries = tuple(physical_cell_boundaries(
+            cell, "REVERSE", layout.turn.inner_pivot) for cell in traversed)
+        self.assertEqual(tuple(item.cell_index for item in boundaries), (4, 3, 2, 1))
+        for previous, current in zip(boundaries, boundaries[1:]):
+            self.assertEqual(previous.rear, current.front)
+
+    def test_reverse_last_winder_does_not_duplicate_following_straight_riser(self):
+        layout = resolve_winder_layout(
+            POINTS, "REVERSE", *ARGS[2:], point_ids=IDS,
+            winder_pattern=WINDER_EQUAL_3)
+        final = physical_cell_boundaries(
+            tuple(reversed(layout.cells))[-1], "REVERSE",
+            layout.turn.inner_pivot)
+        canonical_entry = (layout.turn.inner_pivot, layout.turn.entry_outer)
+        self.assertEqual(final.rear, canonical_entry)
+        self.assertNotEqual(final.front, canonical_entry)
+        # There is one destination-owned Winder riser per cell, never an
+        # additional riser on the final cell's rear/uphill boundary.
+        plans = tuple(resolve_winder_riser_plan(
+            cell, "REVERSE", layout.turn.inner_pivot,
+            layout.riser_thickness) for cell in reversed(layout.cells))
+        self.assertEqual(len(plans), len(layout.cells))
+        self.assertNotIn(canonical_entry, tuple(plan.front for plan in plans))
+
+    def test_reverse_rise_events_match_unequal_geometry_progression(self):
+        points = ((0, 0), (5, 0), (5, 2))
+        layout, fragments, _mesh = prepare_winder_geometry(
+            points, "REVERSE", 0, 2800, 16, 900, 30, 12,
+            point_ids=IDS, winder_pattern=WINDER_EQUAL_3)
+        self.assertNotEqual(layout.straight_allocation[0],
+                            layout.straight_allocation[1])
+        reverse_lower_count = layout.straight_allocation[1]
+        first_winder_event = layout.rise_events[reverse_lower_count]
+        self.assertEqual(first_winder_event.owner, "WINDER_TREAD")
+        winder_treads = [part for part in fragments
+                         if part.part_type == "TREAD"
+                         and len(part.vertices) != 8]
+        self.assertTrue(winder_treads)
+        self.assertAlmostEqual(max(vertex[2] for vertex in winder_treads[0].vertices),
+                               first_winder_event.top_z)
+
+    def test_winder_riser_has_exact_perpendicular_thickness(self):
+        layout = resolve_winder_layout(*ARGS, point_ids=IDS,
+                                       winder_pattern=WINDER_EQUAL_3)
+        plan = resolve_winder_riser_plan(
+            layout.cells[1], "FORWARD", layout.turn.inner_pivot,
+            layout.riser_thickness)
+        origin, outer = plan.front
+        dx, dy = outer[0] - origin[0], outer[1] - origin[1]
+        length = math.hypot(dx, dy)
+        direction = (dx / length, dy / length)
+        distances = [abs(direction[0] * (point[1] - origin[1])
+                         - direction[1] * (point[0] - origin[0]))
+                     for point in plan.polygon]
+        self.assertAlmostEqual(max(distances), layout.riser_thickness)
+
+    def test_width_650_pivot_trim_for_all_equal_patterns(self):
+        for pattern in (WINDER_EQUAL_2, WINDER_EQUAL_3, WINDER_EQUAL_4):
+            with self.subTest(pattern=pattern):
+                layout = resolve_winder_layout(
+                    POINTS, "FORWARD", 0, 2800, 16, 650, 30, 20,
+                    point_ids=IDS, winder_pattern=pattern)
+                plans = tuple(resolve_winder_riser_plan(
+                    cell, "FORWARD", layout.turn.inner_pivot,
+                    layout.riser_thickness) for cell in layout.cells)
+                self.assertEqual(len(plans), len(layout.cells))
+                self.assertTrue(all(polygon_area(plan.polygon) > 0
+                                    for plan in plans))
+
+    def test_forward_boundary_ownership_regression(self):
+        layout = resolve_winder_layout(*ARGS, point_ids=IDS,
+                                       winder_pattern=WINDER_EQUAL_3)
+        boundaries = tuple(physical_cell_boundaries(
+            cell, "FORWARD", layout.turn.inner_pivot) for cell in layout.cells)
+        self.assertEqual(boundaries[0].front[1], layout.turn.entry_outer)
+        self.assertEqual(boundaries[-1].rear[1], layout.turn.exit_outer)
+        for previous, current in zip(boundaries, boundaries[1:]):
+            self.assertEqual(previous.rear, current.front)
 
     def test_named_epsilon_is_numerical_not_width_minimum(self):
         self.assertLess(EPS_LENGTH, .001)

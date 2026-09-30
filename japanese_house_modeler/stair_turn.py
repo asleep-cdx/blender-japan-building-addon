@@ -80,6 +80,24 @@ class RiseEvent:
 
 
 @dataclass(frozen=True)
+class PhysicalCellBoundaries:
+    """Ascent-local boundaries without changing the canonical subdivision."""
+    cell_index: int
+    front: tuple
+    rear: tuple
+
+
+@dataclass(frozen=True)
+class WinderRiserPlan:
+    """A destination-owned, locally clipped constant-thickness plan strip."""
+    cell_index: int
+    front: tuple
+    rear: tuple
+    polygon: tuple
+    thickness: float
+
+
+@dataclass(frozen=True)
 class WinderLayout:
     canonical_path: tuple
     traversal_point_ids: tuple
@@ -317,6 +335,76 @@ def resolve_nominal_cells(frame, pattern):
     return tuple(cells)
 
 
+def physical_cell_boundaries(cell, ascent_direction, inner_pivot):
+    """Resolve physical downhill/uphill dividers for an ascent direction.
+
+    A nominal cell remains canonical.  Reverse traversal swaps its two radial
+    boundaries rather than merely reversing the order in which cells are used.
+    Each returned boundary is ordered from the inner pivot to the outer chain.
+    """
+    pivot = tuple(inner_pivot)
+    canonical_front = (pivot, cell.polygon[1])
+    canonical_rear = (pivot, cell.polygon[-1])
+    if ascent_direction == "FORWARD":
+        return PhysicalCellBoundaries(cell.index, canonical_front,
+                                      canonical_rear)
+    if ascent_direction == "REVERSE":
+        return PhysicalCellBoundaries(cell.index, canonical_rear,
+                                      canonical_front)
+    raise ValueError("不明な上り方向です。")
+
+
+def _clip_polygon_scalar(polygon, scalar, keep_greater, threshold):
+    """Clip a polygon against one scalar half-plane deterministically."""
+    result = []
+    previous = polygon[-1]
+    previous_value = scalar(previous)
+    previous_inside = (previous_value >= threshold - EPS_LENGTH
+                       if keep_greater else previous_value <= threshold + EPS_LENGTH)
+    for current in polygon:
+        current_value = scalar(current)
+        current_inside = (current_value >= threshold - EPS_LENGTH
+                          if keep_greater else current_value <= threshold + EPS_LENGTH)
+        if current_inside != previous_inside:
+            denominator = current_value - previous_value
+            if abs(denominator) > EPS_INTERSECTION:
+                fraction = (threshold - previous_value) / denominator
+                result.append((_add(previous,
+                                    _scale(_sub(current, previous), fraction))))
+        if current_inside:
+            result.append(current)
+        previous, previous_value = current, current_value
+        previous_inside = current_inside
+    return _deduplicate(result)
+
+
+def resolve_winder_riser_plan(cell, ascent_direction, inner_pivot,
+                               riser_thickness):
+    """Offset the physical front divider by an exact perpendicular thickness.
+
+    The constant-distance band is intersected with the destination nominal
+    cell.  This naturally trims its inner end at the mathematical pivot and
+    its outer end at the local Turn chain without entering another sector.
+    """
+    thickness = float(riser_thickness)
+    if not math.isfinite(thickness) or thickness <= 0.0:
+        raise ValueError("蹴込み板厚は正の有限値である必要があります。")
+    boundaries = physical_cell_boundaries(cell, ascent_direction, inner_pivot)
+    origin, outer = boundaries.front
+    direction, _length = _unit(_sub(outer, origin), "Winder front boundary")
+    raw_signed = lambda point: _cross(direction, _sub(point, origin))
+    centroid = (sum(point[0] for point in cell.polygon) / len(cell.polygon),
+                sum(point[1] for point in cell.polygon) / len(cell.polygon))
+    side = 1.0 if raw_signed(centroid) >= 0.0 else -1.0
+    distance = lambda point: side * raw_signed(point)
+    plan = _clip_polygon_scalar(tuple(cell.polygon), distance, True, 0.0)
+    plan = _clip_polygon_scalar(plan, distance, False, thickness)
+    if len(plan) < 3 or polygon_area(plan) <= EPS_AREA:
+        raise ValueError("Winder Riser stripをlocal cell内へtrimできません。")
+    return WinderRiserPlan(cell.index, boundaries.front, boundaries.rear,
+                           plan, thickness)
+
+
 def allocate_straight_events(runs, overall_riser_count, landing_count,
                              winder_tread_count):
     """Apply schema-5 AUTO allocation with canonical-order tie breaking."""
@@ -407,7 +495,10 @@ def resolve_winder_layout(points, ascent_direction, base_z_mm,
     actual_riser = floor_height / int(riser_count)
     if tread_thickness >= actual_riser:
         raise ValueError("踏板厚は実蹴上より小さくする必要があります。")
-    events = build_rise_events(resolved, 0, (count,), base_z, actual_riser)
+    traversal_allocation = (resolved if ascent_direction == "FORWARD"
+                            else tuple(reversed(resolved)))
+    events = build_rise_events(traversal_allocation, 0, (count,),
+                               base_z, actual_riser)
     if len(events) != int(riser_count):
         raise ValueError("RiseEvent invariant S + L + W + 1 = Nを満たしません。")
     path = tuple(PathPoint(identity, xy) for identity, xy in zip(ids, converted))
@@ -491,24 +582,13 @@ def build_winder_fragments(layout):
                 fragments.append(_polygon_prism(cell.polygon,
                                                  top - layout.tread_thickness,
                                                  top, "TREAD", ordinal))
-                # Destination tread owns its front boundary.  A small sector
-                # inside the destination cell gives the board uphill thickness
-                # and is valid even though the mathematical pivot has zero width.
-                front = cell.polygon[1]
-                rear = cell.polygon[-1]
-                inset = min(0.45, layout.riser_thickness /
-                            max(math.hypot(rear[0] - front[0], rear[1] - front[1]),
-                                layout.riser_thickness))
-                inner_rear = _add(layout.turn.inner_pivot,
-                                  _scale(_sub(rear, layout.turn.inner_pivot), inset))
-                outer_rear = _add(front, _scale(_sub(rear, front), inset))
-                riser_plan = _deduplicate((layout.turn.inner_pivot, front,
-                                           outer_rear, inner_rear))
-                if len(riser_plan) >= 3 and polygon_area(riser_plan) > EPS_AREA:
-                    ordinal += 1
-                    fragments.append(_polygon_prism(
-                        riser_plan, top - layout.actual_riser,
-                        top - layout.tread_thickness, "RISER", ordinal))
+                riser = resolve_winder_riser_plan(
+                    cell, layout.ascent_direction, layout.turn.inner_pivot,
+                    layout.riser_thickness)
+                ordinal += 1
+                fragments.append(_polygon_prism(
+                    riser.polygon, top - layout.actual_riser,
+                    top - layout.tread_thickness, "RISER", ordinal))
     fragments = tuple(fragments)
     validate_mesh_fragments(fragments)
     return fragments
