@@ -21,7 +21,8 @@ from japanese_house_modeler.stair_turn import (
     manual_allocation_from_auto, physical_winder_tread_polygon, polygon_area,
     prepare_schema4_promotion, prepare_winder_geometry,
     promote_schema4_landing_allocation, reconcile_shared_interface,
-    resolve_nominal_cells, resolve_turn_frame, resolve_winder_layout,
+    resolve_nominal_cells, resolve_physical_winder_plans,
+    resolve_turn_frame, resolve_winder_layout,
     path_move_validation_allocation, snap_angle_15,
     turn_settings_available,
 )
@@ -350,5 +351,130 @@ class StaticReviewRegressionTests(unittest.TestCase):
     def test_68_schema4_failure_message_keeps_exact90_policy(self):
         message = move_failure_message(4, 1, 3, ValueError("geometry"))
         self.assertIn("90度条件を維持", message)
+
+
+class PhysicalBoundaryRuntimeRegressionTests(unittest.TestCase):
+    @staticmethod
+    def _distance(boundary, point):
+        origin = boundary.nominal_face[0]
+        direction = boundary.direction
+        return abs(direction[0] * (point[1] - origin[1])
+                   - direction[1] * (point[0] - origin[0]))
+
+    def _plans(self, points=L, ids=L_IDS, width=650, degrees=None,
+               patterns=None, reverse=False):
+        if degrees is not None:
+            angle = math.radians(degrees)
+            points = ((0, 0), (0, 2.2),
+                      (-2.2 * math.sin(angle),
+                       2.2 + 2.2 * math.cos(angle)))
+        specs = None
+        if patterns:
+            specs = tuple(TurnSpec(ids[index + 1], "WINDER", pattern)
+                          for index, pattern in enumerate(patterns))
+        resolved = resolve_winder_layout(
+            points, "REVERSE" if reverse else "FORWARD", 0, 2800, 16,
+            width, 30, 12, point_ids=ids, turn_specs=specs,
+            tread_front_overhang_mm=5)
+        all_plans = tuple(resolve_physical_winder_plans(
+            frame, cells, resolved.ascent_direction, resolved.nosing,
+            resolved.riser_thickness)
+            for frame, cells in zip(resolved.turns, resolved.turn_cells))
+        return resolved, all_plans
+
+    def _assert_constant_nose(self, plans, expected=.005):
+        for plan in plans:
+            for endpoint in plan.exposed_front_edge:
+                self.assertAlmostEqual(
+                    self._distance(plan.front_boundary, endpoint), expected)
+
+    def test_69_exact90_equal3_constant_nosing(self):
+        _resolved, groups = self._plans()
+        self._assert_constant_nose(groups[0])
+
+    def test_70_63degree_equal3_constant_nosing(self):
+        _resolved, groups = self._plans(degrees=63)
+        self._assert_constant_nose(groups[0])
+
+    def test_71_inner_front_endpoint_is_not_nominal_pivot(self):
+        resolved, groups = self._plans()
+        self.assertNotEqual(groups[0][0].exposed_front_edge[0],
+                            resolved.turn.inner_pivot)
+
+    def test_72_outer_front_endpoint_keeps_requested_nosing(self):
+        _resolved, groups = self._plans()
+        plan = groups[0][1]
+        self.assertAlmostEqual(self._distance(
+            plan.front_boundary, plan.exposed_front_edge[1]), .005)
+
+    def test_73_rear_support_is_exact_riser_back(self):
+        _resolved, groups = self._plans()
+        plans = groups[0]
+        for lower, destination in zip(plans, plans[1:]):
+            self.assertIs(destination.riser_back_edge,
+                          lower.rear_support_edge)
+            self.assertEqual(destination.riser_back_edge,
+                             lower.rear_support_edge)
+
+    def test_74_no_independently_recomputed_shared_points(self):
+        _resolved, groups = self._plans()
+        plans = groups[0]
+        self.assertTrue(all(destination.riser_back_edge is lower.rear_support_edge
+                            for lower, destination in zip(plans, plans[1:])))
+
+    def test_75_u_bf1_bf2_uses_semantic_boundaries(self):
+        _resolved, groups = self._plans(
+            U, U_IDS, 900, patterns=("BF_1", "BF_2"))
+        self.assertEqual(tuple(len(group) for group in groups), (2, 2))
+        for group in groups:
+            self._assert_constant_nose(group)
+
+    def test_76_compact_u_uses_semantic_boundaries(self):
+        resolved, groups = self._plans(
+            U, U_IDS, 900, patterns=("EQUAL_2", "EQUAL_3"))
+        self.assertEqual(resolved.u_classification, "COMPACT_U")
+        for group in groups:
+            self._assert_constant_nose(group)
+
+    def test_77_reverse_keeps_physical_boundary_ownership(self):
+        _resolved, groups = self._plans(reverse=True)
+        self._assert_constant_nose(groups[0])
+        for lower, destination in zip(groups[0], groups[0][1:]):
+            self.assertIs(destination.riser_back_edge,
+                          lower.rear_support_edge)
+
+    def test_78_square_uses_semantic_exposed_edge(self):
+        resolved, groups = self._plans()
+        plan = groups[0][0]
+        self.assertIn(plan.exposed_front_edge[0], plan.polygon)
+        self.assertIn(plan.exposed_front_edge[1], plan.polygon)
+        prepare_winder_geometry(
+            L, *BASE, point_ids=L_IDS, tread_front_overhang_mm=5,
+            tread_front_edge_mode="SQUARE")
+
+    def test_79_bevel_uses_same_semantic_exposed_edge(self):
+        _resolved, groups = self._plans()
+        semantic = groups[0][0].exposed_front_edge
+        self.assertEqual(semantic, groups[0][0].exposed_front_edge)
+        prepare_winder_geometry(
+            L, *BASE, point_ids=L_IDS, tread_front_overhang_mm=5,
+            tread_front_edge_mode="BEVEL", tread_front_edge_size_mm=2)
+
+    def test_80_round_uses_same_semantic_exposed_edge(self):
+        _resolved, groups = self._plans()
+        semantic = groups[0][0].exposed_front_edge
+        self.assertEqual(semantic, groups[0][0].exposed_front_edge)
+        prepare_winder_geometry(
+            L, *BASE, point_ids=L_IDS, tread_front_overhang_mm=5,
+            tread_front_edge_mode="ROUND", tread_front_edge_size_mm=2)
+
+    def test_81_width650_physical_geometry_valid(self):
+        _resolved, groups = self._plans(width=650)
+        self.assertTrue(all(plan.polygon for plan in groups[0]))
+
+    def test_82_physical_trim_is_deterministic(self):
+        first = self._plans()[1]
+        second = self._plans()[1]
+        self.assertEqual(first, second)
 
 if __name__ == "__main__": unittest.main()

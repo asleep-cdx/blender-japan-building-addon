@@ -721,45 +721,89 @@ atomically。
 
 # 15. Physical TREAD / RISER solids
 
-Nominal plan cells and physical finish solids are separate validation layers。
+Nominal plan cells and physical finish solids are separate validation layers。Nominal Winder cells `C_j` remain unchanged。
 
-## 15.1 Physical TREAD
+## 15.1 Physical Winder boundary authority
 
-For Winder tread `j`：
+For each ascent-local semantic boundary `B=(P_inner,P_outer)` between a lower/downhill tread and its destination/uphill tread：
 
-1. start from nominal `C_j`;
-2. extrude vertically `top_z-t .. top_z`;
-3. apply front nosing only across front/downhill boundary `D(j-1)`;
-4. apply rear support extension only across rear/uphill boundary `Dj` using accepted riser-thickness semantics;
-5. trim both extensions to local Turn boundaries / immediate neighboring walking region。
+```text
+u    = normalize(P_outer-P_inner)
+m_up = unit normal perpendicular to u, toward destination/uphill tread
 
-Nosing `n`：plan strip offset downhill from front boundary。
+L_face = B
+L_nose = B - n*m_up
+L_back = B + r*m_up
+```
 
-Rear extension `r`：offset uphill/destination side。
+`n` is tread front nosing and `r` is riser thickness / accepted rear-support extension。Distances are exact perpendicular distances：
 
-Intentional XY overlap at different Z is allowed。
+```text
+distance(L_nose,L_face)=n
+distance(L_back,L_face)=r
+```
 
-### Pivot trim
+Derive these three parallel semantic lines once per boundary and reuse them for every incident physical fragment。Do not independently recompute near-equal copies。
 
-Front/rear offset strips must not extrapolate through inner pivot into unrelated sector。
+### 15.1.1 Physical tread plan
 
-If strip converges to pivot, trim at first valid boundary intersection。Local collapse at exact pivot endpoint is allowed。Do not reject entire Winder because nominal local width tends to zero at `I`。
+For Winder tread `C_j`：
 
-## 15.2 Physical RISER
+```text
+front physical boundary = front/downhill L_nose
+rear physical boundary  = rear/uphill L_back
+```
 
-Destination-owned Riser lies on destination front boundary。Thickness extends to uphill/destination side, matching accepted Straight semantics。
+Resolve the physical tread plan from these offset lines plus the ordered Turn outer chain / immediate neighboring walking-region trim。Normally：
+
+```text
+P_inner_physical = intersection(front L_nose,rear L_back)
+```
+
+subject to deterministic local clipping。The inner physical vertex is not forced to nominal pivot `I`。A positive `n` may create a finite mitered physical corner around `I`。
+
+Forbidden：
+
+- retaining `I` as physical front/rear vertex merely because it is the nominal divider origin;
+- moving only the outer endpoint while keeping `I` fixed;
+- tapering positive nosing toward zero at `I`;
+- hiding the opening later with Stage-3 Underbody or Side Board。
+
+The mathematical pivot remains nominal subdivision authority only。
+
+### 15.1.2 Outer-chain and neighbor trim
+
+Trim front/rear offset lines using the deterministic local walking domain：complete `E_in -> O -> E_out` outer chain, the immediate neighboring Winder cell, or the immediate adjacent Straight/Landing walking region at entry/exit。Do not extend into an unrelated Turn sector。
+
+If an offset line crosses outer-corner station `O`, preserve required split stations consistently。Every trim intersection which becomes a semantic shared point is reused exactly by incident fragments。
+
+### 15.1.3 Positive nosing at inner side
+
+For `n>0`, every point of the resolved exposed Winder front edge lies on `L_nose`。Its signed perpendicular distance from `L_face` equals `n` within named epsilon at both endpoints。The inner endpoint may and normally does move away from `I`。
+
+Do not accept `outer ~= n` but `inner ~= 0` solely because the nominal cell converges to `I`。If no finite local trim can preserve `n` without self-intersection or unrelated-sector intrusion, reject as `GEOMETRY_INVALID`; never silently reduce `n`。
+
+## 15.2 Destination Riser / shared rear-support authority
+
+The destination-owned Riser remains on `L_face` and extends uphill to `L_back`。The lower/downhill tread rear support uses the same `L_back`。
+
+Mandatory：
+
+```text
+lower tread rear-support boundary == destination Riser back boundary
+```
+
+using identical derived coordinates and split points。The Riser band is the exact constant-distance band `L_face -> L_back`, trimmed/mitered against the same semantic trim authority。Do not derive tread and Riser from separate pivot-fixed or independently clipped approximations。
+
+### 15.2.1 No cavity at Winder step junction
+
+At every Winder junction, lower tread + destination Riser + destination tread/nosing form a closed physical transition。Intentional XY overlap at different Z and accepted coplanar contact are allowed。
+
+Forbidden：background-visible wedge/open cavity, progressively widening outer gap, missing rear-support/Riser strip, or deferring a Stage-2 cavity patch to Stage 3。
 
 ## 15.3 SQUARE / BEVEL / ROUND
 
-Apply only to exposed downhill/front edge of physical TREAD/nosing solid。
-
-Do not apply to：
-
-- rear boundary
-- inner/outer side chain merely because it is a polygon edge
-- internal partition that is not exposed front edge for that tread
-
-Global 07-C rules：
+Keep accepted 07-C validation：
 
 ```text
 q > 0 for BEVEL/ROUND
@@ -767,31 +811,20 @@ q < t/2
 q <= n
 ```
 
-Straight `n < g_i` applies only to ordinary Straight region。Do not invent Winder pseudo-going from pivot and call Straight validator。
-
-Endpoint zero-length at pivot is omitted rather than made into zero-area cap。
+The exposed edge for SQUARE/BEVEL/ROUND is the resolved constant-offset `L_nose` edge。Use explicit semantic edge metadata rather than brittle polygon indices。BEVEL/ROUND apply only to that edge, not rear, inner/outer side chain, or hidden partition。
 
 ## 15.4 Physical validation
 
-Do not reject because physical tread XY projections overlap intentionally。
+In addition to finite/manifold/contact validation, require：
 
-Check：
+- requested `n>0` remains constant across both exposed-edge endpoints;
+- tread rear-support `L_back` and Riser `L_back` reuse identical full XY;
+- no background-visible wedge or open exterior cavity before Stage 3;
+- finite deterministic inner miter;
+- no unintended positive-volume inner-miter overlap;
+- no zero-area cap created merely to preserve nominal `I`。
 
-- non-finite coordinates
-- unintended zero/near-zero real face
-- unintended positive-volume intersection at overlapping Z
-- open exterior cavity
-- front/rear strip crossing that cannot be validly trimmed
-- unintended duplicate ownership / z-fighting face
-
-Intentional zero-volume coplanar contact between separately owned accepted fragments may remain where required。Distinguish：
-
-```text
-INTENTIONAL_CONTACT
-UNINTENDED_DUPLICATE
-```
-
-No global redesign of accepted 07-C/07-D contact architecture is required。
+Nominal local width tending to zero at `I` remains valid。Physical nosing collapse to zero is not required and is not an acceptable solution。
 
 ---
 
@@ -1680,9 +1713,14 @@ Both adjacent original segment lengths exactly2200mm。Must succeed without angl
 
 ## 30.5 Representative physical finish
 
-At least one width650 EQUAL_3 L must pass positive nosing5mm / SQUARE / riser thickness20mm。Inner pivot tending to zero nominal width is not itself failure。
+Mandatory Stage-2 physical fixtures：
 
-BEVEL / ROUND representative acceptance follows SQUARE physical-solid acceptance。
+- A: width650, exact-90 L, EQUAL_3, nosing5mm, SQUARE;
+- B: width650, 63-degree L, EQUAL_3, nosing5mm, SQUARE;
+- C: width900, exact-90 U, Turn1=BF_1, Turn2=BF_2, nosing5mm, SQUARE;
+- D: representative REVERSE case。
+
+For every positive-nosing front edge, perpendicular offset from nominal Riser face equals requested `n` at both endpoints within epsilon; `inner ~= 0 / outer ~= n` is invalid。For every shared step boundary, lower-tread rear support equals destination-Riser back boundary exactly, with no open wedge cavity。BEVEL/ROUND use the same semantic front-edge authority。Width650 is a regression sample, not a lower bound。
 
 ---
 
@@ -1731,6 +1769,14 @@ Implement / accept：
 - full schema-5 AUTO / MANUAL
 - schema-4 migration guards
 - deterministic regeneration
+- constant-distance physical Winder nosing
+- finite inner physical miter instead of pivot collapse
+- exact shared Tread rear-support / destination-Riser boundary reuse
+- no open Winder tread/Riser cavity
+- 90-degree and arbitrary-angle physical Winder finish
+- U / Compact-U use the same physical boundary authority
+
+These physical requirements are Stage 2 and must not be deferred to Stage 3。
 
 Do not debug all families simultaneously。
 
@@ -1823,6 +1869,15 @@ Pure tests include at least：
 - Side Board profile component rules / point-contact separation / butt-joint ownership
 - narrow-width property/UI guard
 - deterministic geometry
+- constant-offset Winder nose endpoints at 90-degree and 63-degree Turns
+- finite inner miter not forced to nominal `I`
+- exact tread rear-support / Riser-back coordinate reuse
+- BF_1+BF_2 U and Compact-U semantic-boundary reuse
+- REVERSE physical ownership
+- SQUARE/BEVEL/ROUND semantic exposed-edge identity
+- width650 physical geometry and deterministic trim points
+
+Visual runtime additionally inspects inner nosing and outer junctions from an oblique angle where any background-visible cavity is evident。
 
 Dedicated：
 
@@ -1856,7 +1911,7 @@ Stage 3 specifically inspect `HIGH_SIDE_PIVOT_CLOSURE` with Side Boards OFF from
 8. Shift15 not production angle restriction。
 9. RiseEvent exact, no double count, `S+L+W+1=N`。
 10. schema-4 MANUAL not silently converted to Winder。
-11. physical Tread/Riser/nosing ownership deterministic。
+11. physical Tread/Riser/nosing ownership deterministic; positive Winder nosing does not collapse at `I`, adjacent physical components have no open exterior cavity, and semantic shared boundaries are reused exactly。
 12. EQUAL_3 central outer corner O not omitted。
 13. STEPPED_CLOSED Winder uses exact schema-5 patch Z and remains CLOSED。
 14. SLOPED_CLOSED uses complete outer chain + finite pivot relief + local high-side closure, no horizontal Landing plateau。

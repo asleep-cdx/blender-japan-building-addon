@@ -128,6 +128,30 @@ class WinderRiserPlan:
 
 
 @dataclass(frozen=True)
+class PhysicalWinderBoundary:
+    """One ascent-local semantic divider and its three parallel authorities."""
+    index: int
+    nominal_face: tuple
+    direction: tuple
+    uphill_normal: tuple
+    nose_origin: tuple
+    back_origin: tuple
+
+
+@dataclass(frozen=True)
+class PhysicalWinderTreadPlan:
+    cell_index: int
+    polygon: tuple
+    exposed_front_edge: tuple
+    rear_support_edge: tuple
+    inner_miter: tuple
+    front_boundary: PhysicalWinderBoundary
+    rear_boundary: PhysicalWinderBoundary
+    riser_polygon: tuple
+    riser_back_edge: tuple
+
+
+@dataclass(frozen=True)
 class WinderLayout:
     canonical_path: tuple
     traversal_point_ids: tuple
@@ -454,29 +478,141 @@ def resolve_winder_riser_plan(cell, ascent_direction, inner_pivot,
 
 def physical_winder_tread_polygon(cell, ascent_direction, inner_pivot,
                                   nosing=0.0, rear_extension=0.0):
-    """Return a locally trimmed tread plan with extensions on radial edges only."""
-    polygon = list(cell.polygon)
-    boundaries = physical_cell_boundaries(cell, ascent_direction, inner_pivot)
-    result = tuple(polygon)
-    for boundary, amount, downhill in ((boundaries.front, float(nosing), True),
-                                        (boundaries.rear, float(rear_extension), False)):
-        if amount <= EPS_LENGTH:
-            continue
-        origin, outer = boundary
-        direction, _ = _unit(_sub(outer, origin), "Winder tread boundary")
-        centroid = (sum(p[0] for p in result) / len(result),
-                    sum(p[1] for p in result) / len(result))
-        interior_sign = 1.0 if _cross(direction, _sub(centroid, origin)) >= 0 else -1.0
-        sign = -interior_sign if downhill else interior_sign
-        offset = _scale((-direction[1], direction[0]), sign * amount)
-        # The mathematical pivot is fixed, so the strip collapses locally
-        # instead of extrapolating through it into the neighbouring sector.
-        target = 1 if tuple(outer) == tuple(result[1]) else len(result) - 1
-        result = tuple(_add(p, offset) if index == target else p
-                       for index, p in enumerate(result))
-    if polygon_area(result) <= EPS_AREA:
-        raise ValueError("physical Winder treadをtrimできません。")
-    return result
+    """Compatibility wrapper around the semantic physical-boundary resolver."""
+    frame = type("_Frame", (), {
+        "inner_pivot": tuple(inner_pivot),
+        "entry_outer": cell.polygon[1],
+        "outer_corner": cell.polygon[1],
+        "exit_outer": cell.polygon[-1],
+    })()
+    return resolve_physical_winder_plans(
+        frame, (cell,), ascent_direction, nosing, rear_extension)[0].polygon
+
+
+def _centroid(polygon):
+    return (sum(point[0] for point in polygon) / len(polygon),
+            sum(point[1] for point in polygon) / len(polygon))
+
+
+def _semantic_boundary(index, nominal, destination_point, nosing, thickness,
+                       *, away=False):
+    inner, outer = nominal
+    direction, _ = _unit(_sub(outer, inner), "Winder semantic boundary")
+    normal = (-direction[1], direction[0])
+    if _dot(normal, _sub(destination_point, inner)) < 0.0:
+        normal = _scale(normal, -1.0)
+    if away:
+        normal = _scale(normal, -1.0)
+    return PhysicalWinderBoundary(
+        index, nominal, direction, normal,
+        _add(inner, _scale(normal, -float(nosing))),
+        _add(inner, _scale(normal, float(thickness))))
+
+
+def _line_chain_intersection(origin, direction, chain, preferred):
+    candidates = []
+    cumulative = 0.0
+    for segment_index, (start, end) in enumerate(zip(chain, chain[1:])):
+        edge = _sub(end, start)
+        length = math.hypot(*edge)
+        denominator = _cross(direction, edge)
+        if abs(denominator) > EPS_INTERSECTION:
+            delta = _sub(start, origin)
+            line_t = _cross(delta, edge) / denominator
+            edge_t = _cross(delta, direction) / denominator
+            if -EPS_LENGTH <= edge_t <= 1.0 + EPS_LENGTH:
+                point = _add(origin, _scale(direction, line_t))
+                candidates.append((math.hypot(point[0] - preferred[0],
+                                              point[1] - preferred[1]),
+                                   cumulative + max(0.0, min(1.0, edge_t)) * length,
+                                   point, segment_index))
+        cumulative += length
+    if not candidates:
+        raise ValueError("GEOMETRY_INVALID: physical boundaryをouter chainへtrimできません。")
+    _distance, station, point, segment_index = min(candidates)
+    return point, station, segment_index
+
+
+def _trim_semantic_line(origin, direction, chain, nominal_face):
+    """Trim to the Turn chain or its immediate entry/exit walking extension."""
+    try:
+        return _line_chain_intersection(origin, direction, chain,
+                                        nominal_face[1])
+    except ValueError:
+        displacement = _sub(origin, nominal_face[0])
+        point = _add(nominal_face[1], displacement)
+        total = sum(math.hypot(*_sub(b, a)) for a, b in zip(chain, chain[1:]))
+        station = (0.0 if math.hypot(*_sub(nominal_face[1], chain[0])) <= EPS_LENGTH
+                   else total if math.hypot(*_sub(nominal_face[1], chain[-1])) <= EPS_LENGTH
+                   else math.hypot(*_sub(chain[1], chain[0])))
+        return point, station, -1
+
+
+def resolve_physical_winder_plans(frame, cells, ascent_direction,
+                                  nosing, riser_thickness):
+    """Derive shared semantic lines once and assemble finite mitered plans."""
+    cells = tuple(cells)
+    if not cells:
+        return ()
+    ordered = cells if ascent_direction == "FORWARD" else tuple(reversed(cells))
+    local = tuple(physical_cell_boundaries(
+        cell, ascent_direction, frame.inner_pivot) for cell in ordered)
+    nominal = [local[0].front] + [item.rear for item in local]
+    boundaries = []
+    for index, boundary in enumerate(nominal):
+        if index < len(ordered):
+            boundaries.append(_semantic_boundary(
+                index, boundary, _centroid(ordered[index].polygon),
+                nosing, riser_thickness))
+        else:
+            boundaries.append(_semantic_boundary(
+                index, boundary, _centroid(ordered[-1].polygon),
+                nosing, riser_thickness, away=True))
+    chain = _deduplicate(
+        (frame.entry_outer, frame.outer_corner, frame.exit_outer)
+        if ascent_direction == "FORWARD" else
+        (frame.exit_outer, frame.outer_corner, frame.entry_outer))
+    corner_station = (math.hypot(*_sub(frame.outer_corner, chain[0]))
+                      if frame.outer_corner in chain else float("inf"))
+    plans = []
+    for index, cell in enumerate(ordered):
+        front, rear = boundaries[index], boundaries[index + 1]
+        inner_miter = _line_intersection(
+            front.nose_origin, front.direction,
+            rear.back_origin, rear.direction)
+        front_outer, front_station, _ = _trim_semantic_line(
+            front.nose_origin, front.direction, chain, front.nominal_face)
+        rear_outer, rear_station, _ = _trim_semantic_line(
+            rear.back_origin, rear.direction, chain, rear.nominal_face)
+        outer = [front_outer]
+        low, high = sorted((front_station, rear_station))
+        if low + EPS_LENGTH < corner_station < high - EPS_LENGTH:
+            outer.append(frame.outer_corner)
+        outer.append(rear_outer)
+        polygon = _deduplicate((inner_miter, *outer))
+        if len(polygon) < 3 or polygon_area(polygon) <= EPS_AREA:
+            raise ValueError("GEOMETRY_INVALID: physical Winder inner miterが不正です。")
+        front_edge = (inner_miter, front_outer)
+        rear_edge = (inner_miter, rear_outer)
+        if plans:
+            riser_back = plans[-1].rear_support_edge
+        else:
+            first_back_outer, _station, _segment = _trim_semantic_line(
+                front.back_origin, front.direction, chain,
+                front.nominal_face)
+            first_back_inner = _add(front.nominal_face[0],
+                                    _scale(front.uphill_normal,
+                                           float(riser_thickness)))
+            riser_back = (first_back_inner, first_back_outer)
+        riser_polygon = _deduplicate((front.nominal_face[0],
+                                      front.nominal_face[1],
+                                      riser_back[1], riser_back[0]))
+        if len(riser_polygon) < 3 or polygon_area(riser_polygon) <= EPS_AREA:
+            raise ValueError("GEOMETRY_INVALID: Winder Riser bandが不正です。")
+        plans.append(PhysicalWinderTreadPlan(
+            cell.index, polygon, front_edge, rear_edge, inner_miter,
+            front, rear, riser_polygon, riser_back))
+    return tuple(plans)
 
 
 def allocate_straight_events(runs, overall_riser_count, landing_count,
@@ -945,30 +1081,22 @@ def build_winder_fragments(layout):
                 riser.polygon, top - layout.actual_riser,
                 top - layout.tread_thickness, "RISER", ordinal))
         else:
-            cells = layout.turn_cells[turn_index]
-            if layout.ascent_direction == "REVERSE":
-                cells = tuple(reversed(cells))
-            for cell in cells:
+            plans = resolve_physical_winder_plans(
+                layout.turns[turn_index], layout.turn_cells[turn_index],
+                layout.ascent_direction, layout.nosing,
+                layout.riser_thickness)
+            for plan in plans:
                 counter += 1
                 top = layout.base_z + counter * layout.actual_riser
                 ordinal += 1
-                tread_polygon = physical_winder_tread_polygon(
-                    cell, layout.ascent_direction,
-                    layout.turns[turn_index].inner_pivot, layout.nosing,
-                    layout.riser_thickness)
-                exposed = ((tread_polygon[0], tread_polygon[1])
-                           if layout.ascent_direction == "FORWARD"
-                           else (tread_polygon[-1], tread_polygon[0]))
                 fragments.append(_profiled_prism(
-                    tread_polygon, top - layout.tread_thickness, top,
-                    exposed, layout.front_edge_mode, layout.front_edge_size,
+                    plan.polygon, top - layout.tread_thickness, top,
+                    plan.exposed_front_edge, layout.front_edge_mode,
+                    layout.front_edge_size,
                     "TREAD", ordinal))
-                riser = resolve_winder_riser_plan(
-                    cell, layout.ascent_direction, layout.turns[turn_index].inner_pivot,
-                    layout.riser_thickness)
                 ordinal += 1
                 fragments.append(_polygon_prism(
-                    riser.polygon, top - layout.actual_riser,
+                    plan.riser_polygon, top - layout.actual_riser,
                     top - layout.tread_thickness, "RISER", ordinal))
     fragments = tuple(fragments)
     validate_mesh_fragments(fragments)
