@@ -615,6 +615,31 @@ def active_schema5_allocation(mode, auto_allocation, manual_allocation):
     raise ValueError("schema-5 distribution modeが不正です。")
 
 
+def turn_settings_available(schema_version, _distribution_mode):
+    """Both schema-4 and schema-5 expose explicit Turn editing."""
+    return int(schema_version) in (4, WINDER_SCHEMA_VERSION)
+
+
+def path_move_validation_allocation(distribution_mode, manual_allocation):
+    """AUTO recomputes for a changed Path; MANUAL retains its authority."""
+    if distribution_mode == "AUTO":
+        return None
+    if distribution_mode == "MANUAL":
+        return tuple(manual_allocation)
+    raise ValueError("schema-5 distribution modeが不正です。")
+
+
+def compatibility_scalar_pattern(turn_specs, legacy_pattern=WINDER_NONE):
+    """Return the non-authoritative scalar used by old single-Turn files."""
+    specs = tuple(turn_specs or ())
+    if not specs:
+        return legacy_pattern
+    if len(specs) == 1:
+        return (specs[0].winder_pattern
+                if specs[0].turn_mode == TURN_WINDER else WINDER_NONE)
+    return WINDER_NONE
+
+
 def reconcile_shared_interface(first, second, eps_length=EPS_LENGTH):
     """Return one exact midpoint section or reject a non-compact mismatch."""
     first, second = tuple(first), tuple(second)

@@ -16,12 +16,14 @@ from japanese_house_modeler.stair_turn import (
     BF_RIGHT_ANGLE_TOLERANCE, ScopeUnsupportedError, TurnSpec,
     WINDER_BF_1, WINDER_BF_2, WINDER_EQUAL_2, WINDER_EQUAL_3,
     active_schema5_allocation, canonical_turn_specs, classify_adjacent_turns,
+    compatibility_scalar_pattern,
     equal_pattern_fractions,
     manual_allocation_from_auto, physical_winder_tread_polygon, polygon_area,
     prepare_schema4_promotion, prepare_winder_geometry,
     promote_schema4_landing_allocation, reconcile_shared_interface,
     resolve_nominal_cells, resolve_turn_frame, resolve_winder_layout,
-    snap_angle_15,
+    path_move_validation_allocation, snap_angle_15,
+    turn_settings_available,
 )
 from japanese_house_modeler.stair_guides import (
     resolve_generalized_move_candidate, resolve_move_candidate,
@@ -253,5 +255,61 @@ class StaticReviewRegressionTests(unittest.TestCase):
     def test_52_manual_active_allocation(self):
         self.assertEqual(active_schema5_allocation(
             "MANUAL", (8, 4), (5, 7)), (5, 7))
+
+    def test_53_schema4_manual_turn_settings_available(self):
+        self.assertTrue(turn_settings_available(4, "MANUAL"))
+
+    def test_54_schema4_manual_landing_available_by_ui_policy(self):
+        self.assertTrue(turn_settings_available(4, "MANUAL"))
+        specs, mode, allocation = prepare_schema4_promotion(
+            U_IDS, 0, "LANDING", "NONE", "MANUAL", (6, 5, 5))
+        self.assertEqual((mode, allocation), ("MANUAL", (5, 4, 4)))
+        self.assertEqual(specs[0].turn_mode, "LANDING")
+
+    def test_55_schema4_manual_winder_still_blocked(self):
+        with self.assertRaisesRegex(ValueError, "先にAUTO"):
+            prepare_schema4_promotion(
+                U_IDS, 0, "WINDER", "EQUAL_2", "MANUAL", (6, 5, 5))
+
+    def test_56_auto_path_move_recomputes_allocation(self):
+        self.assertIsNone(path_move_validation_allocation("AUTO", (5, 0, 4)))
+
+    def test_57_manual_path_move_keeps_manual_allocation(self):
+        self.assertEqual(path_move_validation_allocation(
+            "MANUAL", (5, 0, 4)), (5, 0, 4))
+
+    def test_58_separated_to_compact_auto_reallocates(self):
+        separated = ((0, 0), (0, 2.2), (1.1, 2.2), (1.1, 0))
+        specs = (TurnSpec("t1", "WINDER", "EQUAL_2"),
+                 TurnSpec("t2", "WINDER", "EQUAL_3"))
+        old = layout(separated, U_IDS, specs).straight_allocation
+        with self.assertRaises(ValueError):
+            layout(U, U_IDS, specs, allocation=old)
+        moved = layout(U, U_IDS, specs,
+                       allocation=path_move_validation_allocation("AUTO", old))
+        self.assertEqual(moved.straight_allocation[1], 0)
+
+    def test_59_compact_to_separated_auto_reallocates(self):
+        separated = ((0, 0), (0, 2.2), (1.1, 2.2), (1.1, 0))
+        specs = (TurnSpec("t1", "WINDER", "EQUAL_2"),
+                 TurnSpec("t2", "WINDER", "EQUAL_3"))
+        old = layout(U, U_IDS, specs).straight_allocation
+        with self.assertRaises(ValueError):
+            layout(separated, U_IDS, specs, allocation=old)
+        moved = layout(separated, U_IDS, specs,
+                       allocation=path_move_validation_allocation("AUTO", old))
+        self.assertGreater(moved.straight_allocation[1], 0)
+
+    def test_60_single_landing_scalar_synchronizes_to_none(self):
+        specs = (TurnSpec("turn", "LANDING", "NONE"),)
+        self.assertEqual(compatibility_scalar_pattern(specs, "EQUAL_3"), "NONE")
+
+    def test_61_multi_turn_scalar_is_only_none_sentinel(self):
+        specs = (TurnSpec("t1", "WINDER", "EQUAL_2"),
+                 TurnSpec("t2", "WINDER", "EQUAL_3"))
+        self.assertEqual(compatibility_scalar_pattern(specs, "EQUAL_3"), "NONE")
+
+    def test_62_stage1_empty_specs_keep_legacy_scalar(self):
+        self.assertEqual(compatibility_scalar_pattern((), "EQUAL_3"), "EQUAL_3")
 
 if __name__ == "__main__": unittest.main()

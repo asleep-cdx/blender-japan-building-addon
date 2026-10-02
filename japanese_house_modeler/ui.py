@@ -15,7 +15,10 @@ from .finish_preview_images import cached_preview_icon, request_preview_build
 from .stair_geometry import resolve_stair_layout
 from .stair_guides import path_point_move_labels
 from .stair_multiflight import resolve_multiflight_layout
-from .stair_turn import TurnSpec, active_schema5_allocation, resolve_turn_layout
+from .stair_turn import (
+    TurnSpec, active_schema5_allocation, resolve_turn_layout,
+    turn_settings_available,
+)
 from .stair_operators import stair_issues
 from .stair_state import operation_allowed, state_label
 
@@ -177,8 +180,17 @@ class JHM_PT_house_modeler(bpy.types.Panel):
                     selected_box.label(text=stair.riser_distribution_mode + "配分: " + ", ".join(
                         str(value) for value in derived.allocation))
                     if stair.stair_schema_version == 5:
-                        selected_box.label(
-                            text="廻り段: " + getattr(stair, "win" + "der_" + "pattern"))
+                        specs = tuple(getattr(stair, "turn_specs", ()))
+                        if specs:
+                            for index, spec in enumerate(specs, 1):
+                                pattern = getattr(spec, "win" + "der_pattern")
+                                suffix = "" if pattern == "NONE" else " / " + pattern
+                                selected_box.label(
+                                    text=f"Turn {index}: {spec.turn_mode}{suffix}")
+                        else:
+                            selected_box.label(
+                                text="廻り段: " + getattr(
+                                    stair, "win" + "der_" + "pattern"))
                 else:
                     selected_box.label(
                         text=f"独立踏板枚数: {derived.independent_tread_count}")
@@ -202,8 +214,9 @@ class JHM_PT_house_modeler(bpy.types.Panel):
                     operator.point_index = index
                 normal_actions.operator(
                     "jhm.edit_stair_distribution", text="Riser Distribution")
-                if (stair.stair_schema_version == 5
-                        or stair.riser_distribution_mode == "AUTO"):
+                if turn_settings_available(
+                        stair.stair_schema_version,
+                        stair.riser_distribution_mode):
                     turn_count = max(1, len(stair.path_points) - 2)
                     for turn_index in range(turn_count):
                         operator = normal_actions.operator(

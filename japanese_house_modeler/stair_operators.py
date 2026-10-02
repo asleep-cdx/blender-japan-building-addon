@@ -191,10 +191,13 @@ def _set_canonical(stair, values):
     if values.get("stair_schema_version", 1) >= MULTIPOINT_SCHEMA_VERSION:
         stair.turn_mode = values.get("turn_mode", TURN_MODE)
         if values.get("stair_schema_version") >= turn5.SCHEMA_VERSION:
+            specs = values.get("turn_specs") or ()
             setattr(stair, "win" + "der_" + "pattern",
-                    values.get("win" + "der_" + "pattern", turn5.PATTERN_NONE))
+                    turn5.compatibility_scalar_pattern(
+                        specs, values.get("win" + "der_" + "pattern",
+                                          turn5.PATTERN_NONE)))
             stair.turn_specs.clear()
-            for spec in values.get("turn_specs") or ():
+            for spec in specs:
                 item = stair.turn_specs.add()
                 item.path_point_id = spec.path_point_id
                 item.turn_mode = spec.turn_mode
@@ -909,7 +912,8 @@ class JHM_OT_set_turn_pattern(_StairOperationMixin, bpy.types.Operator):
                          riser_distribution_mode=distribution,
                          auto_riser_allocation=(),
                          manual_riser_allocation=manual)
-        candidate["win" + "der_" + "pattern"] = self.pattern
+        candidate["win" + "der_" + "pattern"] = (
+            turn5.compatibility_scalar_pattern(specs))
         return self._run_candidate(context, candidate)
 
 
@@ -1219,9 +1223,9 @@ class JHM_OT_move_stair_path_point(_StairOperationMixin, bpy.types.Operator):
                     self._candidate = resolve_generalized_move_candidate(
                         self._snapshot["path_points"], self._snapshot["point_ids"],
                         self.point_index, raw, shift=event.shift)
-                    active = (self._snapshot.get("manual_riser_allocation")
-                              if self._snapshot["riser_distribution_mode"] == RISER_DISTRIBUTION_MANUAL
-                              else self._snapshot.get("auto_riser_allocation"))
+                    active = turn5.path_move_validation_allocation(
+                        self._snapshot["riser_distribution_mode"],
+                        self._snapshot.get("manual_riser_allocation", ()))
                     turn5.resolve_turn_layout(
                         self._candidate.points, self._snapshot["ascent_direction"],
                         self._snapshot["base_z_mm"], self._snapshot["floor_to_floor_mm"],
@@ -1232,7 +1236,7 @@ class JHM_OT_move_stair_path_point(_StairOperationMixin, bpy.types.Operator):
                         turn_mode=self._snapshot.get("turn_mode", turn5.MODE),
                         **{"win" + "der_pattern": self._snapshot.get(
                             "win" + "der_pattern", turn5.PATTERN_EQUAL_3)},
-                        allocation=active or None)
+                        allocation=active)
                 else:
                     self._candidate = resolve_move_candidate(
                         self._snapshot["path_points"], self._snapshot["point_ids"],
