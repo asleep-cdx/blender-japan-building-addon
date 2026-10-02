@@ -20,7 +20,7 @@ from . import stair_turn as turn5
 from .stair_guides import (
     GUIDE_THRESHOLD_PX, aligned_candidates, endpoint_right_angle_candidate,
     creation_right_angle_guide_rays, project_to_line,
-    move_persistent_guides, move_point_semantic_label,
+    move_failure_message, move_persistent_guides, move_point_semantic_label,
     resolve_creation_candidate, resolve_generalized_move_candidate,
     resolve_move_candidate,
     turn_right_angle_candidate,
@@ -807,9 +807,11 @@ class JHM_OT_edit_stair_dimensions(_StairOperationMixin, bpy.types.Operator):
         for name in _CANONICAL_NAMES:
             if name != "ascent_direction":
                 candidate[name] = getattr(self, name)
-        if (candidate.get("stair_schema_version") == MULTIPOINT_SCHEMA_VERSION
-                and candidate.get("riser_distribution_mode") == RISER_DISTRIBUTION_AUTO):
-            candidate["auto_riser_allocation"] = None
+        candidate["auto_riser_allocation"] = (
+            turn5.dimension_edit_auto_allocation(
+                candidate.get("stair_schema_version"),
+                candidate.get("riser_distribution_mode"),
+                candidate.get("auto_riser_allocation")))
         return self._run_candidate(context, candidate)
 
 
@@ -1247,9 +1249,10 @@ class JHM_OT_move_stair_path_point(_StairOperationMixin, bpy.types.Operator):
                 self._candidate = None
                 self._area.tag_redraw()
                 if event.type == "LEFTMOUSE":
-                    message = ("この折れ点は他のPath点を固定したままでは90度条件を維持して移動できません。"
-                               if self.point_index not in (0, len(self._snapshot["path_points"]) - 1)
-                               else str(exc))
+                    message = move_failure_message(
+                        self._snapshot["stair_schema_version"],
+                        self.point_index, len(self._snapshot["path_points"]),
+                        exc)
                     self.report({"WARNING"}, message)
                 return {"RUNNING_MODAL"}
             if event.type == "MOUSEMOVE":

@@ -16,7 +16,7 @@ from japanese_house_modeler.stair_turn import (
     BF_RIGHT_ANGLE_TOLERANCE, ScopeUnsupportedError, TurnSpec,
     WINDER_BF_1, WINDER_BF_2, WINDER_EQUAL_2, WINDER_EQUAL_3,
     active_schema5_allocation, canonical_turn_specs, classify_adjacent_turns,
-    compatibility_scalar_pattern,
+    compatibility_scalar_pattern, dimension_edit_auto_allocation,
     equal_pattern_fractions,
     manual_allocation_from_auto, physical_winder_tread_polygon, polygon_area,
     prepare_schema4_promotion, prepare_winder_geometry,
@@ -26,7 +26,8 @@ from japanese_house_modeler.stair_turn import (
     turn_settings_available,
 )
 from japanese_house_modeler.stair_guides import (
-    resolve_generalized_move_candidate, resolve_move_candidate,
+    move_failure_message, resolve_generalized_move_candidate,
+    resolve_move_candidate,
 )
 from japanese_house_modeler.stair_residential import (
     ResidentialFields, assemble_material_slot_plan,
@@ -311,5 +312,43 @@ class StaticReviewRegressionTests(unittest.TestCase):
 
     def test_62_stage1_empty_specs_keep_legacy_scalar(self):
         self.assertEqual(compatibility_scalar_pattern((), "EQUAL_3"), "EQUAL_3")
+
+    def test_63_schema5_auto_dimension_edit_invalidates_allocation(self):
+        self.assertIsNone(dimension_edit_auto_allocation(
+            5, "AUTO", (4, 2, 4)))
+
+    def test_64_schema5_manual_dimension_edit_retains_authority(self):
+        stored = (4, 2, 4)
+        self.assertIs(dimension_edit_auto_allocation(
+            5, "MANUAL", stored), stored)
+
+    def test_65_width_change_does_not_reuse_stale_auto(self):
+        points = ((0, 0), (0, 3), (1.8, 3), (1.8, 0))
+        specs = (TurnSpec("t1", "WINDER", "EQUAL_2"),
+                 TurnSpec("t2", "WINDER", "EQUAL_3"))
+        before = resolve_winder_layout(
+            points, *BASE[:4], 900, *BASE[5:], point_ids=U_IDS,
+            turn_specs=specs)
+        active = dimension_edit_auto_allocation(
+            5, "AUTO", before.straight_allocation)
+        after = resolve_winder_layout(
+            points, *BASE[:4], 1500, *BASE[5:], point_ids=U_IDS,
+            turn_specs=specs, allocation=active)
+        self.assertNotEqual(before.straight_allocation,
+                            after.straight_allocation)
+
+    def test_66_schema4_auto_dimension_regression(self):
+        self.assertIsNone(dimension_edit_auto_allocation(
+            4, "AUTO", (6, 5, 5)))
+
+    def test_67_schema5_failure_message_is_generalized_reason(self):
+        reason = "SCOPE_UNSUPPORTED: BF patternはright-angle Turnのみ対応します。"
+        message = move_failure_message(5, 1, 3, ValueError(reason))
+        self.assertEqual(message, reason)
+        self.assertNotIn("90度条件を維持", message)
+
+    def test_68_schema4_failure_message_keeps_exact90_policy(self):
+        message = move_failure_message(4, 1, 3, ValueError("geometry"))
+        self.assertIn("90度条件を維持", message)
 
 if __name__ == "__main__": unittest.main()

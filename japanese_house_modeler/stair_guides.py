@@ -322,6 +322,14 @@ def resolve_generalized_move_candidate(points, point_ids, moved_index,
     return MoveCandidate(tuple(result), tuple(point_ids), moved_index, guide)
 
 
+def move_failure_message(schema_version, moved_index, point_count, error):
+    """Keep legacy exact-90 wording out of generalized schema-5 failures."""
+    if (int(schema_version) == 4
+            and int(moved_index) not in (0, int(point_count) - 1)):
+        return "この折れ点は他のPath点を固定したままでは90度条件を維持して移動できません。"
+    return str(error)
+
+
 def resolve_creation_candidate(points, point_ids, raw_point, *, shift=False,
                                guide_candidates=(), distances=(), guide_names=(),
                                threshold_px=GUIDE_THRESHOLD_PX):

@@ -629,6 +629,15 @@ def path_move_validation_allocation(distribution_mode, manual_allocation):
     raise ValueError("schema-5 distribution modeが不正です。")
 
 
+def dimension_edit_auto_allocation(schema_version, distribution_mode,
+                                   stored_auto_allocation):
+    """Invalidate AUTO after schema-4/5 dimensions change; preserve MANUAL."""
+    if (int(schema_version) in (4, WINDER_SCHEMA_VERSION)
+            and distribution_mode == "AUTO"):
+        return None
+    return stored_auto_allocation
+
+
 def compatibility_scalar_pattern(turn_specs, legacy_pattern=WINDER_NONE):
     """Return the non-authoritative scalar used by old single-Turn files."""
     specs = tuple(turn_specs or ())
