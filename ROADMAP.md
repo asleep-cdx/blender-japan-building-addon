@@ -1,6 +1,6 @@
 # Japanese House Modeler — Development Roadmap
 
-最終更新: 2026-09-30
+最終更新: 2026-10-02
 
 この文書は、Blender 5.2 LTS 向け **Japanese House Modeler / 日本住宅モデラー** の今後の開発順序と、各Buildをまたいで維持する設計方針をまとめたロードマップである。
 
@@ -61,16 +61,17 @@
 - **Build 07-C overall — ACCEPTED**
 - **Build 07-D — ACCEPTED**
 - **Build 07-D overall — ACCEPTED**
-- **Build 07-E — NEXT / SPECIFICATION FINAL / IMPLEMENTATION NEXT**
+- **Build 07-E — STAGE 1 ACCEPTED / STAGE 2 NEXT**
 - **Build 07-F — HOLD after 07-E**
 - **Build 07-G — HOLD / OPTIONAL BACKLOG**
-- Current accepted add-on version: **0.7.3**
-- Build 07-D final identification: `Build 07-D: Multi-point Path + L/U + Landing`
+- Current accepted Stage baseline add-on version: **0.7.4**
+- Build 07-E Stage 1 Acceptance: **ACCEPTED**
+- Build 07-E overall: **NOT YET ACCEPTED**
 - Build 07-E Specification: **FINAL / IMPLEMENTATION AUTHORITY**
 
-現時点で、Wall System、Finish Attachment Foundation、Baseboard、Crown Moulding、standalone Managed Stair Core、Standard Residential Straight Stair、07-C Straight Stair Finish Variants、および07-D Multi-point L/U + Landingまでの基盤が成立している。
+現時点で、Wall System、Finish Attachment Foundation、Baseboard、Crown Moulding、standalone Managed Stair Core、Standard Residential Straight Stair、07-C Straight Stair Finish Variants、07-D Multi-point L/U + Landing、および07-E Stage 1のschema-5 Turn / RiseEvent foundation + exact-90° EQUAL_2/3/4 L Winder上面Geometryまでの基盤が成立している。
 
-07-D完了後の次の主要開発は **Build 07-E — Winder / 廻り段 + arbitrary-angle Turn / Landing extension** とし、仕様書は第三者レビュー3回を経てFINAL化済み。次はCodexによるStage 1 implementationへ進む。
+07-Eは第三者レビュー3回を経てFINAL化された仕様に従って実装中であり、Stage 1はBlender 5.2 LTS runtime acceptanceを完了した。次はStage 2として BF-1 / BF-2、per-Turn U / Compact U、arbitrary-angle Landing / Winder、schema migration / physical finish integrationへ進む。
 
 Build 07は07-Eを一般住宅の直線＋折れ曲がり階段の主要ゴールとし、07-E Acceptance後はいったん07-F / 07-Gを保留して08-A / 08-Bへ進む。08-B完了後、既知問題 8.5 のFinish endpoint mismatchを修正してから、Wall / Finish / Floor / Ceiling / Stair / Voidを使う早期一室Core統合試験を実施する。
 
@@ -91,7 +92,7 @@ Door / Window / Boolean / Finish Exclusionを含む完全な一室統合試験�
 | **07-B** | Standard Residential Straight Stair + Stepped Closed Underside + Side Boards | **DONE / ACCEPTED** |
 | **07-C** | Sloped Closed Underside + Straight Stair Finish Variants | **DONE / ACCEPTED** |
 | **07-D** | Multi-point Path + L/U + Landing | **DONE / ACCEPTED** |
-| **07-E** | Winder / 廻り段 + arbitrary-angle Turn / Landing | **NEXT / SPEC FINAL** |
+| **07-E** | Winder / 廻り段 + arbitrary-angle Turn / Landing | **STAGE 1 ACCEPTED / STAGE 2 NEXT** |
 | **07-F** | Open / Support Variants | **HOLD after 07-E** |
 | **07-G** | Optional Stair Detail Expansion | **HOLD / Optional Backlog** |
 | **08-A** | Minimal Room / Boundary + Floor | Planned after 07-E |
@@ -963,9 +964,12 @@ Acceptance済み主要機能：
 
 ## 12.12 Build 07-E — Winder / 廻り段 + arbitrary-angle Turn / Landing
 
-**Status: NEXT / SPECIFICATION FINAL / IMPLEMENTATION NEXT**
+**Status: STAGE 1 ACCEPTED / STAGE 2 NEXT**
 
 Implementation authority：`BUILD_07_E_SPECIFICATION.md` — **FINAL / IMPLEMENTATION AUTHORITY**。
+Acceptance status authority：`BUILD_07_E_ACCEPTANCE_RECORD.md`。
+
+Stage 1はBlender 5.2 LTS runtime acceptance済み。schema-5 Turn / RiseEvent foundation、exact-90° 3-point L EQUAL_2/3/4 Winder TREAD/RISER、REVERSE ownership、650mm narrow-width regression、Save/Reopen、Undo/Redo、rollback、deterministic RegenerateまでAcceptance済み。Stage 2以降はまだAcceptanceしていない。
 
 07-Eは階段Buildの主要本命とし、07-DのMulti-point / Turn foundationを拡張して一般的な住宅の廻り階段と、変形住宅の90°以外の折れ曲がり階段をproduction対応する。
 
@@ -1135,23 +1139,23 @@ Compact U中央では2枚を衝突させず、shared-center profile / symmetric 
 ### Final Stage structure
 
 ```text
-Stage 1
+Stage 1 [ACCEPTED]
 schema-5 Turn / RiseEvent foundation
 + 90° EQUAL_2/3/4 L Winder top geometry
 
-Stage 2
+Stage 2 [NEXT]
 BF-1 / BF-2
 + per-Turn U / Compact U
 + arbitrary-angle Landing / Winder
 + schema migration / physical finish integration
 
-Stage 3
+Stage 3 [PENDING]
 STEPPED_CLOSED
 + continuous SLOPED_CLOSED finite pivot relief
 + ordinary Side Board
 + Compact-U shared Side Board
 
-Stage 4
+Stage 4 [PENDING]
 Save/Reopen
 + Undo/Redo
 + rollback / Repair
@@ -1457,6 +1461,7 @@ Build 07はstandalone Stairとして成立させるが、Integrationでは住宅
 - **07-C完了時**：直線住宅階段の実用性を確認し07-Dへ進むことを決定、完了済み。
 - **07-D完了時**：Multi-point L/U + LandingのAcceptance完了。07-E Winder / arbitrary-angle Turnへ進む。
 - **07-E仕様FINAL時**：第三者レビューを反映し、Codex Stage 1 implementationへ進む。
+- **07-E Stage 1完了時**：schema-5 foundation + EQUAL_2/3/4 exact-90 L WinderのBlender runtime acceptance完了。Stage 2へ進む。
 - **07-E完了時**：一般住宅の折れ曲がり階段としてpractical checkpointを行い、07-F / 07-Gを保留して08-A / 08-Bへ進む。
 - **08-B完了時**：Known Issue 8.5を修正後、Integration Coreを実施する。
 - **Integration Core完了時**：Foundation問題を整理し、09 minimalへ進む。
@@ -1483,7 +1488,7 @@ Build 07はstandalone Stairとして成立させるが、Integrationでは住宅
 - final Editable Mesh workflow
 - production documentation
 
-ここでは新しい大規模Featureを増やすより、**既存機能を壊れにくくし、実制作で使いやすくする**ことを優先する。
+ここでは新しい大規模Featureを増やすより、**既存機能を壊れにくくし、実制作で使いやすくすること**を優先する。
 
 ### Quality policy
 
@@ -1562,17 +1567,17 @@ Roadmap変更は許可するが、Accepted historyは消さない。
 07-B  ACCEPTED
 07-C  ACCEPTED
 07-D  ACCEPTED
-07-E  SPECIFICATION FINAL
+07-E  STAGE 1 ACCEPTED
 ```
 
 次：
 
 ```text
-07-E Stage 1 implementation
-     + schema-5 Turn identity / pattern authority
-     + exact RiseEvent allocation
-     + 90° L EQUAL_2 / EQUAL_3 / EQUAL_4 Winder
-     + text-only reviewed geometry contract
+07-E Stage 2 implementation
+     + BF-1 / BF-2 production geometry
+     + per-Turn U / Compact U
+     + arbitrary-angle Landing / Winder
+     + schema migration / physical finish integration
 ```
 
 状態遷移：
@@ -1580,7 +1585,8 @@ Roadmap変更は許可するが、Accepted historyは消さない。
 ```text
 07-D ACCEPTED
 → 07-E SPECIFICATION FINAL
-→ 07-E STAGE 1 IMPLEMENTATION NEXT
+→ 07-E STAGE 1 ACCEPTED
+→ 07-E STAGE 2 IMPLEMENTATION NEXT
 ```
 
 07-E完成後は07-F / 07-GをHOLDし、08-A / 08-Bへ進む。
@@ -1608,7 +1614,7 @@ Crown
     ↓
 07-D Multi-point L/U + Landing [ACCEPTED]
     ↓
-07-E Winder + arbitrary-angle Turn / Landing [SPEC FINAL / NEXT]
+07-E Winder + arbitrary-angle Turn / Landing [STAGE 1 ACCEPTED / STAGE 2 NEXT]
     ↓
 [07-E practical checkpoint]
     ↓
