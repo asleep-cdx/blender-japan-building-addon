@@ -15,7 +15,7 @@ from .finish_preview_images import cached_preview_icon, request_preview_build
 from .stair_geometry import resolve_stair_layout
 from .stair_guides import path_point_move_labels
 from .stair_multiflight import resolve_multiflight_layout
-from .stair_turn import resolve_turn_layout
+from .stair_turn import TurnSpec, resolve_turn_layout
 from .stair_operators import stair_issues
 from .stair_state import operation_allowed, state_label
 
@@ -151,6 +151,10 @@ class JHM_PT_house_modeler(bpy.types.Panel):
                     keywords = dict(
                         point_ids=tuple(point.point_id for point in stair.path_points),
                         **{"win" + "der_" + "pattern": getattr(stair, "win" + "der_" + "pattern")},
+                        turn_specs=tuple(TurnSpec(
+                            item.path_point_id, item.turn_mode,
+                            getattr(item, "win" + "der_pattern"))
+                            for item in getattr(stair, "turn_specs", ())) or None,
                         allocation=tuple(int(value) for value in
                                          stair.auto_riser_allocation.split(",")
                                          if value))
@@ -195,13 +199,17 @@ class JHM_PT_house_modeler(bpy.types.Panel):
                     operator = normal_actions.operator(
                         "jhm.move_stair_path_point", text=label)
                     operator.point_index = index
-                if stair.stair_schema_version == 4:
-                    normal_actions.operator(
-                        "jhm.edit_stair_distribution", text="Riser Distribution")
+                normal_actions.operator(
+                    "jhm.edit_stair_distribution", text="Riser Distribution")
                 if (stair.stair_schema_version == 5
                         or stair.riser_distribution_mode == "AUTO"):
-                    normal_actions.operator(
-                        "jhm.set_turn_pattern", text="廻り段パターン")
+                    turn_count = max(1, len(stair.path_points) - 2)
+                    for turn_index in range(turn_count):
+                        operator = normal_actions.operator(
+                            "jhm.set_turn_pattern",
+                            text=("Turn設定" if turn_count == 1
+                                  else f"Turn {turn_index + 1} 設定"))
+                        operator.turn_index = turn_index
             normal_actions.operator("jhm.reverse_stair_ascent", text="上り方向を反転")
             normal_actions.operator("jhm.regenerate_stair", text="階段を再生成")
             if stair.assembly_mode == "BASIC_TREAD_RISER":
