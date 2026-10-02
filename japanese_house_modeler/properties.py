@@ -66,6 +66,17 @@ class JHM_StairProperties(bpy.types.PropertyGroup):
     stair_schema_version: bpy.props.IntProperty(default=1, options={"HIDDEN"})
     path_points: bpy.props.CollectionProperty(type=JHM_StairPathPoint)
     turn_mode: bpy.props.StringProperty(default="", options={"HIDDEN"})
+    # Schema-5 single canonical pattern authority.  Step count and partition
+    # rule are always derived and deliberately are not persisted as RNA.
+    winder_pattern: bpy.props.EnumProperty(
+        name="廻り段パターン",
+        items=(("NONE", "なし", "Landing Turn"),
+               ("EQUAL_2", "2段廻り", "等角2段"),
+               ("EQUAL_3", "3段廻り", "等角3段"),
+               ("EQUAL_4", "4段廻り", "等角4段"),
+               ("BF_1", "BF-1", "Stage 2"),
+               ("BF_2", "BF-2", "Stage 2")),
+        default="NONE", options={"HIDDEN"})
     riser_distribution_mode: bpy.props.StringProperty(default="", options={"HIDDEN"})
     auto_riser_allocation: bpy.props.StringProperty(default="", options={"HIDDEN"})
     manual_riser_allocation: bpy.props.StringProperty(default="", options={"HIDDEN"})

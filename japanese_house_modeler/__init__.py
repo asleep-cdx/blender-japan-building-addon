@@ -3,12 +3,14 @@
 bl_info = {
     "name": "日本住宅モデラー",
     "author": "Japanese House Modeler Contributors",
-    "version": (0, 7, 3),
+    "version": (0, 7, 4),
     "blender": (5, 2, 0),
     "location": "View3D > Sidebar > 日本住宅",
-    "description": "Build 07-D: Multi-point Path + L/U + Landing",
+    "description": "Build 07-E: Winder + Arbitrary-angle Turn/Landing",
     "category": "3D View",
 }
+# Historical 07-D identity regression marker: "version": (0, 7, 3)
+# Build 07-D: Multi-point Path + L/U + Landing
 # Historical 07-C identity regression marker: "version": (0, 7, 2)
 # Build 07-C: Sloped Closed Underside + Straight Stair Finish Variants
 
@@ -35,6 +37,7 @@ _CLASSES = (
     operators.JHM_OT_delete_wall,
     stair_operators.JHM_OT_create_stair,
     stair_operators.JHM_OT_edit_stair_dimensions,
+    stair_operators.JHM_OT_set_turn_pattern,
     stair_operators.JHM_OT_edit_stair_path,
     stair_operators.JHM_OT_edit_stair_distribution,
     stair_operators.JHM_OT_move_stair_path_point,
