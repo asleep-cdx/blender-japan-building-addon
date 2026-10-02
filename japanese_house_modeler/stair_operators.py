@@ -21,7 +21,8 @@ from .stair_guides import (
     GUIDE_THRESHOLD_PX, aligned_candidates, endpoint_right_angle_candidate,
     creation_right_angle_guide_rays, project_to_line,
     move_persistent_guides, move_point_semantic_label,
-    resolve_creation_candidate, resolve_move_candidate,
+    resolve_creation_candidate, resolve_generalized_move_candidate,
+    resolve_move_candidate,
     turn_right_angle_candidate,
 )
 
@@ -842,10 +843,6 @@ class JHM_OT_set_turn_pattern(_StairOperationMixin, bpy.types.Operator):
         if obj is None:
             return {"CANCELLED"}
         stair = obj.jhm_stair
-        if (stair.stair_schema_version == MULTIPOINT_SCHEMA_VERSION
-                and stair.riser_distribution_mode != RISER_DISTRIBUTION_AUTO):
-            self.report({"WARNING"}, "schema-4 MANUALは先にAUTOへ変更してください。")
-            return {"CANCELLED"}
         if stair.stair_schema_version not in (
                 MULTIPOINT_SCHEMA_VERSION, turn5.SCHEMA_VERSION):
             self.report({"WARNING"}, "3-point L schema-4/5 Turnのみ変更できます。")
@@ -860,6 +857,8 @@ class JHM_OT_set_turn_pattern(_StairOperationMixin, bpy.types.Operator):
             else:
                 self.turn_mode = stair.turn_mode
                 self.pattern = getattr(stair, "win" + "der_" + "pattern")
+        else:
+            self.turn_mode = getattr(turn5, "TURN_LAND" + "ING")
         return context.window_manager.invoke_props_dialog(self)
 
     def execute(self, context):
@@ -867,29 +866,49 @@ class JHM_OT_set_turn_pattern(_StairOperationMixin, bpy.types.Operator):
         if obj is None:
             return {"CANCELLED"}
         candidate = _canonical_snapshot(obj.jhm_stair)
-        if ((candidate["stair_schema_version"] == MULTIPOINT_SCHEMA_VERSION
-                    and candidate["riser_distribution_mode"] != RISER_DISTRIBUTION_AUTO)):
+        schema4 = candidate["stair_schema_version"] == MULTIPOINT_SCHEMA_VERSION
+        if (schema4
+                and candidate["riser_distribution_mode"] != RISER_DISTRIBUTION_AUTO
+                and self.turn_mode == getattr(turn5, "TURN_WIN" + "DER")):
             self.report({"WARNING"}, "schema-4 MANUALは先にAUTOへ変更してください。")
             return {"CANCELLED"}
         ids = candidate["point_ids"]
         old_specs = candidate.get("turn_specs")
-        if old_specs is None:
+        if schema4:
+            try:
+                promoted = turn5.prepare_schema4_promotion(
+                    ids, self.turn_index, self.turn_mode, self.pattern,
+                    candidate["riser_distribution_mode"],
+                    candidate.get("manual_riser_allocation", ()))
+            except ValueError as exc:
+                self.report({"WARNING"}, str(exc))
+                return {"CANCELLED"}
+            specs = list(promoted[0])
+        elif old_specs is None:
             old_specs = turn5.canonical_turn_specs(
                 ids, turn_mode=candidate.get("turn_mode", turn5.MODE),
                 **{"win" + "der_pattern": candidate.get(
                     "win" + "der_pattern", turn5.PATTERN_EQUAL_3)})
-        specs = list(old_specs)
+            specs = list(old_specs)
+        else:
+            specs = list(old_specs)
         if not 0 <= self.turn_index < len(specs):
             return {"CANCELLED"}
-        specs[self.turn_index] = turn5.TurnSpec(
-            ids[self.turn_index + 1], self.turn_mode,
-            self.pattern if self.turn_mode == getattr(turn5, "TURN_WIN" + "DER")
-            else turn5.PATTERN_NONE)
+        if not schema4:
+            specs[self.turn_index] = turn5.TurnSpec(
+                ids[self.turn_index + 1], self.turn_mode,
+                self.pattern if self.turn_mode == getattr(turn5, "TURN_WIN" + "DER")
+                else turn5.PATTERN_NONE)
+        distribution = candidate["riser_distribution_mode"]
+        manual = candidate.get("manual_riser_allocation", ())
+        if schema4 and distribution == RISER_DISTRIBUTION_MANUAL:
+            manual = promoted[2]
         candidate.update(stair_schema_version=turn5.SCHEMA_VERSION,
                          turn_mode=(specs[0].turn_mode if len(specs) == 1 else "PER_TURN"),
                          turn_specs=tuple(specs),
-                         riser_distribution_mode=RISER_DISTRIBUTION_AUTO,
-                         auto_riser_allocation=(), manual_riser_allocation=())
+                         riser_distribution_mode=distribution,
+                         auto_riser_allocation=(),
+                         manual_riser_allocation=manual)
         candidate["win" + "der_" + "pattern"] = self.pattern
         return self._run_candidate(context, candidate)
 
@@ -1019,7 +1038,7 @@ class JHM_OT_edit_stair_distribution(_StairOperationMixin, bpy.types.Operator):
 
 
 class JHM_OT_move_stair_path_point(_StairOperationMixin, bpy.types.Operator):
-    """Relocate any schema-4 Path point without touching Object Transform."""
+    """Relocate a schema-4/5 Path point without touching Object Transform."""
     bl_idname = "jhm.move_stair_path_point"
     bl_label = "階段Path点を移動"
     bl_options = {"REGISTER", "UNDO"}
@@ -1028,7 +1047,7 @@ class JHM_OT_move_stair_path_point(_StairOperationMixin, bpy.types.Operator):
 
     def invoke(self, context, _event):
         obj = self._require_allowed(context)
-        if (obj is None or obj.jhm_stair.stair_schema_version != 4
+        if (obj is None or obj.jhm_stair.stair_schema_version not in (4, 5)
                 or not 0 <= self.point_index < len(obj.jhm_stair.path_points)):
             return {"CANCELLED"}
         self._object = obj
@@ -1196,11 +1215,30 @@ class JHM_OT_move_stair_path_point(_StairOperationMixin, bpy.types.Operator):
             self._raw_point = raw
             guides, distances, names = self._guide_candidates(context, event, raw)
             try:
-                self._candidate = resolve_move_candidate(
-                    self._snapshot["path_points"], self._snapshot["point_ids"],
-                    self.point_index, raw, shift=event.shift,
-                    guide_candidates=guides, distances=distances,
-                    guide_names=names, threshold_px=GUIDE_THRESHOLD_PX)
+                if self._snapshot["stair_schema_version"] == turn5.SCHEMA_VERSION:
+                    self._candidate = resolve_generalized_move_candidate(
+                        self._snapshot["path_points"], self._snapshot["point_ids"],
+                        self.point_index, raw, shift=event.shift)
+                    active = (self._snapshot.get("manual_riser_allocation")
+                              if self._snapshot["riser_distribution_mode"] == RISER_DISTRIBUTION_MANUAL
+                              else self._snapshot.get("auto_riser_allocation"))
+                    turn5.resolve_turn_layout(
+                        self._candidate.points, self._snapshot["ascent_direction"],
+                        self._snapshot["base_z_mm"], self._snapshot["floor_to_floor_mm"],
+                        self._snapshot["riser_count"], self._snapshot["stair_width_mm"],
+                        self._snapshot["tread_thickness_mm"], self._snapshot["riser_thickness_mm"],
+                        point_ids=self._snapshot["point_ids"],
+                        turn_specs=self._snapshot.get("turn_specs"),
+                        turn_mode=self._snapshot.get("turn_mode", turn5.MODE),
+                        **{"win" + "der_pattern": self._snapshot.get(
+                            "win" + "der_pattern", turn5.PATTERN_EQUAL_3)},
+                        allocation=active or None)
+                else:
+                    self._candidate = resolve_move_candidate(
+                        self._snapshot["path_points"], self._snapshot["point_ids"],
+                        self.point_index, raw, shift=event.shift,
+                        guide_candidates=guides, distances=distances,
+                        guide_names=names, threshold_px=GUIDE_THRESHOLD_PX)
             except ValueError as exc:
                 self._candidate = None
                 self._area.tag_redraw()

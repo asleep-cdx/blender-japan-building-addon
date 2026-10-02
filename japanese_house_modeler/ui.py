@@ -15,7 +15,7 @@ from .finish_preview_images import cached_preview_icon, request_preview_build
 from .stair_geometry import resolve_stair_layout
 from .stair_guides import path_point_move_labels
 from .stair_multiflight import resolve_multiflight_layout
-from .stair_turn import TurnSpec, resolve_turn_layout
+from .stair_turn import TurnSpec, active_schema5_allocation, resolve_turn_layout
 from .stair_operators import stair_issues
 from .stair_state import operation_allowed, state_label
 
@@ -155,9 +155,10 @@ class JHM_PT_house_modeler(bpy.types.Panel):
                             item.path_point_id, item.turn_mode,
                             getattr(item, "win" + "der_pattern"))
                             for item in getattr(stair, "turn_specs", ())) or None,
-                        allocation=tuple(int(value) for value in
-                                         stair.auto_riser_allocation.split(",")
-                                         if value))
+                        allocation=active_schema5_allocation(
+                            stair.riser_distribution_mode,
+                            tuple(int(value) for value in stair.auto_riser_allocation.split(",") if value),
+                            tuple(int(value) for value in stair.manual_riser_allocation.split(",") if value)))
                 derived = resolver(
                     tuple(tuple(point.xy) for point in stair.path_points),
                     stair.ascent_direction, stair.base_z_mm,
@@ -173,7 +174,7 @@ class JHM_PT_house_modeler(bpy.types.Panel):
                 selected_box.label(
                     text=f"実蹴上: {derived.actual_riser_mm:.1f} mm")
                 if stair.stair_schema_version in (4, 5):
-                    selected_box.label(text="AUTO配分: " + ", ".join(
+                    selected_box.label(text=stair.riser_distribution_mode + "配分: " + ", ".join(
                         str(value) for value in derived.allocation))
                     if stair.stair_schema_version == 5:
                         selected_box.label(

@@ -15,11 +15,19 @@ if package is None:
 from japanese_house_modeler.stair_turn import (
     BF_RIGHT_ANGLE_TOLERANCE, ScopeUnsupportedError, TurnSpec,
     WINDER_BF_1, WINDER_BF_2, WINDER_EQUAL_2, WINDER_EQUAL_3,
-    canonical_turn_specs, classify_adjacent_turns, equal_pattern_fractions,
+    active_schema5_allocation, canonical_turn_specs, classify_adjacent_turns,
+    equal_pattern_fractions,
     manual_allocation_from_auto, physical_winder_tread_polygon, polygon_area,
-    prepare_winder_geometry, promote_schema4_landing_allocation,
+    prepare_schema4_promotion, prepare_winder_geometry,
+    promote_schema4_landing_allocation, reconcile_shared_interface,
     resolve_nominal_cells, resolve_turn_frame, resolve_winder_layout,
     snap_angle_15,
+)
+from japanese_house_modeler.stair_guides import (
+    resolve_generalized_move_candidate, resolve_move_candidate,
+)
+from japanese_house_modeler.stair_residential import (
+    ResidentialFields, assemble_material_slot_plan,
 )
 
 L = ((0, 0), (0, 2.2), (-2.2, 2.2))
@@ -111,5 +119,139 @@ class AngleMigrationFinishTests(unittest.TestCase):
         a=prepare_winder_geometry(*args,point_ids=L_IDS,tread_front_overhang_mm=5)[2]
         b=prepare_winder_geometry(*args,point_ids=L_IDS,tread_front_overhang_mm=5)[2]
         self.assertEqual(a,b)
+
+
+class StaticReviewRegressionTests(unittest.TestCase):
+    def test_35_schema4_u_selected_turn_only_promotion(self):
+        specs, mode, allocation = prepare_schema4_promotion(
+            U_IDS, 0, "WINDER", "EQUAL_2", "AUTO", (6, 5, 5))
+        self.assertEqual(specs, (TurnSpec("t1", "WINDER", "EQUAL_2"),
+                                 TurnSpec("t2", "LANDING", "NONE")))
+        self.assertEqual((mode, allocation), ("AUTO", ()))
+
+    def test_36_second_turn_can_be_edited_after_materialization(self):
+        specs = list(prepare_schema4_promotion(
+            U_IDS, 0, "WINDER", "EQUAL_2", "AUTO", ())[0])
+        specs[1] = TurnSpec("t2", "WINDER", "EQUAL_3")
+        self.assertEqual(layout(U, U_IDS, tuple(specs)).winder_counts, (2, 3))
+
+    def test_37_manual_landing_promotion_preserves_manual(self):
+        specs, mode, allocation = prepare_schema4_promotion(
+            U_IDS, 1, "LANDING", "NONE", "MANUAL", (6, 5, 5))
+        self.assertEqual((mode, allocation), ("MANUAL", (5, 4, 4)))
+        self.assertTrue(all(spec.turn_mode == "LANDING" for spec in specs))
+
+    def test_38_manual_winder_promotion_is_blocked_without_mutation(self):
+        old = ("schema4", (6, 5, 5), None)
+        with self.assertRaises(ValueError):
+            prepare_schema4_promotion(
+                U_IDS, 0, "WINDER", "EQUAL_2", "MANUAL", old[1])
+        self.assertEqual(old, ("schema4", (6, 5, 5), None))
+
+    def test_39_schema5_free_angle_63(self):
+        raw = (-2.2 * math.sin(math.radians(63)),
+               2.2 + 2.2 * math.cos(math.radians(63)))
+        candidate = resolve_generalized_move_candidate(
+            L, L_IDS, 2, raw, shift=False)
+        self.assertAlmostEqual(abs(resolve_turn_frame(*candidate.points, .9).theta),
+                               math.radians(63))
+
+    def test_40_schema5_shift_nearest_15(self):
+        raw = (-2.2 * math.sin(math.radians(63)),
+               2.2 + 2.2 * math.cos(math.radians(63)))
+        candidate = resolve_generalized_move_candidate(
+            L, L_IDS, 2, raw, shift=True)
+        degrees = abs(math.degrees(resolve_turn_frame(*candidate.points, .9).theta))
+        self.assertAlmostEqual(degrees / 15.0, round(degrees / 15.0))
+
+    def test_41_schema4_move_remains_exact_90(self):
+        with self.assertRaises(ValueError):
+            resolve_move_candidate(L, L_IDS, 2, (-1.7, 3.1), shift=False)
+
+    def test_42_compact_actual_shared_section(self):
+        specs = (TurnSpec("t1", "WINDER", "EQUAL_2"),
+                 TurnSpec("t2", "WINDER", "EQUAL_3"))
+        resolved = layout(U, U_IDS, specs)
+        self.assertEqual((resolved.turns[0].inner_pivot,
+                          resolved.turns[0].exit_outer), resolved.shared_interface)
+        self.assertEqual((resolved.turns[1].inner_pivot,
+                          resolved.turns[1].entry_outer), resolved.shared_interface)
+        self.assertEqual((resolved.turn_cells[0][-1].polygon[0],
+                          resolved.turn_cells[0][-1].polygon[-1]),
+                         (resolved.turn_cells[1][0].polygon[0],
+                          resolved.turn_cells[1][0].polygon[1]))
+
+    def test_43_compact_interface_mismatch_rejected(self):
+        with self.assertRaisesRegex(ValueError, "shared interface mismatch"):
+            reconcile_shared_interface(((0, 0), (0, 1)),
+                                       ((0, 0), (.01, 1)))
+
+    def test_44_landing_arrival_riser_and_roles(self):
+        specs = (TurnSpec("turn", "LANDING", "NONE"),)
+        resolved, fragments, mesh = prepare_winder_geometry(
+            L, *BASE, point_ids=L_IDS, turn_specs=specs)
+        self.assertEqual([event.owner for event in resolved.rise_events].count(
+            "LANDING_ARRIVAL"), 1)
+        self.assertGreater(sum(part.part_type == "RISER" for part in fragments),
+                           sum(resolved.straight_allocation))
+        self.assertNotIn("LANDING", mesh.face_roles)
+
+    def test_45_landing_roles_exist_in_residential_material_plan(self):
+        _resolved, _fragments, mesh = prepare_winder_geometry(
+            L, *BASE, point_ids=L_IDS,
+            turn_specs=(TurnSpec("turn", "LANDING", "NONE"),))
+        roles = dict(assemble_material_slot_plan(ResidentialFields()).role_indices)
+        self.assertTrue(set(mesh.face_roles).issubset(roles))
+
+    def _profile_mesh(self, mode):
+        return prepare_winder_geometry(
+            L, *BASE, point_ids=L_IDS, tread_front_overhang_mm=8,
+            tread_front_edge_mode=mode, tread_front_edge_size_mm=3)[2]
+
+    def test_46_bevel_actual_geometry_differs(self):
+        square, bevel = self._profile_mesh("SQUARE"), self._profile_mesh("BEVEL")
+        self.assertNotEqual(square.vertices, bevel.vertices)
+        self.assertGreater(len(bevel.vertices), len(square.vertices))
+
+    def test_47_round_actual_geometry_differs(self):
+        square, rounded = self._profile_mesh("SQUARE"), self._profile_mesh("ROUND")
+        self.assertNotEqual(square.vertices, rounded.vertices)
+        self.assertGreater(len(rounded.vertices), len(square.vertices))
+
+    def test_48_schema5_straight_treads_keep_profile(self):
+        _layout, fragments, _mesh = prepare_winder_geometry(
+            L, *BASE, point_ids=L_IDS, tread_front_overhang_mm=8,
+            tread_front_edge_mode="BEVEL", tread_front_edge_size_mm=3)
+        straight_profiles = [part for part in fragments
+                             if part.part_type == "TREAD"
+                             and len(part.vertices) > 8]
+        self.assertGreater(len(straight_profiles), 0)
+
+    def test_49_reverse_equal4_local_indices(self):
+        resolved = resolve_winder_layout(
+            L, "REVERSE", *BASE[1:], point_ids=L_IDS,
+            winder_pattern="EQUAL_4")
+        self.assertEqual([event.owner_index for event in resolved.rise_events
+                          if event.owner == "WINDER_TREAD"], [1, 2, 3, 4])
+
+    def test_50_reverse_u_indices_restart_per_uphill_component(self):
+        specs = (TurnSpec("t1", "WINDER", "EQUAL_2"),
+                 TurnSpec("t2", "WINDER", "EQUAL_3"))
+        resolved = resolve_winder_layout(
+            U, "REVERSE", *BASE[1:], point_ids=U_IDS, turn_specs=specs)
+        indices = [event.owner_index for event in resolved.rise_events
+                   if event.owner == "WINDER_TREAD"]
+        self.assertEqual(indices, [1, 2, 3, 1, 2])
+
+    def test_51_invalid_candidate_does_not_mutate_turn_specs(self):
+        specs = (TurnSpec("turn", "WINDER", "EQUAL_3"),)
+        snapshot = tuple(specs)
+        with self.assertRaises(ValueError):
+            layout(((0, 0), (.1, 0), (.1, 1)), L_IDS, specs)
+        self.assertEqual(specs, snapshot)
+
+    def test_52_manual_active_allocation(self):
+        self.assertEqual(active_schema5_allocation(
+            "MANUAL", (8, 4), (5, 7)), (5, 7))
 
 if __name__ == "__main__": unittest.main()

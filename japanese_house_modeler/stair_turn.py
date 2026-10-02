@@ -6,7 +6,7 @@ state.  Operators can therefore prepare and validate a complete candidate
 before replacing a managed object's mesh or canonical properties.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import math
 
 from .stair_geometry import (
@@ -551,6 +551,32 @@ def canonical_turn_specs(point_ids, turn_specs=None, *, turn_mode=TURN_WINDER,
     return result
 
 
+def promotion_turn_specs(point_ids, selected_index, turn_mode, winder_pattern):
+    """Materialize a schema-4 L/U only for an explicit Stage-2 edit."""
+    interior = tuple(str(value) for value in point_ids[1:-1])
+    if not 0 <= int(selected_index) < len(interior):
+        raise ValueError("Turn indexが不正です。")
+    specs = [TurnSpec(identity, TURN_LANDING, WINDER_NONE)
+             for identity in interior]
+    specs[int(selected_index)] = TurnSpec(
+        interior[int(selected_index)], turn_mode,
+        winder_pattern if turn_mode == TURN_WINDER else WINDER_NONE)
+    return tuple(specs)
+
+
+def prepare_schema4_promotion(point_ids, selected_index, turn_mode,
+                              winder_pattern, distribution_mode,
+                              physical_allocation):
+    """Pure transactional candidate data for an explicit schema-4 promotion."""
+    if distribution_mode == "MANUAL" and turn_mode == TURN_WINDER:
+        raise ValueError("schema-4 MANUALは先にAUTOへ変更してください。")
+    specs = promotion_turn_specs(point_ids, selected_index, turn_mode,
+                                 winder_pattern)
+    allocation = (promote_schema4_landing_allocation(physical_allocation)
+                  if distribution_mode == "MANUAL" else ())
+    return specs, distribution_mode, allocation
+
+
 def classify_adjacent_turns(middle_length, first_exit_cutback,
                             second_entry_cutback, eps_length=EPS_LENGTH):
     remainder = float(middle_length) - float(first_exit_cutback) - float(second_entry_cutback)
@@ -580,6 +606,27 @@ def manual_allocation_from_auto(resolved_allocation):
     return tuple(int(value) for value in resolved_allocation)
 
 
+def active_schema5_allocation(mode, auto_allocation, manual_allocation):
+    """Select the one allocation authority used for schema-5 derivation/UI."""
+    if mode == "AUTO":
+        return tuple(auto_allocation)
+    if mode == "MANUAL":
+        return tuple(manual_allocation)
+    raise ValueError("schema-5 distribution modeが不正です。")
+
+
+def reconcile_shared_interface(first, second, eps_length=EPS_LENGTH):
+    """Return one exact midpoint section or reject a non-compact mismatch."""
+    first, second = tuple(first), tuple(second)
+    if len(first) != 2 or len(second) != 2:
+        raise ValueError("Compact-U shared interfaceが不正です。")
+    if any(math.hypot(a[0] - b[0], a[1] - b[1]) > eps_length
+           for a, b in zip(first, second)):
+        raise ValueError("GEOMETRY_INVALID: Compact-U shared interface mismatch")
+    return tuple(((a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0)
+                 for a, b in zip(first, second))
+
+
 def resolve_winder_layout(points, ascent_direction, base_z_mm,
                           floor_to_floor_mm, riser_count, stair_width_mm,
                           tread_thickness_mm, riser_thickness_mm, *,
@@ -599,9 +646,6 @@ def resolve_winder_layout(points, ascent_direction, base_z_mm,
     frames = tuple(resolve_turn_frame(converted[index - 1], converted[index],
                                       converted[index + 1], width, ids[index])
                    for index in range(1, len(converted) - 1))
-    cells_by_turn = tuple(resolve_nominal_cells(frame, spec.winder_pattern)
-                          if spec.turn_mode == TURN_WINDER else ()
-                          for frame, spec in zip(frames, specs))
     counts = tuple(pattern_mapping(spec.winder_pattern)[0]
                    if spec.turn_mode == TURN_WINDER else 0 for spec in specs)
     lengths = tuple(math.hypot(*_sub(b, a)) for a, b in zip(converted, converted[1:]))
@@ -619,12 +663,18 @@ def resolve_winder_layout(points, ascent_direction, base_z_mm,
             raise ValueError("GEOMETRY_INVALID: adjacent Turn envelopes overlap")
         runs[1] = middle
         if classification == "COMPACT_U":
-            # One deterministic cross-section authority; Path points stay put.
-            shared = tuple((_add(a, b)[0] / 2.0, _add(a, b)[1] / 2.0)
-                           for a, b in zip((frames[0].inner_pivot, frames[0].exit_outer),
-                                           (frames[1].inner_pivot, frames[1].entry_outer)))
+            first = (frames[0].inner_pivot, frames[0].exit_outer)
+            second = (frames[1].inner_pivot, frames[1].entry_outer)
+            shared = reconcile_shared_interface(first, second)
+            frames = (replace(frames[0], inner_pivot=shared[0],
+                              exit_outer=shared[1]),
+                      replace(frames[1], inner_pivot=shared[0],
+                              entry_outer=shared[1]))
     if any(value < -EPS_LENGTH for value in runs):
         raise ValueError("GEOMETRY_INVALID: Turn cutback後のstraight regionが負です。")
+    cells_by_turn = tuple(resolve_nominal_cells(frame, spec.winder_pattern)
+                          if spec.turn_mode == TURN_WINDER else ()
+                          for frame, spec in zip(frames, specs))
     landing_count = sum(spec.turn_mode == TURN_LANDING for spec in specs)
     resolved = (allocate_straight_events(runs, riser_count, landing_count, sum(counts))
                 if allocation is None else tuple(int(value) for value in allocation))
@@ -657,16 +707,19 @@ def resolve_winder_layout(points, ascent_direction, base_z_mm,
         raise ValueError("踏板厚は実蹴上より小さくする必要があります。")
     if ascent_direction not in ("FORWARD", "REVERSE"):
         raise ValueError("不明な上り方向です。")
-    sequence = []
+    event_components = []
     for index, straight_count in enumerate(resolved):
-        sequence.extend(("STRAIGHT_TREAD", step) for step in range(1, straight_count + 1))
+        event_components.append(("STRAIGHT_TREAD", straight_count))
         if index < len(specs):
             if specs[index].turn_mode == TURN_LANDING:
-                sequence.append(("LANDING_ARRIVAL", index + 1))
+                event_components.append(("LANDING_ARRIVAL", 1))
             else:
-                sequence.extend(("WINDER_TREAD", step) for step in range(1, counts[index] + 1))
+                event_components.append(("WINDER_TREAD", counts[index]))
     if ascent_direction == "REVERSE":
-        sequence.reverse()
+        event_components.reverse()
+    sequence = [(owner, local_index)
+                for owner, count in event_components
+                for local_index in range(1, count + 1)]
     sequence.append(("UPPER_ARRIVAL", 1))
     events = tuple(RiseEvent(index, owner, owner_index,
                              base_z + index * actual_riser)
@@ -696,6 +749,82 @@ def _polygon_prism(polygon, bottom, top, role, ordinal):
     return MeshFragment(role, ordinal, vertices, tuple(faces))
 
 
+def _profiled_prism(polygon, bottom, top, front, mode, edge_size,
+                    role, ordinal):
+    """Profile only one named exposed plan edge; every other edge stays square."""
+    if mode == "SQUARE":
+        return _polygon_prism(polygon, bottom, top, role, ordinal)
+    polygon = tuple(polygon)
+    if polygon_signed_area(polygon) < 0.0:
+        polygon = tuple(reversed(polygon))
+    endpoints = tuple(front)
+    indices = tuple(next((index for index, point in enumerate(polygon)
+                          if math.hypot(point[0] - endpoint[0],
+                                        point[1] - endpoint[1]) <= EPS_LENGTH), -1)
+                    for endpoint in endpoints)
+    if -1 in indices or (indices[1] - indices[0]) % len(polygon) not in (1, len(polygon) - 1):
+        raise ValueError("exposed front edgeをphysical treadから解決できません。")
+    i, j = indices
+    if (j - i) % len(polygon) != 1:
+        i, j = j, i
+    direction, _ = _unit(_sub(polygon[j], polygon[i]), "exposed front edge")
+    centroid = (sum(p[0] for p in polygon) / len(polygon),
+                sum(p[1] for p in polygon) / len(polygon))
+    normal = (-direction[1], direction[0])
+    if _dot(normal, _sub(centroid, polygon[i])) < 0.0:
+        normal = _scale(normal, -1.0)
+    q = float(edge_size)
+    if mode == "BEVEL":
+        stations = ((q, bottom), (0.0, bottom + q),
+                    (0.0, top - q), (q, top))
+    elif mode == "ROUND":
+        stations = [(q, bottom)]
+        lower = (q, bottom + q)
+        stations.extend((q + q * math.cos(-math.pi / 2.0 - k * math.pi / 8.0),
+                         lower[1] + q * math.sin(-math.pi / 2.0 - k * math.pi / 8.0))
+                        for k in range(1, 5))
+        upper = (q, top - q)
+        stations.extend((q + q * math.cos(math.pi - k * math.pi / 8.0),
+                         upper[1] + q * math.sin(math.pi - k * math.pi / 8.0))
+                        for k in range(0, 5))
+    else:
+        raise ValueError("不明なfront-edge modeです。")
+    stations = tuple(stations)
+    bottom_plan = list(polygon)
+    top_plan = list(polygon)
+    for index in (i, j):
+        bottom_plan[index] = _add(polygon[index], _scale(normal, stations[0][0]))
+        top_plan[index] = _add(polygon[index], _scale(normal, stations[-1][0]))
+    vertices = [(x, y, bottom) for x, y in bottom_plan]
+    vertices.extend((x, y, top) for x, y in top_plan)
+    chains = {}
+    for index in (i, j):
+        chain = [index]
+        for offset, z in stations[1:-1]:
+            point = _add(polygon[index], _scale(normal, offset))
+            chain.append(len(vertices)); vertices.append((point[0], point[1], z))
+        chain.append(index + len(polygon))
+        chains[index] = chain
+    size = len(polygon)
+    faces = [tuple(reversed(range(size))), tuple(range(size, size * 2))]
+    for index in range(size):
+        following = (index + 1) % size
+        if index == i and following == j:
+            for a, b, c, d in zip(chains[i], chains[j],
+                                  chains[j][1:], chains[i][1:]):
+                faces.append((a, b, c, d))
+        elif following == i:
+            faces.append((index, i, *chains[i][1:], index + size))
+        elif index == j:
+            faces.append((j, following, following + size, j + size,
+                          *tuple(reversed(chains[j][1:-1]))))
+        else:
+            faces.append((index, following, following + size, index + size))
+    fragment = MeshFragment(role, ordinal, tuple(vertices), tuple(faces))
+    validate_mesh_fragments((fragment,))
+    return fragment
+
+
 def _straight_box(start, direction, normal, width, x0, x1, bottom, top,
                   role, ordinal):
     half = width / 2.0
@@ -703,6 +832,18 @@ def _straight_box(start, direction, normal, width, x0, x1, bottom, top,
                     for x, y in ((x0, -half), (x1, -half),
                                  (x1, half), (x0, half)))
     return _polygon_prism(polygon, bottom, top, role, ordinal)
+
+
+def _straight_tread(start, direction, normal, width, x0, x1, bottom, top,
+                    nosing, mode, edge_size, ordinal):
+    half = width / 2.0
+    front = x0 - nosing
+    polygon = tuple(_add(start, _add(_scale(direction, x), _scale(normal, y)))
+                    for x, y in ((front, -half), (x1, -half),
+                                 (x1, half), (front, half)))
+    exposed = (polygon[-1], polygon[0])
+    return _profiled_prism(polygon, bottom, top, exposed, mode, edge_size,
+                           "TREAD", ordinal)
 
 
 def build_winder_fragments(layout):
@@ -740,11 +881,11 @@ def build_winder_fragments(layout):
                 counter += 1
                 top = layout.base_z + counter * layout.actual_riser
                 ordinal += 1
-                fragments.append(_straight_box(start, direction, normal(direction),
-                                                 layout.width, step * going,
-                                                 (step + 1) * going,
-                                                 top - layout.tread_thickness, top,
-                                                 "TREAD", ordinal))
+                fragments.append(_straight_tread(
+                    start, direction, normal(direction), layout.width,
+                    step * going, (step + 1) * going + layout.riser_thickness,
+                    top - layout.tread_thickness, top, layout.nosing,
+                    layout.front_edge_mode, layout.front_edge_size, ordinal))
                 ordinal += 1
                 fragments.append(_straight_box(start, direction, normal(direction),
                                                  layout.width, step * going,
@@ -758,7 +899,17 @@ def build_winder_fragments(layout):
             ordinal += 1
             fragments.append(_polygon_prism(layout.turns[turn_index].envelope,
                                              top - layout.tread_thickness, top,
-                                             "LANDING", ordinal))
+                                             "TREAD", ordinal))
+            landing_cell = NominalWinderCell(
+                1, 0.0, 1.0, layout.turns[turn_index].envelope)
+            riser = resolve_winder_riser_plan(
+                landing_cell, layout.ascent_direction,
+                layout.turns[turn_index].inner_pivot,
+                layout.riser_thickness)
+            ordinal += 1
+            fragments.append(_polygon_prism(
+                riser.polygon, top - layout.actual_riser,
+                top - layout.tread_thickness, "RISER", ordinal))
         else:
             cells = layout.turn_cells[turn_index]
             if layout.ascent_direction == "REVERSE":
@@ -771,9 +922,13 @@ def build_winder_fragments(layout):
                     cell, layout.ascent_direction,
                     layout.turns[turn_index].inner_pivot, layout.nosing,
                     layout.riser_thickness)
-                fragments.append(_polygon_prism(tread_polygon,
-                                                 top - layout.tread_thickness,
-                                                 top, "TREAD", ordinal))
+                exposed = ((tread_polygon[0], tread_polygon[1])
+                           if layout.ascent_direction == "FORWARD"
+                           else (tread_polygon[-1], tread_polygon[0]))
+                fragments.append(_profiled_prism(
+                    tread_polygon, top - layout.tread_thickness, top,
+                    exposed, layout.front_edge_mode, layout.front_edge_size,
+                    "TREAD", ordinal))
                 riser = resolve_winder_riser_plan(
                     cell, layout.ascent_direction, layout.turns[turn_index].inner_pivot,
                     layout.riser_thickness)
