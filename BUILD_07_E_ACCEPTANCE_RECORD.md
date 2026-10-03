@@ -363,6 +363,15 @@ commit 9424da623953a32a97576ce45bec074b269d4058
 tree   7d30e76ae20ad58b72cece1e298f54ee45f90a65
 ```
 
+Merged main revision:
+
+```text
+commit 128e2e0c31b49b195c5353697dc6a52912a9ebd0
+tree   65193608748b2979cb6cfc5bc601c476ac743add
+```
+
+The merged tree includes the Stage-2 production contents plus the Acceptance Record commit. The exact runtime-tested production authority remains the Candidate-r3 revision/tree above.
+
 Runtime Candidate:
 
 ```text
@@ -382,8 +391,6 @@ Description: Build 07-E: Winder + Arbitrary-angle Turn/Landing
 Candidate r1 and Candidate r2 were rejected during pre-acceptance runtime review and are not accepted artifacts.
 
 The acceptance-record commit added after runtime testing is documentation-only and does not supersede the exact runtime-tested production revision above.
-
-Merged main revision is recorded after PR #32 merge in the post-merge update of this Acceptance Record.
 
 ## 9. Stage 2 automated / static evidence
 
@@ -627,6 +634,13 @@ commit 9424da623953a32a97576ce45bec074b269d4058
 tree   7d30e76ae20ad58b72cece1e298f54ee45f90a65
 ```
 
+Merged main revision:
+
+```text
+commit 128e2e0c31b49b195c5353697dc6a52912a9ebd0
+tree   65193608748b2979cb6cfc5bc601c476ac743add
+```
+
 Accepted runtime Candidate:
 
 ```text
@@ -635,6 +649,6 @@ SIZE    159639 bytes
 SHA256  15d48e9230b5a7e7f0b59954ccbe56acc7fb99bce3d26b39481f969f75c7b1d4
 ```
 
-PR #32 merge identity will be added after merge. Documentation-only commits do not replace the accepted runtime-tested production tree above.
+The merged main tree includes the documentation acceptance commit; documentation-only changes do not replace the accepted runtime-tested production tree above.
 
 Build 07-E overall remains **NOT YET ACCEPTED**. Next implementation stage is **Build 07-E Stage 3**.
