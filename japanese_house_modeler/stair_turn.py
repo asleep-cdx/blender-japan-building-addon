@@ -139,12 +139,26 @@ class PhysicalWinderBoundary:
 
 
 @dataclass(frozen=True)
+class PhysicalWinderInnerTrim:
+    """One Turn-local common physical finish chord."""
+    bisector: tuple
+    h_finish: float
+    entry_point: tuple
+    exit_point: tuple
+    chord: tuple
+
+
+@dataclass(frozen=True)
 class PhysicalWinderTreadPlan:
     cell_index: int
     polygon: tuple
     exposed_front_edge: tuple
     rear_support_edge: tuple
     inner_miter: tuple
+    inner_front: tuple
+    inner_rear: tuple
+    inner_edge: tuple
+    inner_trim: PhysicalWinderInnerTrim
     front_boundary: PhysicalWinderBoundary
     rear_boundary: PhysicalWinderBoundary
     riser_polygon: tuple
@@ -574,12 +588,46 @@ def resolve_physical_winder_plans(frame, cells, ascent_direction,
         (frame.exit_outer, frame.outer_corner, frame.entry_outer))
     corner_station = (math.hypot(*_sub(frame.outer_corner, chain[0]))
                       if frame.outer_corner in chain else float("inf"))
+    raw_miters = tuple(_line_intersection(
+        boundaries[index].nose_origin, boundaries[index].direction,
+        boundaries[index + 1].back_origin,
+        boundaries[index + 1].direction)
+        for index in range(len(ordered)))
+    entry_ray, entry_length = _unit(
+        _sub(frame.entry_outer, frame.inner_pivot), "Turn entry ray")
+    exit_ray, exit_length = _unit(
+        _sub(frame.exit_outer, frame.inner_pivot), "Turn exit ray")
+    bisector, _ = _unit(_add(entry_ray, exit_ray), "Turn inner finish bisector")
+    clearance = max(float(nosing), float(riser_thickness), 10.0 * EPS_LENGTH)
+    h_finish = max(0.0, max(_dot(_sub(point, frame.inner_pivot), bisector)
+                            for point in raw_miters)) + clearance
+    finish_origin = _add(frame.inner_pivot, _scale(bisector, h_finish))
+    finish_direction = (-bisector[1], bisector[0])
+    entry_point = _line_intersection(
+        finish_origin, finish_direction, frame.inner_pivot, entry_ray)
+    exit_point = _line_intersection(
+        finish_origin, finish_direction, frame.inner_pivot, exit_ray)
+    entry_t = _dot(_sub(entry_point, frame.inner_pivot), entry_ray)
+    exit_t = _dot(_sub(exit_point, frame.inner_pivot), exit_ray)
+    if (entry_t <= EPS_LENGTH or exit_t <= EPS_LENGTH
+            or entry_t >= entry_length - EPS_LENGTH
+            or exit_t >= exit_length - EPS_LENGTH):
+        raise ValueError("GEOMETRY_INVALID: common inner finish chordがTurn内に収まりません。")
+    inner_trim = PhysicalWinderInnerTrim(
+        bisector, h_finish, entry_point, exit_point,
+        (entry_point, exit_point))
     plans = []
     for index, cell in enumerate(ordered):
         front, rear = boundaries[index], boundaries[index + 1]
-        inner_miter = _line_intersection(
+        inner_miter = raw_miters[index]
+        inner_front = _line_intersection(
             front.nose_origin, front.direction,
-            rear.back_origin, rear.direction)
+            finish_origin, finish_direction)
+        inner_rear = _line_intersection(
+            rear.back_origin, rear.direction,
+            finish_origin, finish_direction)
+        if math.hypot(*_sub(inner_rear, inner_front)) <= EPS_LENGTH:
+            raise ValueError("GEOMETRY_INVALID: physical Winder inner edgeが短すぎます。")
         front_outer, front_station, _ = _trim_semantic_line(
             front.nose_origin, front.direction, chain, front.nominal_face)
         rear_outer, rear_station, _ = _trim_semantic_line(
@@ -589,28 +637,37 @@ def resolve_physical_winder_plans(frame, cells, ascent_direction,
         if low + EPS_LENGTH < corner_station < high - EPS_LENGTH:
             outer.append(frame.outer_corner)
         outer.append(rear_outer)
-        polygon = _deduplicate((inner_miter, *outer))
+        if len(outer) == 2:
+            midpoint = _scale(_add(outer[0], outer[1]), 0.5)
+            outer.insert(1, midpoint)
+        polygon = _deduplicate((inner_front, *outer, inner_rear))
         if len(polygon) < 3 or polygon_area(polygon) <= EPS_AREA:
-            raise ValueError("GEOMETRY_INVALID: physical Winder inner miterが不正です。")
-        front_edge = (inner_miter, front_outer)
-        rear_edge = (inner_miter, rear_outer)
+            raise ValueError("GEOMETRY_INVALID: physical Winder common inner trimが不正です。")
+        if any(_dot(_sub(point, frame.inner_pivot), bisector)
+               < h_finish - EPS_LENGTH for point in polygon):
+            raise ValueError("GEOMETRY_INVALID: physical vertexがinner finish chordを越えます。")
+        front_edge = (inner_front, front_outer)
+        rear_edge = (inner_rear, rear_outer)
         if plans:
             riser_back = plans[-1].rear_support_edge
         else:
             first_back_outer, _station, _segment = _trim_semantic_line(
                 front.back_origin, front.direction, chain,
                 front.nominal_face)
-            first_back_inner = _add(front.nominal_face[0],
-                                    _scale(front.uphill_normal,
-                                           float(riser_thickness)))
+            first_back_inner = _line_intersection(
+                front.back_origin, front.direction,
+                finish_origin, finish_direction)
             riser_back = (first_back_inner, first_back_outer)
-        riser_polygon = _deduplicate((front.nominal_face[0],
-                                      front.nominal_face[1],
+        face_inner = _line_intersection(
+            front.nominal_face[0], front.direction,
+            finish_origin, finish_direction)
+        riser_polygon = _deduplicate((face_inner, front.nominal_face[1],
                                       riser_back[1], riser_back[0]))
         if len(riser_polygon) < 3 or polygon_area(riser_polygon) <= EPS_AREA:
             raise ValueError("GEOMETRY_INVALID: Winder Riser bandが不正です。")
         plans.append(PhysicalWinderTreadPlan(
             cell.index, polygon, front_edge, rear_edge, inner_miter,
+            inner_front, inner_rear, (inner_front, inner_rear), inner_trim,
             front, rear, riser_polygon, riser_back))
     return tuple(plans)
 

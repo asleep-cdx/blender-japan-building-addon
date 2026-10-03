@@ -477,4 +477,149 @@ class PhysicalBoundaryRuntimeRegressionTests(unittest.TestCase):
         second = self._plans()[1]
         self.assertEqual(first, second)
 
+    @staticmethod
+    def _height(trim, pivot, point):
+        return ((point[0] - pivot[0]) * trim.bisector[0]
+                + (point[1] - pivot[1]) * trim.bisector[1])
+
+    def _assert_common_chord(self, resolved, plans):
+        trim = plans[0].inner_trim
+        for plan in plans:
+            self.assertIs(plan.inner_trim, trim)
+            for point in plan.inner_edge:
+                self.assertAlmostEqual(
+                    self._height(trim, resolved.turn.inner_pivot, point),
+                    trim.h_finish)
+
+    def test_83_exact90_all_inner_edges_use_one_chord(self):
+        resolved, groups = self._plans()
+        self._assert_common_chord(resolved, groups[0])
+
+    def test_84_63degree_all_inner_edges_use_one_chord(self):
+        resolved, groups = self._plans(degrees=63)
+        self._assert_common_chord(resolved, groups[0])
+
+    def test_85_63degree_inner_edges_are_finite(self):
+        _resolved, groups = self._plans(degrees=63)
+        self.assertTrue(all(math.dist(*plan.inner_edge) > 1e-6
+                            for plan in groups[0]))
+
+    def test_86_inner_front_keeps_five_mm_nosing(self):
+        _resolved, groups = self._plans(degrees=63)
+        for plan in groups[0]:
+            self.assertAlmostEqual(self._distance(
+                plan.front_boundary, plan.inner_front), .005)
+
+    def test_87_outer_front_keeps_five_mm_nosing(self):
+        _resolved, groups = self._plans(degrees=63)
+        for plan in groups[0]:
+            self.assertAlmostEqual(self._distance(
+                plan.front_boundary, plan.exposed_front_edge[1]), .005)
+
+    def test_88_no_tread_vertex_is_on_pivot_side(self):
+        resolved, groups = self._plans(degrees=63)
+        trim = groups[0][0].inner_trim
+        for plan in groups[0]:
+            for point in plan.polygon:
+                self.assertGreaterEqual(
+                    self._height(trim, resolved.turn.inner_pivot, point),
+                    trim.h_finish - 1e-6)
+
+    def test_89_riser_inner_points_use_same_chord(self):
+        resolved, groups = self._plans(degrees=63)
+        trim = groups[0][0].inner_trim
+        for plan in groups[0]:
+            for point in (plan.riser_polygon[0], plan.riser_polygon[-1]):
+                self.assertAlmostEqual(
+                    self._height(trim, resolved.turn.inner_pivot, point),
+                    trim.h_finish)
+
+    def test_90_shared_back_survives_chord_trim(self):
+        _resolved, groups = self._plans(degrees=63)
+        for lower, destination in zip(groups[0], groups[0][1:]):
+            self.assertEqual(lower.rear_support_edge,
+                             destination.riser_back_edge)
+
+    def test_91_shared_back_tuple_identity_survives_chord_trim(self):
+        _resolved, groups = self._plans(degrees=63)
+        for lower, destination in zip(groups[0], groups[0][1:]):
+            self.assertIs(lower.rear_support_edge,
+                          destination.riser_back_edge)
+
+    def test_92_outer_wedge_regression_stays_closed(self):
+        _resolved, groups = self._plans()
+        for lower, destination in zip(groups[0], groups[0][1:]):
+            self.assertEqual(lower.rear_support_edge[1],
+                             destination.riser_back_edge[1])
+
+    def test_93_bf_u_has_independent_turn_local_chords(self):
+        resolved, groups = self._plans(
+            U, U_IDS, 900, patterns=("BF_1", "BF_2"))
+        self.assertIsNot(groups[0][0].inner_trim, groups[1][0].inner_trim)
+        for frame, plans in zip(resolved.turns, groups):
+            for plan in plans:
+                for point in plan.inner_edge:
+                    self.assertAlmostEqual(self._height(
+                        plan.inner_trim, frame.inner_pivot, point),
+                        plan.inner_trim.h_finish)
+
+    def test_94_compact_u_keeps_independent_chords_and_shared_middle(self):
+        resolved, groups = self._plans(
+            U, U_IDS, 900, patterns=("EQUAL_2", "EQUAL_3"))
+        self.assertIsNot(groups[0][0].inner_trim, groups[1][0].inner_trim)
+        self.assertEqual((resolved.turns[0].inner_pivot,
+                          resolved.turns[0].exit_outer),
+                         (resolved.turns[1].inner_pivot,
+                          resolved.turns[1].entry_outer))
+
+    def test_95_reverse_chord_is_geometry_equivalent(self):
+        forward, fg = self._plans()
+        reverse, rg = self._plans(reverse=True)
+        self.assertAlmostEqual(fg[0][0].inner_trim.h_finish,
+                               rg[0][0].inner_trim.h_finish)
+        self.assertEqual(set(fg[0][0].inner_trim.chord),
+                         set(rg[0][0].inner_trim.chord))
+        self.assertEqual(forward.turn.inner_pivot, reverse.turn.inner_pivot)
+
+    def test_96_width650_exact90_remains_valid(self):
+        resolved, groups = self._plans(width=650)
+        self._assert_common_chord(resolved, groups[0])
+
+    def test_97_width650_63degree_remains_valid(self):
+        resolved, groups = self._plans(width=650, degrees=63)
+        self._assert_common_chord(resolved, groups[0])
+
+    def test_98_chord_and_trim_repeat_deterministically(self):
+        first = self._plans(degrees=63)[1]
+        second = self._plans(degrees=63)[1]
+        self.assertEqual(first, second)
+
+    def test_99_entry_transition_has_finite_contact_edges(self):
+        _resolved, groups = self._plans(degrees=63)
+        first = groups[0][0]
+        self.assertGreater(math.dist(*first.exposed_front_edge), 1e-6)
+        self.assertGreater(math.dist(first.riser_polygon[0],
+                                     first.riser_polygon[-1]), 1e-6)
+
+    def test_100_exit_transition_has_finite_contact_edges(self):
+        _resolved, groups = self._plans(degrees=63)
+        last = groups[0][-1]
+        self.assertGreater(math.dist(*last.rear_support_edge), 1e-6)
+        self.assertGreater(math.dist(*last.inner_edge), 1e-6)
+
+    def test_101_no_near_zero_triangular_inner_tip(self):
+        _resolved, groups = self._plans(degrees=63)
+        self.assertTrue(all(math.dist(*plan.inner_edge) > 1e-6
+                            and polygon_area(plan.polygon) > 1e-12
+                            for plan in groups[0]))
+
+    def test_102_front_edge_profiles_remain_geometry_valid(self):
+        for mode in ("SQUARE", "BEVEL", "ROUND"):
+            with self.subTest(mode=mode):
+                prepare_winder_geometry(
+                    L, *BASE, point_ids=L_IDS,
+                    tread_front_overhang_mm=5,
+                    tread_front_edge_mode=mode,
+                    tread_front_edge_size_mm=2)
+
 if __name__ == "__main__": unittest.main()

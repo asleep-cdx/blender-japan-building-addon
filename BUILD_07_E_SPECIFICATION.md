@@ -754,13 +754,13 @@ front physical boundary = front/downhill L_nose
 rear physical boundary  = rear/uphill L_back
 ```
 
-Resolve the physical tread plan from these offset lines plus the ordered Turn outer chain / immediate neighboring walking-region trim。Normally：
+Resolve the physical tread plan from these offset lines plus the ordered Turn outer chain / immediate neighboring walking-region trim。First derive the raw intermediate：
 
 ```text
-P_inner_physical = intersection(front L_nose,rear L_back)
+M_j = intersection(front L_nose,rear L_back)
 ```
 
-subject to deterministic local clipping。The inner physical vertex is not forced to nominal pivot `I`。A positive `n` may create a finite mitered physical corner around `I`。
+`M_j` determines the safe common inner finish chord in §15.1.4; it is not the final visible inner corner。Final inner points are `L_nose ∩ K_finish` and `L_back ∩ K_finish`。The physical finish is not forced to nominal pivot `I`。
 
 Forbidden：
 
@@ -782,6 +782,69 @@ If an offset line crosses outer-corner station `O`, preserve required split stat
 For `n>0`, every point of the resolved exposed Winder front edge lies on `L_nose`。Its signed perpendicular distance from `L_face` equals `n` within named epsilon at both endpoints。The inner endpoint may and normally does move away from `I`。
 
 Do not accept `outer ~= n` but `inner ~= 0` solely because the nominal cell converges to `I`。If no finite local trim can preserve `n` without self-intersection or unrelated-sector intrusion, reject as `GEOMETRY_INVALID`; never silently reduce `n`。
+
+### 15.1.4 Common inner physical finish chord
+
+The mathematical pivot `I` remains nominal subdivision authority only。Per-tread raw `M_j` is an intermediate construction point, never automatically the final visible inner corner。All physical Winder TREAD/RISER finish geometry for one Turn uses one deterministic common inner trim authority。
+
+#### 15.1.4.1 Turn-local trim frame
+
+```text
+R0 = normalize(E_in-I)
+Rn = normalize(E_out-I)
+b  = normalize(R0+Rn)             # points into envelope
+h_j = dot(M_j-I,b)
+eps_l = named length epsilon
+c_finish = max(n,r,10*eps_l)
+h_finish = max(0,max_j(h_j))+c_finish
+K_finish: dot(X-I,b)=h_finish
+```
+
+`K_finish` is perpendicular to `b`。`c_finish` is derived physical-finish regularization only, never a legal/width minimum or user-facing regulatory rule。
+
+#### 15.1.4.2 Finite finish chord
+
+Intersect `K_finish` with boundary rays `I+t*R0` and `I+t*Rn` to obtain finite `J_entry` and `J_exit`。Both must occur strictly before their outer-chain endpoints within epsilon; `K_chord=segment(J_entry,J_exit)` must lie inside the Turn walking envelope and every required semantic line must intersect it。Otherwise reject `GEOMETRY_INVALID` without reducing nosing。
+
+#### 15.1.4.3 Final physical tread inner edge
+
+For each tread：
+
+```text
+front_inner = intersection(front L_nose,K_finish)
+rear_inner  = intersection(rear L_back,K_finish)
+polygon = front_inner -> front outer trim -> ordered outer stations
+          -> rear outer trim -> rear_inner -> close
+```
+
+Both points lie on one `K_finish`; every tread has a finite collinear inner side edge and no raw-`M_j` spike。
+
+#### 15.1.4.4 Constant nosing remains exact
+
+Because `front_inner` remains on `L_nose`, its distance from `L_face` equals `n`, as does the outer endpoint。The common chord must never move `front_inner` off `L_nose`。
+
+#### 15.1.4.5 Riser inner trim
+
+For each Riser boundary：
+
+```text
+face_inner = intersection(L_face,K_finish)
+back_inner = intersection(L_back,K_finish)
+```
+
+TREAD inner points, Riser face/back, and rear-support geometry terminate on the same `K_finish`; coordinates are not independently approximated。
+
+#### 15.1.4.6 Shared rear-support remains authoritative
+
+After chord trimming, `lower tread rear_support_edge == destination Riser riser_back_edge` exactly, including identical `K_finish` inner and outer-trim endpoints。The common trim must not reintroduce the r1 outer wedge cavity。
+
+#### 15.1.4.7 Removed inner core
+
+The pivot-side triangle `I/J_entry/J_exit` is intentionally outside the Stage-2 physical finish footprint while nominal cells still converge to `I`。Entry/exit preserve deterministic contact with adjacent Straight/Landing components。No spike, giant filler face, or background-visible crack is allowed。
+
+#### 15.1.4.8 Stage-3 relationship
+
+Stage 3 consumes final Stage-2 trim stations as contact geometry and may not move/undo `K_finish`。Existing lower pivot-relief authority may remain distinct。Do not implement Stage 3 here。
 
 ## 15.2 Destination Riser / shared rear-support authority
 
@@ -822,7 +885,15 @@ In addition to finite/manifold/contact validation, require：
 - no background-visible wedge or open exterior cavity before Stage 3;
 - finite deterministic inner miter;
 - no unintended positive-volume inner-miter overlap;
-- no zero-area cap created merely to preserve nominal `I`。
+- no zero-area cap created merely to preserve nominal `I`;
+- all final Tread inner edges and all Riser inner trim points lie on one `K_finish` per Turn;
+- no physical vertex protrudes onto the pivot side of `K_finish`, except explicit terminal closure;
+- every tread inner side edge has length greater than `eps_l`;
+- no acute zero/near-zero-area triangular inner tip;
+- positive nosing remains `n` at the chord endpoint;
+- rear-support/Riser-back sharing and outer wedge-cavity correction remain intact;
+- no background-visible entry/exit crack;
+- `K_finish` is deterministic under regeneration。
 
 Nominal local width tending to zero at `I` remains valid。Physical nosing collapse to zero is not required and is not an acceptable solution。
 
