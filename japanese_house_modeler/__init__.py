@@ -19,6 +19,7 @@ from . import finish_operators, operators, properties, stair_operators, ui
 
 _CLASSES = (
     properties.JHM_StairPathPoint,
+    properties.JHM_StairTurnSpec,
     properties.JHM_NewStairDefaults,
     properties.JHM_StairProperties,
     properties.JHM_NewWallDefaults,

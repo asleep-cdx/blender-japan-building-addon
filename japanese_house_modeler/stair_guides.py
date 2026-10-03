@@ -293,6 +293,43 @@ def resolve_move_candidate(points, point_ids, moved_index, raw_point, *,
                          moved_index, guide)
 
 
+def resolve_generalized_move_candidate(points, point_ids, moved_index,
+                                       raw_point, *, shift=False):
+    """Resolve schema-5 free-angle editing without the schema-4 90° filter."""
+    original = tuple(tuple(map(float, point[:2])) for point in points)
+    if len(original) not in (3, 4) or len(point_ids) != len(original):
+        raise ValueError("schema-5 Path identityが不正です。")
+    if not 0 <= moved_index < len(original):
+        raise ValueError("Path point indexが不正です。")
+    raw = tuple(map(float, raw_point[:2]))
+    point, guide = raw, "FREE"
+    if shift:
+        anchor = original[move_anchor_index(len(original), moved_index)]
+        direction = constrained_direction(anchor, raw, step_degrees=15.0)
+        if direction is None:
+            raise ValueError("Shift candidateが短すぎます。")
+        distance = math.hypot(raw[0] - anchor[0], raw[1] - anchor[1])
+        point = (anchor[0] + direction[0] * distance,
+                 anchor[1] + direction[1] * distance)
+        guide = "SHIFT_15"
+    result = list(original)
+    result[moved_index] = point
+    if any(math.hypot(b[0] - a[0], b[1] - a[1]) <= 1.0e-6
+           for a, b in zip(result, result[1:])):
+        raise ValueError("Path segmentがzero/near-zeroです。")
+    if len(set(point_ids)) != len(point_ids) or any(not value for value in point_ids):
+        raise ValueError("schema-5 Path identityが不正です。")
+    return MoveCandidate(tuple(result), tuple(point_ids), moved_index, guide)
+
+
+def move_failure_message(schema_version, moved_index, point_count, error):
+    """Keep legacy exact-90 wording out of generalized schema-5 failures."""
+    if (int(schema_version) == 4
+            and int(moved_index) not in (0, int(point_count) - 1)):
+        return "この折れ点は他のPath点を固定したままでは90度条件を維持して移動できません。"
+    return str(error)
+
+
 def resolve_creation_candidate(points, point_ids, raw_point, *, shift=False,
                                guide_candidates=(), distances=(), guide_names=(),
                                threshold_px=GUIDE_THRESHOLD_PX):

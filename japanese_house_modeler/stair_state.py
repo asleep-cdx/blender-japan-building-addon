@@ -65,6 +65,7 @@ class StairState:
     riser_distribution_mode: str = ""
     auto_riser_allocation: tuple = ()
     manual_riser_allocation: tuple = ()
+    turn_specs: tuple = ()
 
 
 def duplicate_stair_ids(records):
@@ -97,7 +98,7 @@ def diagnose_stair(state, duplicate_ids=()):
     layout = None
     try:
         if state.stair_schema_version == WINDER_SCHEMA_VERSION:
-            if state.turn_mode != TURN_WINDER:
+            if state.turn_mode not in (TURN_WINDER, TURN_LANDING, "PER_TURN"):
                 raise ValueError("schema 5 Turn modeが不正です。")
             if state.riser_distribution_mode not in (
                     RISER_DISTRIBUTION_AUTO, RISER_DISTRIBUTION_MANUAL):
@@ -110,7 +111,8 @@ def diagnose_stair(state, duplicate_ids=()):
                 state.floor_to_floor_mm, state.riser_count,
                 state.stair_width_mm, state.tread_thickness_mm,
                 state.riser_thickness_mm, point_ids=state.point_ids,
-                winder_pattern=state.winder_pattern, allocation=allocation)
+                winder_pattern=state.winder_pattern, turn_mode=state.turn_mode,
+                turn_specs=state.turn_specs or None, allocation=allocation)
         elif state.stair_schema_version == MULTIPOINT_SCHEMA_VERSION:
             if state.turn_mode != TURN_LANDING:
                 raise ValueError("schema 4 Turn modeが不正です。")

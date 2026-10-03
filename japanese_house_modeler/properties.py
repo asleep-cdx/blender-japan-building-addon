@@ -33,6 +33,25 @@ class JHM_StairPathPoint(bpy.types.PropertyGroup):
     point_id: bpy.props.StringProperty(default="", options={"HIDDEN"})
 
 
+class JHM_StairTurnSpec(bpy.types.PropertyGroup):
+    """Schema-5 per-Turn authority keyed by the existing Path point ID."""
+
+    path_point_id: bpy.props.StringProperty(default="", options={"HIDDEN"})
+    turn_mode: bpy.props.EnumProperty(
+        name="Turn", items=(("LANDING", "Landing", "踊り場"),
+                            ("WINDER", "Winder", "廻り段")),
+        default="WINDER", options={"HIDDEN"})
+    winder_pattern: bpy.props.EnumProperty(
+        name="廻り段パターン",
+        items=(("NONE", "なし", "Landing Turn"),
+               ("EQUAL_2", "2段廻り", "等角2段"),
+               ("EQUAL_3", "3段廻り", "等角3段"),
+               ("EQUAL_4", "4段廻り", "等角4段"),
+               ("BF_1", "BF-1", "60° + 30°"),
+               ("BF_2", "BF-2", "30° + 60°")),
+        default="EQUAL_3", options={"HIDDEN"})
+
+
 class JHM_NewStairDefaults(bpy.types.PropertyGroup):
     """Values copied into a newly committed managed Stair."""
 
@@ -65,6 +84,7 @@ class JHM_StairProperties(bpy.types.PropertyGroup):
         items=_STAIR_ASSEMBLY_ITEMS, default="BASIC_TREAD_RISER", options={"HIDDEN"})
     stair_schema_version: bpy.props.IntProperty(default=1, options={"HIDDEN"})
     path_points: bpy.props.CollectionProperty(type=JHM_StairPathPoint)
+    turn_specs: bpy.props.CollectionProperty(type=JHM_StairTurnSpec)
     turn_mode: bpy.props.StringProperty(default="", options={"HIDDEN"})
     # Schema-5 single canonical pattern authority.  Step count and partition
     # rule are always derived and deliberately are not persisted as RNA.
