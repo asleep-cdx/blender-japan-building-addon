@@ -1,13 +1,13 @@
 # BUILD 07-E ACCEPTANCE RECORD
 ## Japanese House Modeler — Winder + Arbitrary-angle Turn / Landing
 
-Date: 2026-10-02
+Date: 2026-10-03
 
 ## 1. Status
 
 - Build 07-E Stage 1 — **ACCEPTED**
-- Build 07-E Stage 2 — **NEXT**
-- Build 07-E Stage 3 — **PENDING**
+- Build 07-E Stage 2 — **ACCEPTED**
+- Build 07-E Stage 3 — **NEXT**
 - Build 07-E Stage 4 — **PENDING**
 - Build 07-E overall — **NOT YET ACCEPTED**
 
@@ -15,7 +15,9 @@ Implementation authority remains `BUILD_07_E_SPECIFICATION.md` (`FINAL / IMPLEME
 
 Stage 1 established the schema-5 generalized Turn / Winder foundation, RiseEvent allocation authority, explicit schema-4 AUTO L -> schema-5 Winder promotion, and exact-90-degree 3-point L EQUAL_2 / EQUAL_3 / EQUAL_4 Winder TREAD/RISER production geometry while preserving existing schema-1/2/3/4 behavior.
 
-Stage 2+ scope remains deferred exactly as defined by the final specification.
+Stage 2 accepted BF_1 / BF_2, per-Turn U / Compact U, arbitrary-angle Landing / EQUAL Winder, full schema-5 AUTO / MANUAL allocation, and Stage-2 physical Winder finish authority including constant-distance nosing, exact shared TREAD/RISER boundaries, and the Turn-local common inner finish chord `K_finish`.
+
+Stage 3+ scope remains deferred exactly as defined by the final specification.
 
 ## 2. Stage 1 implementation / merge identity
 
@@ -346,4 +348,293 @@ SIZE    152026 bytes
 SHA256  eab3a4ef7b5a6a1607d817c5b31c930594d10853f311909413887e79f2d981c1
 ```
 
-Build 07-E overall remains **NOT YET ACCEPTED**. Next implementation stage is **Build 07-E Stage 2**.
+Build 07-E overall remains **NOT YET ACCEPTED**. At the Stage-1 acceptance point, the next implementation stage was Build 07-E Stage 2.
+
+---
+
+## 8. Stage 2 implementation / runtime identity
+
+GitHub PR: #32
+
+Exact runtime-tested production revision:
+
+```text
+commit 9424da623953a32a97576ce45bec074b269d4058
+tree   7d30e76ae20ad58b72cece1e298f54ee45f90a65
+```
+
+Runtime Candidate:
+
+```text
+Japanese_House_Modeler_Build_07_E_Stage2_Candidate_r3.zip
+SIZE    159639 bytes
+SHA256  15d48e9230b5a7e7f0b59954ccbe56acc7fb99bce3d26b39481f969f75c7b1d4
+```
+
+Runtime environment:
+
+```text
+Blender 5.2 LTS
+Add-on version: (0, 7, 4)
+Description: Build 07-E: Winder + Arbitrary-angle Turn/Landing
+```
+
+Candidate r1 and Candidate r2 were rejected during pre-acceptance runtime review and are not accepted artifacts.
+
+The acceptance-record commit added after runtime testing is documentation-only and does not supersede the exact runtime-tested production revision above.
+
+Merged main revision is recorded after PR #32 merge in the post-merge update of this Acceptance Record.
+
+## 9. Stage 2 automated / static evidence
+
+Final implementation report after the Candidate-r3 common-inner-finish correction:
+
+```text
+python -m unittest tests.test_build_07_e_stage1 tests.test_build_07_e_stage2   127 PASS
+python -m unittest tests.test_build_07_d_stage1 tests.test_build_07_d_stage2 tests.test_build_07_d_stage3 tests.test_build_07_d_stage4   131 PASS
+python -m unittest discover -s tests                                          893 PASS
+python -m compileall -q japanese_house_modeler tests                          PASS
+git diff --check                                                               PASS
+git status --short --branch                                                   clean
+```
+
+Automated coverage includes per-Turn storage, BF patterns, U / Compact-U classification, arbitrary-angle Landing / EQUAL Winder, AUTO / MANUAL allocation, schema-4 migration guards, free-angle Path movement, REVERSE owner indices, physical front-edge modes, constant-distance nosing, exact rear-support / Riser-back reuse, `K_finish`, narrow-width regression, and deterministic physical trim.
+
+## 10. Stage 2 accepted contracts
+
+### Per-Turn authority / compatibility
+
+- `TurnSpec(path_point_id, turn_mode, winder_pattern)` is the canonical per-Turn authority for materialized schema-5 state.
+- no persistent independent Turn UUID is introduced.
+- Stage-1 three-point schema-5 files with empty `turn_specs` retain scalar compatibility without silent load-time materialization.
+- explicit schema-4 U promotion materializes all interior Turn identities; unedited Turns remain `LANDING / NONE`.
+- schema-4 MANUAL may promote to generalized LANDING with explicit allocation conversion; schema-4 MANUAL -> WINDER remains blocked until AUTO.
+
+### BF / U / Compact-U / arbitrary angle
+
+- BF_1 and BF_2 are supported as the specified asymmetric right-angle patterns.
+- U uses two persistent interior Turn identities with independent mode/pattern assignments.
+- Compact-U preserves both Turn identities, uses zero ordinary middle-run allocation, and maintains the deterministic shared interface.
+- arbitrary-angle generalized LANDING is production-supported.
+- arbitrary-angle EQUAL Winder uses actual signed Turn angle rather than snapping production geometry to 15-degree increments.
+- Shift15 remains an interaction convenience only.
+
+### Allocation / migration
+
+- schema-5 AUTO Path/dimension edits invalidate stale AUTO allocation and recompute from candidate geometry.
+- schema-5 MANUAL uses `manual_riser_allocation` as authority and preserves the stored AUTO value independently.
+- invalid MANUAL totals are rejected before canonical or Mesh mutation.
+- `S + L + W + 1 = N` remains the whole-Stair RiseEvent invariant.
+
+### Physical Winder finish
+
+- nominal Winder cells remain separate from physical finish geometry.
+- `L_face`, `L_nose`, and `L_back` are shared semantic boundary authorities.
+- positive nosing remains a constant perpendicular offset at both the inner and outer endpoints of the exposed front edge.
+- lower-tread rear-support and destination-Riser back boundaries reuse the same semantic edge authority.
+- background-visible wedge cavities between Winder TREAD/RISER components are not accepted.
+- all physical TREAD/RISER inner trim for one Turn uses one deterministic common inner finish chord `K_finish`.
+- raw per-tread inner intersections are intermediate only; they are not final visible spike points.
+- SQUARE / BEVEL / ROUND operate from the explicit semantic exposed front edge.
+- the physical finish contract applies to exact-90 and arbitrary-angle Winder and to each Turn in U / Compact-U.
+
+## 11. Blender 5.2 LTS Stage 2 runtime acceptance
+
+All thirteen Stage-2 runtime tests passed on Candidate r3 after Candidate-r1 / r2 defects were corrected.
+
+### Test 1 — Candidate / RNA / pattern registration — PASS
+
+Confirmed schema-5 Stair/Turn RNA registration and patterns:
+
+```text
+NONE / EQUAL_2 / EQUAL_3 / EQUAL_4 / BF_1 / BF_2
+```
+
+### Test 2 — schema-4 compatibility / no silent migration — PASS
+
+Existing schema-4 U objects remained schema 4 with empty `turn_specs`; existing Stage-1 scalar schema-5 compatibility state remained unmaterialized until explicit edit.
+
+### Test 3 — schema-4 U -> schema-5 per-Turn promotion — PASS
+
+Turn 1 was explicitly changed to `WINDER / EQUAL_2`; Turn 2 remained `LANDING / NONE` and schema became 5. `ISSUES=()`.
+
+### Test 4 — independent Turn editing — PASS
+
+The second persistent Turn was independently changed to `WINDER / EQUAL_3` while Turn 1 remained `WINDER / EQUAL_2`. `ISSUES=()`.
+
+### Test 5 — BF_1 / BF_2 — PASS
+
+A U stair accepted:
+
+```text
+Turn 1 = WINDER / BF_1
+Turn 2 = WINDER / BF_2
+ISSUES=()
+```
+
+Visual review confirmed asymmetric BF geometry without major failure.
+
+### Test 6 — Compact-U — PASS
+
+Representative result:
+
+```text
+CLASS=COMPACT_U
+RUNS_MM=(2547.73,0.0,2515.2)
+AUTO=(6,0,5)
+SHARED=2
+ISSUES=()
+```
+
+The middle ordinary straight region and its event allocation were both zero, and the two Turns connected through the shared interface.
+
+### Test 7 — 63-degree EQUAL_3 Winder physical geometry — PASS after Candidate r3
+
+Canonical evidence:
+
+```text
+ANGLE=63.0
+PATTERN=EQUAL_3
+CELLS=3
+ISSUES=()
+```
+
+Pre-acceptance runtime defects found during this test were corrected through Candidate r2 and r3. Final visual review confirmed:
+
+- no background-visible outer Tread/Riser wedge cavity;
+- positive nosing remains visibly constant at the inner and outer ends;
+- Winder inner finish follows one common line;
+- acute triangular/spike-like inner termination is removed.
+
+A small terminal alignment difference where `K_finish` meets neighboring Straight geometry remains a Stage-3 integration watchpoint rather than a Stage-2 blocker.
+
+### Test 8 — 63-degree arbitrary-angle Landing — PASS
+
+```text
+ANGLE=63.0
+TURN=[('LANDING','NONE')]
+LANDINGS=1
+ISSUES=()
+```
+
+Visual review found no giant face, spike, or obvious open hole. Landing front/nosing presentation and the Landing tread / destination-Riser rear-junction finish are recorded as later integration watchpoints.
+
+### Test 9 — SQUARE / BEVEL / ROUND — PASS
+
+Runtime Mesh counts demonstrated actual geometry changes:
+
+```text
+SQUARE  V=246 F=183
+BEVEL   V=306 F=213 ISSUES=()
+ROUND   V=486 F=303 ISSUES=()
+```
+
+Visual review confirmed BEVEL and ROUND were applied to the exposed front-edge geometry without regressing the common inner line or reopening the outer cavity.
+
+### Test 10 — AUTO -> MANUAL authority — PASS
+
+```text
+MODE=MANUAL
+AUTO=6,6
+MANUAL=5,7
+ISSUES=()
+```
+
+The saved AUTO allocation remained independent while MANUAL became active authority.
+
+### Test 11 — invalid MANUAL atomic rejection — PASS
+
+An invalid `5,6` MANUAL candidate was rejected. Before/after evidence remained identical:
+
+```text
+MANUAL=5,7
+same Mesh datablock pointer
+V=246
+F=183
+ISSUES=()
+```
+
+The visible Stair did not change.
+
+### Test 12 — Candidate-r3 Compact-U + BF regression — PASS
+
+```text
+CLASS=COMPACT_U
+RUNS_MM=(2547.73,0.0,2515.2)
+AUTO=(6,0,5)
+TURNS=[('WINDER','BF_1'),('WINDER','BF_2')]
+SHARED=2
+ISSUES=()
+```
+
+Visual review confirmed no reappearance of the rejected outer wedge cavity or inner spike failure.
+
+### Test 13 — Save / full exit / reopen persistence — PASS
+
+Before save and after complete Blender exit / reopen matched:
+
+```text
+SCHEMA=5
+ASCENT=REVERSE
+DIST=AUTO
+AUTO=6,0,5
+TURNS=[('WINDER','BF_1'),('WINDER','BF_2')]
+PATH=[(45.990631,4.0),(48.988358,4.0),(48.988358,3.1),(46.023155,3.1)]
+V=248
+F=184
+ISSUES=()
+```
+
+Visual appearance also remained unchanged after reopen.
+
+## 12. Stage 2 resolved pre-acceptance defects
+
+Candidate r1 and r2 exposed physical finish defects that were corrected before acceptance:
+
+1. Winder TREAD / destination-Riser boundary divergence produced a real background-visible wedge cavity toward the outer side.
+2. positive nosing tapered from the requested value at the outer side to approximately zero at the mathematical inner pivot.
+3. per-tread raw physical inner miters produced an irregular sawtooth / protruding inner finish.
+4. acute triangular / spike-like inner nosing terminations remained after the first correction.
+
+The accepted Candidate r3 resolves these through shared `L_face / L_nose / L_back` authorities and the Turn-local common inner finish chord `K_finish`.
+
+## 13. Stage 3 integration watchpoints / deferred scope
+
+Stage 2 does **not** claim acceptance of Stage-3 CLOSED body / Side Board geometry.
+
+The following must be explicitly revisited during Stage 3:
+
+- small terminal alignment difference where a Turn-local `K_finish` meets neighboring Straight TREAD/RISER geometry;
+- whether that terminal difference creates a T-junction, short missing strip, filler face, or local cavity when STEPPED_CLOSED / SLOPED_CLOSED is added;
+- Side Board ON/OFF behavior at both Winder terminal seams;
+- REVERSE seam ownership at entry/exit;
+- Compact-U interaction between two independent Turn-local inner chords and the shared middle interface;
+- arbitrary-angle Landing front/nosing presentation;
+- arbitrary-angle Landing tread / destination-Riser rear-junction finish;
+- Winder STEPPED_CLOSED final geometry;
+- continuous Winder SLOPED_CLOSED with finite pivot relief / high-side closure;
+- ordinary Winder Side Board continuation;
+- Compact-U shared-center Side Board.
+
+Stage 3 must consume accepted Stage-2 physical trim stations rather than silently moving or undoing `K_finish`.
+
+## 14. Stage 2 acceptance conclusion
+
+Build 07-E Stage 2 — **ACCEPTED** at the exact runtime-tested production revision:
+
+```text
+commit 9424da623953a32a97576ce45bec074b269d4058
+tree   7d30e76ae20ad58b72cece1e298f54ee45f90a65
+```
+
+Accepted runtime Candidate:
+
+```text
+Japanese_House_Modeler_Build_07_E_Stage2_Candidate_r3.zip
+SIZE    159639 bytes
+SHA256  15d48e9230b5a7e7f0b59954ccbe56acc7fb99bce3d26b39481f969f75c7b1d4
+```
+
+PR #32 merge identity will be added after merge. Documentation-only commits do not replace the accepted runtime-tested production tree above.
+
+Build 07-E overall remains **NOT YET ACCEPTED**. Next implementation stage is **Build 07-E Stage 3**.
