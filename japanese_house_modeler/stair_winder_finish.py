@@ -454,8 +454,11 @@ def trim_prism_fragment_against_shared_board(fragment, shared_interface,
     if n < 3 or any(math.dist(vertices[i][:2], vertices[i+n][:2]) > EPS_LENGTH
                     for i in range(n)):
         return fragment
-    bottom = min(vertex[2] for vertex in vertices)
-    top = max(vertex[2] for vertex in vertices)
+    source_polygon = tuple(vertex[:2] for vertex in vertices[:n])
+    source_bottom = tuple(vertex[2] for vertex in vertices[:n])
+    source_top = tuple(vertex[2] for vertex in vertices[n:])
+    bottom = min(source_bottom)
+    top = max(source_top)
     if top <= z_min + EPS_LENGTH or bottom >= z_max - EPS_LENGTH:
         return fragment
     # A partial-height intersection must not erase the full strip. Split the
@@ -464,7 +467,23 @@ def trim_prism_fragment_against_shared_board(fragment, shared_interface,
     tangent, seam_length = _unit(_sub(end, start), "shared center seam")
     if s_max is None: s_max = seam_length
     normal = (-tangent[1], tangent[0]); half = float(thickness) / 2.0
-    polygon = tuple(vertex[:2] for vertex in vertices[:n])
+    polygon = source_polygon
+    def source_z(point, values):
+        for vertex,value in zip(source_polygon,values):
+            if math.dist(point,vertex)<=EPS_LENGTH: return value
+        # Production variable prisms use planar/ruled faces.  Locate the point
+        # in the deterministic fan and barycentrically preserve that surface.
+        a=source_polygon[0]
+        for i in range(1,n-1):
+            b,c=source_polygon[i],source_polygon[i+1]
+            den=_cross(_sub(b,a),_sub(c,a))
+            if abs(den)<=1e-15: continue
+            u=_cross(_sub(point,a),_sub(c,a))/den
+            v=_cross(_sub(b,a),_sub(point,a))/den
+            w=1.0-u-v
+            if min(u,v,w)>=-EPS_LENGTH:
+                return w*values[0]+u*values[i]+v*values[i+1]
+        raise ValueError("GEOMETRY_INVALID: trim Z interpolation")
     def clip(poly, value, bound, keep_greater):
         out=[]
         for a,b in zip(poly,poly[1:]+poly[:1]):
@@ -485,6 +504,8 @@ def trim_prism_fragment_against_shared_board(fragment, shared_interface,
     after=clip(list(polygon),sval,float(s_max),True)
     negative=clip(middle,vval,-half,False) if middle else []
     positive=clip(middle,vval,half,True) if middle else []
+    center=clip(middle,vval,-half,True) if middle else []
+    center=clip(center,vval,half,False) if center else []
     for candidate in (before,negative,positive,after):
         cleaned=[]
         for point in candidate:
@@ -506,19 +527,25 @@ def trim_prism_fragment_against_shared_board(fragment, shared_interface,
         if len(candidate)>=3 and area>EPS_LENGTH*EPS_LENGTH:
             plan_pieces.append(tuple(candidate))
     if not plan_pieces: return None
-    overlap_low, overlap_high = max(bottom, z_min), min(top, z_max)
     pieces = []
-    if bottom < overlap_low - EPS_LENGTH:
-        pieces.append(_variable_prism(polygon, (bottom,)*n,
-                                      (overlap_low,)*n,
-                                      fragment.part_type, fragment.ordinal))
     for plan in plan_pieces:
+        bottoms=tuple(source_z(point,source_bottom) for point in plan)
+        tops=tuple(source_z(point,source_top) for point in plan)
         pieces.append(_variable_prism(
-            plan, (overlap_low,)*len(plan), (overlap_high,)*len(plan),
+            plan, bottoms, tops,
             fragment.part_type, fragment.ordinal))
-    if overlap_high < top - EPS_LENGTH:
-        pieces.append(_variable_prism(polygon, (overlap_high,)*n, (top,)*n,
-                                      fragment.part_type, fragment.ordinal))
+    center=list(_deduplicate(center))
+    if len(center)>=3:
+        bottoms=tuple(source_z(point,source_bottom) for point in center)
+        tops=tuple(source_z(point,source_top) for point in center)
+        if all(value < z_min-EPS_LENGTH for value in bottoms):
+            pieces.append(_variable_prism(
+                tuple(center), bottoms, tuple(min(z_min,t) for t in tops),
+                fragment.part_type, fragment.ordinal))
+        if all(value > z_max+EPS_LENGTH for value in tops):
+            pieces.append(_variable_prism(
+                tuple(center), tuple(max(z_max,b) for b in bottoms), tops,
+                fragment.part_type, fragment.ordinal))
     return tuple(pieces)
 
 

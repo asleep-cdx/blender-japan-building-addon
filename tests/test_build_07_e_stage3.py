@@ -15,7 +15,7 @@ if package is None:
 from japanese_house_modeler.stair_turn import (
     TurnSpec, prepare_winder_geometry, resolve_turn_frame,
     resolve_winder_layout, resolve_nominal_cells, resolve_physical_winder_plans,
-    winder_tread_tops,
+    winder_tread_tops, build_winder_finish_fragments,
 )
 from japanese_house_modeler.stair_residential import ResidentialFields
 from japanese_house_modeler.stair_winder_finish import (
@@ -219,5 +219,27 @@ class BoardAndIntegrationTests(unittest.TestCase):
         self.assertIn((1.0,1.0),loops[0])
         area=abs(sum(loops[0][i][0]*loops[0][(i+1)%len(loops[0])][1]-loops[0][(i+1)%len(loops[0])][0]*loops[0][i][1] for i in range(len(loops[0])))/2)
         self.assertEqual(area,3.0)
+
+    def test_50_sloped_trim_preserves_original_vertex_z(self):
+        specs=(TurnSpec("a","WINDER","EQUAL_3"),TurnSpec("b","WINDER","EQUAL_3"))
+        fields=ResidentialFields(underside_mode="SLOPED_CLOSED",side_board_mode="SLOPED",tread_front_overhang_mm=5)
+        resolved=resolve_winder_layout(U,"FORWARD",0,2800,17,750,30,20,point_ids=UIDS,turn_specs=specs,tread_front_overhang_mm=5)
+        original=build_winder_finish_fragments(resolved,fields)
+        _x,trimmed,_m=prepare_winder_geometry(U,"FORWARD",0,2800,17,750,30,20,point_ids=UIDS,turn_specs=specs,assembly_mode="STANDARD_RESIDENTIAL",residential_fields=fields,tread_front_overhang_mm=5)
+        source={(p.ordinal,round(v[0],9),round(v[1],9)):set() for p in original if p.part_type=="UNDERBODY" for v in p.vertices}
+        for p in original:
+            if p.part_type=="UNDERBODY":
+                for v in p.vertices: source[(p.ordinal,round(v[0],9),round(v[1],9))].add(round(v[2],9))
+        output={}
+        for p in trimmed:
+            if p.part_type=="UNDERBODY":
+                for v in p.vertices:
+                    output.setdefault((p.ordinal,round(v[0],9),round(v[1],9)),set()).add(round(v[2],9))
+        retained=0
+        for key,zs in source.items():
+            if key in output:
+                matches=zs & output[key]
+                retained+=len(matches)
+        self.assertGreater(retained,0)
 
 if __name__ == "__main__": unittest.main()
