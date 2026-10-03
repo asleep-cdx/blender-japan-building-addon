@@ -477,3 +477,7 @@ class BoardAndIntegrationTests(unittest.TestCase):
                 self.assertIn(round(length,9),shared_stations)
 
 if __name__ == "__main__": unittest.main()
+
+# Landing authority foundation cases are kept in a focused source module but
+# imported here so the mandated Stage-1+2+3 command executes them.
+from tests.build_07_e_landing_finish_cases import GeneralizedLandingFinishTests

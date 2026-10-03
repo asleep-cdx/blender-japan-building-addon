@@ -1006,7 +1006,50 @@ outer = E_in -> O -> E_out
 
 Landing top Z is its `LANDING_ARRIVAL` event elevation。Material `TREAD`。Body `UNDERSIDE`。
 
-Exact 90° reduces to accepted square。47° / 63° / 82° etc use same algorithm。
+Generalized WALKING envelope uses this one TurnFrame authority。Exact-right-
+angle Residential BODY dispatches unchanged to the accepted schema-4 Landing
+oracle; it is not approximated by the non-right builder。47° / 63° / 82°など
+non-right Residential BODYは以下の明示authorityを使う。
+
+### 17.1.1 Generalized Residential Landing finish
+
+`K=[I,E_in,O,E_out]` is finite, simple, convex, positive-area, and has entry
+and exit lengths equal to stair width within `EPS_LENGTH`; otherwise
+`GEOMETRY_INVALID`。`G_entry=I->E_in`, `G_exit=I->E_out`, and the exposed outer
+chain is `E_in->O->E_out`。Semantic vertices are never moved by finish logic。
+
+With real perpendicular distance `r=riser_thickness`, offset outer edges
+`E_in->O` and `O->E_out` inward.  Their intersections with `G_entry`,
+`G_exit`, and each other are `A_entry`, `A_exit`, and `O_inner`。The cavity and
+skirt are exactly `C=[I,A_entry,O_inner,A_exit]` and
+`S=[E_in,O,E_out,A_exit,O_inner,A_entry]`。Both must be finite, simple,
+positive-area; `O_inner` must lie in/on K。Invalid acute/obtuse constructions
+raise `GEOMETRY_INVALID`; `r` is never silently reduced。
+
+Let `Z_contact=Z_top-tread_thickness`, `d=side_board_band_width_mm/1000`,
+`u=underside_thickness_mm/1000`, and
+`Z_soffit=max(base_z,Z_top-d)`。The Landing soffit is intentionally horizontal。
+For non-right `STEPPED_CLOSED`, UNDERBODY occupies `K x
+[Z_soffit,Z_contact]`。For non-right `SLOPED_CLOSED`, the bottom slab occupies
+`K x [Z_soffit,Z_soffit+u]` and the exposed skirt occupies
+`S x [Z_soffit+u,Z_contact]`, leaving cavity C above its roof。Required
+clearances are strict within `EPS_LENGTH`。
+
+ENTRY and EXIT body ports retain their semantic plan segment, soffit edge,
+contact edge, and ordered stations。SLOPED ports explicitly retain `A_entry`
+or `A_exit`; they are not reconstructed from Mesh coincidence。
+
+The Landing Side Board follows only `E_in->O->E_out` on the ascent-local
+outside side。Offset both outer edges outward by real perpendicular thickness
+`s`; their interface intersections and mutual miter are `B_entry`, `B_exit`,
+`O_outer`。Its exact footprint is
+`B=[B_entry,O_outer,B_exit,E_out,O,E_in]`。It occupies the constant vertical
+interval `Z_soffit -> Z_top+reveal` for either Side Board mode。Invalid offset
+or miter geometry raises `GEOMETRY_INVALID`。
+
+All authority resolution and UNDERBODY/SIDE_BOARD construction is pure
+candidate preparation。Exact 90° continues to call the accepted schema-4
+production code unchanged。
 
 ## 17.2 Winder
 
