@@ -1192,35 +1192,109 @@ def winder_tread_tops(layout):
 
 def build_winder_finish_fragments(layout, fields):
     """Build schema-5 Stage-3 body after all top geometry has resolved."""
-    from .stair_residential import STEPPED_CLOSED
+    from .stair_residential import (
+        STEPPED_CLOSED, validate_nosing_board_compatibility,
+        validate_side_board_reveal, validate_stepped_closure_depth,
+        validate_stepped_underbody_thickness,
+    )
     from .stair_winder_finish import (
+        build_shared_center_board_fragment, build_winder_side_board_fragments,
+        compact_grouped_height,
         build_sloped_underbody_fragments,
         build_stepped_underbody_fragments,
-        resolve_stepped_underbody,
+        resolve_sloped_stations, resolve_stepped_underbody, stepped_patch_z,
     )
     if fields is None:
         return ()
-    depth = float(fields.side_board_band_width_mm) / _MM_PER_METRE
+    positive_goings = [run / count for run, count in
+                       zip(layout.straight_runs, layout.straight_allocation)
+                       if count and run > EPS_LENGTH]
+    going = min(positive_goings or (layout.actual_riser,))
+    depth = validate_stepped_closure_depth(fields, layout.actual_riser, going)
+    validate_stepped_underbody_thickness(
+        fields, layout.actual_riser, layout.tread_thickness,
+        layout.riser_thickness)
+    validate_nosing_board_compatibility(
+        fields, going, layout.tread_thickness, layout.actual_riser)
+    reveal = (validate_side_board_reveal(
+        fields, layout.actual_riser, going)
+        if fields.left_side_board_enabled or fields.right_side_board_enabled
+        else float(fields.side_board_reveal_mm) / _MM_PER_METRE)
+    board_thickness = float(fields.side_board_thickness_mm) / _MM_PER_METRE
     tops = winder_tread_tops(layout)
+    grouped = {}
+    grouped_middle = None
+    if (fields.underside_mode != STEPPED_CLOSED
+            and layout.u_classification == "COMPACT_U"
+            and layout.straight_allocation[1] == 0
+            and all(spec.turn_mode == TURN_WINDER
+                    for spec in layout.turn_specs)):
+        order = ([0, 1] if layout.ascent_direction == "FORWARD" else [1, 0])
+        first, second = order
+        a = stepped_patch_z(tops[first][0], depth, layout.base_z)
+        b = stepped_patch_z(tops[second][-1], depth, layout.base_z)
+        middle = compact_grouped_height(
+            a, b, layout.winder_counts[first], layout.winder_counts[second])
+        if layout.ascent_direction == "FORWARD":
+            grouped[first] = (None, middle); grouped[second] = (middle, None)
+        else:
+            grouped[first] = (middle, None); grouped[second] = (None, middle)
+        grouped_middle = middle
     result = []
     for turn_index, (spec, cells) in enumerate(zip(layout.turn_specs,
                                                    layout.turn_cells)):
         if spec.turn_mode != TURN_WINDER:
             continue
-        turn_tops = tops[turn_index]
+        ascent_tops = tops[turn_index]
+        turn_tops = (ascent_tops if layout.ascent_direction == "FORWARD"
+                     else tuple(reversed(ascent_tops)))
         if fields.underside_mode == STEPPED_CLOSED:
             plans = resolve_stepped_underbody(
                 cells, turn_tops, depth, layout.base_z,
                 turn_index=turn_index, tread_thickness=layout.tread_thickness)
             result.extend(build_stepped_underbody_fragments(
                 plans, 10000 + turn_index * 100))
+            _relief, stations = resolve_sloped_stations(
+                layout.turns[turn_index], cells,
+                plans[0].visible_z, plans[-1].visible_z,
+                layout.riser_thickness)
+            lower = []
+            for station in stations:
+                fraction = min(station.fraction, 1.0 - 1e-12)
+                index = next(i for i, cell in enumerate(cells)
+                             if cell.front_fraction - 1e-9 <= fraction
+                             <= cell.rear_fraction + 1e-9)
+                lower.append(plans[index].visible_z)
         else:
-            fragments, _relief, _stations, _closure = (
+            z_entry, z_exit = grouped.get(turn_index, (None, None))
+            fragments, _relief, stations, _closure = (
                 build_sloped_underbody_fragments(
                     layout.turns[turn_index], cells, turn_tops, depth,
                     layout.base_z, layout.riser_thickness,
-                    layout.tread_thickness, 11000 + turn_index * 100))
+                    layout.tread_thickness, 11000 + turn_index * 100,
+                    z_entry=z_entry, z_exit=z_exit))
             result.extend(fragments)
+            lower = [station.z for station in stations]
+        for side, enabled in (("LEFT", fields.left_side_board_enabled),
+                              ("RIGHT", fields.right_side_board_enabled)):
+            if enabled:
+                result.extend(build_winder_side_board_fragments(
+                    layout.turns[turn_index], cells, turn_tops, stations,
+                    lower, side, layout.ascent_direction, board_thickness,
+                    reveal, fields.side_board_mode,
+                    12000 + turn_index * 1000 + (0 if side == "LEFT" else 500)))
+    if (layout.u_classification == "COMPACT_U" and layout.shared_interface
+            and (fields.left_side_board_enabled
+                 or fields.right_side_board_enabled)):
+        if grouped_middle is None:
+            adjoining = [stepped_patch_z(turn_tops[-1], depth, layout.base_z)
+                         for turn_tops in tops]
+            shared_lower = max(adjoining)
+        else:
+            shared_lower = grouped_middle
+        result.append(build_shared_center_board_fragment(
+            layout.shared_interface, shared_lower,
+            shared_lower + depth + reveal, board_thickness, 14000))
     return tuple(result)
 
 

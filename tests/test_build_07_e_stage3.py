@@ -114,4 +114,59 @@ class BoardAndIntegrationTests(unittest.TestCase):
         _x,parts,_m=prepare_winder_geometry(L,*BASE,point_ids=IDS,assembly_mode="STANDARD_RESIDENTIAL",residential_fields=f)
         self.assertGreater(sum(p.part_type=="UNDERBODY" for p in parts),0)
 
+    def test_37_production_boards_both_sides(self):
+        f=ResidentialFields()
+        _x,parts,_m=prepare_winder_geometry(L,*BASE,point_ids=IDS,assembly_mode="STANDARD_RESIDENTIAL",residential_fields=f)
+        self.assertGreaterEqual(sum(p.part_type=="SIDE_BOARD" for p in parts),2)
+
+    def test_38_all_four_modes_use_production_path(self):
+        for underside in ("STEPPED_CLOSED","SLOPED_CLOSED"):
+            for board in ("STEPPED","SLOPED"):
+                f=ResidentialFields(underside_mode=underside,side_board_mode=board)
+                _x,parts,mesh=prepare_winder_geometry(L,*BASE,point_ids=IDS,assembly_mode="STANDARD_RESIDENTIAL",residential_fields=f)
+                self.assertIn("SIDE_BOARD",mesh.face_roles)
+                self.assertIn("UNDERBODY",tuple(p.part_type for p in parts))
+
+    def test_39_full_finish_width_matrix(self):
+        for width in (900,800,750,700,650):
+            for underside,board in (("STEPPED_CLOSED","STEPPED"),("SLOPED_CLOSED","SLOPED")):
+                f=ResidentialFields(underside_mode=underside,side_board_mode=board)
+                _x,parts,_m=prepare_winder_geometry(L,"FORWARD",0,2800,16,width,30,20,point_ids=IDS,assembly_mode="STANDARD_RESIDENTIAL",residential_fields=f)
+                self.assertTrue(any(p.part_type=="SIDE_BOARD" for p in parts))
+
+    def _compact(self, direction, underside):
+        specs=(TurnSpec("a","WINDER","EQUAL_3"),TurnSpec("b","WINDER","EQUAL_3"))
+        fields=ResidentialFields(underside_mode=underside,side_board_mode=("SLOPED" if underside=="SLOPED_CLOSED" else "STEPPED"),tread_front_overhang_mm=5)
+        return prepare_winder_geometry(U,direction,0,2800,17,750,30,20,point_ids=UIDS,turn_specs=specs,assembly_mode="STANDARD_RESIDENTIAL",residential_fields=fields,tread_front_overhang_mm=5)
+
+    def test_40_compact_u_full_fixture_both_modes(self):
+        for underside in ("STEPPED_CLOSED","SLOPED_CLOSED"):
+            x,parts,mesh=self._compact("FORWARD",underside)
+            self.assertEqual((x.u_classification,x.straight_allocation[1]),("COMPACT_U",0))
+            self.assertIn("SIDE_BOARD",mesh.face_roles)
+            self.assertEqual(sum(p.ordinal==14000 for p in parts),1)
+
+    def test_41_compact_u_reverse_production(self):
+        x,parts,_mesh=self._compact("REVERSE","SLOPED_CLOSED")
+        self.assertEqual(x.u_classification,"COMPACT_U")
+        self.assertEqual(sum(p.ordinal==14000 for p in parts),1)
+
+    def test_42_reverse_rebuilds_board_world_geometry(self):
+        f=ResidentialFields(left_side_board_enabled=True,right_side_board_enabled=False)
+        forward=prepare_winder_geometry(L,*BASE,point_ids=IDS,assembly_mode="STANDARD_RESIDENTIAL",residential_fields=f)[1]
+        reverse=prepare_winder_geometry(L,"REVERSE",*BASE[1:],point_ids=IDS,assembly_mode="STANDARD_RESIDENTIAL",residential_fields=f)[1]
+        fv=tuple(p.vertices for p in forward if p.part_type=="SIDE_BOARD")
+        rv=tuple(p.vertices for p in reverse if p.part_type=="SIDE_BOARD")
+        self.assertNotEqual(fv,rv)
+
+    def test_43_arbitrary_angle_full_finish(self):
+        angle=math.radians(63); points=((0,0),(0,2.2),(-2.2*math.sin(angle),2.2+2.2*math.cos(angle)))
+        f=ResidentialFields(underside_mode="SLOPED_CLOSED",side_board_mode="SLOPED")
+        _x,parts,_m=prepare_winder_geometry(points,*BASE,point_ids=IDS,assembly_mode="STANDARD_RESIDENTIAL",residential_fields=f)
+        self.assertTrue(any(p.part_type=="SIDE_BOARD" for p in parts))
+
+    def test_44_schema5_ui_gate(self):
+        source=(ROOT/"japanese_house_modeler"/"ui.py").read_text()
+        self.assertIn("stair.stair_schema_version <= 5",source)
+
 if __name__ == "__main__": unittest.main()

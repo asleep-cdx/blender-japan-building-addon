@@ -8,7 +8,7 @@ Distances are metres and Z values are world coordinates.
 from dataclasses import dataclass
 import math
 
-from .stair_geometry import MeshFragment, validate_mesh_fragments
+from .stair_geometry import MeshFragment, _signed_volume, validate_mesh_fragments
 from .stair_turn import EPS_LENGTH, _add, _cross, _scale, _sub, _unit
 
 
@@ -292,14 +292,85 @@ def subtract_box_intersection(part_box, board_box, eps=1.0e-9):
 
 def _variable_prism(polygon, bottom, top, role, ordinal):
     """Closed vertical-wall prism with per-plan-vertex bottom/top heights."""
-    polygon = tuple(polygon); n = len(polygon)
+    polygon, bottom, top = tuple(polygon), tuple(bottom), tuple(top)
+    area = sum(polygon[i][0] * polygon[(i + 1) % len(polygon)][1]
+               - polygon[(i + 1) % len(polygon)][0] * polygon[i][1]
+               for i in range(len(polygon))) / 2.0
+    if area < 0.0:
+        polygon, bottom, top = (tuple(reversed(polygon)),
+                                tuple(reversed(bottom)), tuple(reversed(top)))
+    n = len(polygon)
     vertices = tuple((p[0], p[1], float(bottom[i])) for i, p in enumerate(polygon)) + tuple(
         (p[0], p[1], float(top[i])) for i, p in enumerate(polygon))
-    faces = [tuple(reversed(range(n))), tuple(range(n, 2*n))]
+    faces = ([(0, i + 1, i) for i in range(1, n - 1)]
+             + [(n, n + i, n + i + 1) for i in range(1, n - 1)])
     faces += [(i, (i+1)%n, (i+1)%n+n, i+n) for i in range(n)]
+    if _signed_volume(vertices, faces) < 0.0:
+        faces = [tuple(reversed(face)) for face in faces]
     fragment = MeshFragment(role, ordinal, vertices, tuple(faces))
     validate_mesh_fragments((fragment,))
     return fragment
+
+
+def _edge_board_fragment(a, b, lower_a, lower_b, upper_a, upper_b,
+                         thickness, ordinal):
+    """Extrude one boundary/profile interval as a closed board volume."""
+    direction, _ = _unit(_sub(b, a), "Side Board boundary")
+    normal = (-direction[1], direction[0])
+    half = float(thickness) / 2.0
+    polygon = (_add(a, _scale(normal, -half)),
+               _add(b, _scale(normal, -half)),
+               _add(b, _scale(normal, half)),
+               _add(a, _scale(normal, half)))
+    return _variable_prism(
+        polygon, (lower_a, lower_b, lower_b, lower_a),
+        (upper_a, upper_b, upper_b, upper_a), "SIDE_BOARD", ordinal)
+
+
+def build_shared_center_board_fragment(shared_interface, lower_z, upper_z,
+                                       thickness, ordinal=14000):
+    """Build the single symmetric Compact-U shared-center board family."""
+    if len(shared_interface) != 2 or float(upper_z) <= float(lower_z):
+        raise ValueError("GEOMETRY_INVALID: shared-center board profile")
+    return _edge_board_fragment(
+        shared_interface[0], shared_interface[1], lower_z, lower_z,
+        upper_z, upper_z, thickness, ordinal)
+
+
+def build_winder_side_board_fragments(frame, cells, tread_tops, stations,
+                                      lower_zs, side, ascent_direction,
+                                      thickness, reveal, mode,
+                                      ordinal_start=12000):
+    """Build an enabled uphill-relative ordinary Winder Side Board.
+
+    The lower values are the exact resolved underbody station values.  Upper
+    values are independently obtained from the destination walking surfaces.
+    """
+    world_side = world_side_for_uphill(side, ascent_direction)
+    effective_theta = frame.theta if ascent_direction == "FORWARD" else -frame.theta
+    inner_world_side = "LEFT" if effective_theta > 0.0 else "RIGHT"
+    use_inner = world_side == inner_world_side
+    points = tuple(station.inner if use_inner else station.outer
+                   for station in stations)
+    lower = tuple(float(value) for value in lower_zs)
+    walking = []
+    for station in stations:
+        middle = min(max(station.fraction, 0.0), 1.0 - 1e-12)
+        cell_index = next(i for i, cell in enumerate(cells)
+                          if cell.front_fraction - 1e-9 <= middle
+                          <= cell.rear_fraction + 1e-9)
+        walking.append(float(tread_tops[cell_index]) + float(reveal))
+    if mode == "SLOPED":
+        upper = tuple(walking[0] + station.fraction *
+                      (walking[-1] - walking[0]) for station in stations)
+    else:
+        upper = tuple(walking)
+    if len(points) != len(lower):
+        raise ValueError("GEOMETRY_INVALID: Side Board lower station mismatch")
+    return tuple(_edge_board_fragment(
+        points[index], points[index + 1], lower[index], lower[index + 1],
+        upper[index], upper[index + 1], thickness, ordinal_start + index)
+        for index in range(len(points) - 1))
 
 
 def build_stepped_underbody_fragments(plans, ordinal_start=10000):
@@ -325,36 +396,58 @@ def high_side_pivot_closure(frame, relief, z_entry, z_exit):
 
 def build_sloped_underbody_fragments(frame, cells, tread_tops, body_depth,
                                      base_z, riser_thickness, tread_thickness,
-                                     ordinal_start=11000):
+                                     ordinal_start=11000, z_entry=None,
+                                     z_exit=None):
     """Build deterministic relief strips and a finite pivot-core solid."""
     if len(cells) != len(tread_tops):
         raise ValueError("GEOMETRY_INVALID: Winder cell/Z count mismatch")
-    z0 = stepped_patch_z(tread_tops[0], body_depth, base_z)
-    zn = stepped_patch_z(tread_tops[-1], body_depth, base_z)
+    z0 = (stepped_patch_z(tread_tops[0], body_depth, base_z)
+          if z_entry is None else float(z_entry))
+    zn = (stepped_patch_z(tread_tops[-1], body_depth, base_z)
+          if z_exit is None else float(z_exit))
     relief, stations = resolve_sloped_stations(
         frame, cells, z0, zn, riser_thickness)
     fragments = []
+    def contact_at(fraction):
+        if fraction <= 1e-12:
+            return float(tread_tops[0]) - float(tread_thickness)
+        if fraction >= 1.0 - 1e-12:
+            return float(tread_tops[-1]) - float(tread_thickness)
+        for boundary in range(1, len(cells)):
+            if abs(fraction - cells[boundary].front_fraction) <= 1e-9:
+                return (max(float(tread_tops[boundary - 1]),
+                            float(tread_tops[boundary]))
+                        - float(tread_thickness))
+        cell_index = next(i for i, cell in enumerate(cells)
+                          if cell.front_fraction - 1e-9 <= fraction
+                          <= cell.rear_fraction + 1e-9)
+        return float(tread_tops[cell_index]) - float(tread_thickness)
     for index, (a, b) in enumerate(zip(stations, stations[1:])):
         middle = (a.fraction + b.fraction) / 2.0
         cell_index = next(i for i, cell in enumerate(cells)
                           if cell.front_fraction - 1e-9 <= middle
                           <= cell.rear_fraction + 1e-9)
-        contact = float(tread_tops[cell_index]) - float(tread_thickness)
-        if max(a.z, b.z) >= contact - 1e-9:
+        contact_a, contact_b = contact_at(a.fraction), contact_at(b.fraction)
+        if a.z >= contact_a - 1e-9 or b.z >= contact_b - 1e-9:
             raise ValueError("GEOMETRY_INVALID: Winder contact clearance")
+        shell = min(contact_a - a.z, contact_b - b.z)
         polygon = (a.inner, a.outer, b.outer, b.inner)
         fragments.append(_variable_prism(
-            polygon, (a.z, a.z, b.z, b.z), (contact,) * 4,
+            polygon, (a.z, a.z, b.z, b.z),
+            (a.z + shell, a.z + shell, b.z + shell, b.z + shell),
             "UNDERBODY", ordinal_start + index))
     # A finite triangular core closes the pivot.  Its bottom is horizontal at
     # z_low; the explicit high-side triangle remains discoverable through
     # high_side_pivot_closure and its walls are part of this closed solid.
     z_low = min(z0, zn)
-    contact = min(float(value) - float(tread_thickness)
-                  for value in tread_tops)
+    core_thickness = min(float(body_depth), float(tread_thickness)) / 2.0
+    if core_thickness <= 1e-9:
+        raise ValueError("GEOMETRY_INVALID: Winder pivot-core clearance")
     fragments.append(_variable_prism(
         (frame.inner_pivot, relief.entry, relief.exit),
-        (z_low, z0, zn), (contact, contact, contact),
+        (z_low, z0, zn),
+        (z_low + core_thickness, z0 + core_thickness,
+         zn + core_thickness),
         "UNDERBODY", ordinal_start + len(fragments)))
     return tuple(fragments), relief, stations, high_side_pivot_closure(
         frame, relief, z0, zn)
