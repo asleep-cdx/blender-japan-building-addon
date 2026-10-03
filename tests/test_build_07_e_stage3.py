@@ -169,4 +169,40 @@ class BoardAndIntegrationTests(unittest.TestCase):
         source=(ROOT/"japanese_house_modeler"/"ui.py").read_text()
         self.assertIn("stair.stair_schema_version <= 5",source)
 
+    def test_45_center_enablement_matrix_and_reverse(self):
+        specs=(TurnSpec("a","WINDER","EQUAL_3"),TurnSpec("b","WINDER","EQUAL_3"))
+        def count(direction,left,right):
+            fields=ResidentialFields(left_side_board_enabled=left,right_side_board_enabled=right)
+            _x,parts,_m=prepare_winder_geometry(U,direction,0,2800,17,750,30,20,point_ids=UIDS,turn_specs=specs,assembly_mode="STANDARD_RESIDENTIAL",residential_fields=fields)
+            return sum(14000 <= p.ordinal < 14100 for p in parts)
+        self.assertEqual((count("FORWARD",True,True),count("FORWARD",False,True),count("FORWARD",True,False),count("FORWARD",False,False)),(1,1,0,0))
+        self.assertEqual((count("REVERSE",True,False),count("REVERSE",False,True)),(1,0))
+
+    def test_46_high_side_closure_is_production_mesh(self):
+        fields=ResidentialFields(underside_mode="SLOPED_CLOSED",left_side_board_enabled=False,right_side_board_enabled=False)
+        _x,parts,_m=prepare_winder_geometry(L,*BASE,point_ids=IDS,assembly_mode="STANDARD_RESIDENTIAL",residential_fields=fields)
+        closure=[p for p in parts if p.part_type=="UNDERBODY" and p.ordinal==11099]
+        self.assertEqual(len(closure),1)
+        self.assertEqual(len(closure[0].vertices),4)
+        self.assertTrue(any(len(face)==3 for face in closure[0].faces))
+
+    def test_47_compact_shared_board_trims_production_roles(self):
+        x,parts,_mesh=self._compact("FORWARD","SLOPED_CLOSED")
+        board=next(p for p in parts if 14000<=p.ordinal<14100)
+        z0=min(v[2] for v in board.vertices); z1=max(v[2] for v in board.vertices)
+        a,b=x.shared_interface; dx,dy=b[0]-a[0],b[1]-a[1]
+        length=math.hypot(dx,dy); normal=(-dy/length,dx/length); half=.018/2
+        for part in (p for p in parts if p.part_type in ("TREAD","RISER","UNDERBODY")):
+            if max(v[2] for v in part.vertices)<=z0+1e-6 or min(v[2] for v in part.vertices)>=z1-1e-6: continue
+            offsets=[(v[0]-a[0])*normal[0]+(v[1]-a[1])*normal[1] for v in part.vertices]
+            self.assertFalse(min(offsets)<-half+1e-6 and max(offsets)>half-1e-6)
+        self.assertTrue({"TREAD","RISER","UNDERBODY"}.issubset({p.part_type for p in parts}))
+
+    def test_48_partial_height_trim_creates_capped_role_pieces(self):
+        _x,parts,_mesh=self._compact("FORWARD","SLOPED_CLOSED")
+        for role in ("RISER","UNDERBODY"):
+            ordinals=[p.ordinal for p in parts if p.part_type==role]
+            self.assertLess(len(set(ordinals)),len(ordinals))
+            self.assertTrue(all(len(p.faces)>=4 for p in parts if p.part_type==role))
+
 if __name__ == "__main__": unittest.main()

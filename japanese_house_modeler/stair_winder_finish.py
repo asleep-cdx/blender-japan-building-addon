@@ -9,7 +9,9 @@ from dataclasses import dataclass
 import math
 
 from .stair_geometry import MeshFragment, _signed_volume, validate_mesh_fragments
-from .stair_turn import EPS_LENGTH, _add, _cross, _scale, _sub, _unit
+from .stair_turn import (
+    EPS_LENGTH, _add, _cross, _deduplicate, _dot, _scale, _sub, _unit,
+)
 
 
 @dataclass(frozen=True)
@@ -54,6 +56,17 @@ class SharedCenterBoardComponent:
     polygon: tuple
     v_min: float
     v_max: float
+
+
+def compact_center_side(frame, ascent_direction):
+    """Return the uphill-relative side facing the inside of a Compact-U."""
+    effective_theta = frame.theta if ascent_direction == "FORWARD" else -frame.theta
+    return "LEFT" if effective_theta > 0.0 else "RIGHT"
+
+
+def side_enabled(fields, side):
+    return (fields.left_side_board_enabled if side == "LEFT"
+            else fields.right_side_board_enabled)
 
 
 def stepped_patch_z(tread_top_z, closed_body_depth, base_z):
@@ -337,6 +350,110 @@ def build_shared_center_board_fragment(shared_interface, lower_z, upper_z,
         upper_z, upper_z, thickness, ordinal)
 
 
+def build_shared_profile_component(shared_interface, profile, thickness,
+                                   ordinal=14000):
+    """Extrude one closed ``(s,z)`` union component symmetrically in v."""
+    start, end = shared_interface
+    tangent, length = _unit(_sub(end, start), "shared center seam")
+    normal = (-tangent[1], tangent[0]); half = float(thickness) / 2.0
+    profile = tuple(profile)
+    vertices = []
+    for v in (-half, half):
+        vertices.extend((start[0] + tangent[0] * s + normal[0] * v,
+                         start[1] + tangent[1] * s + normal[1] * v, z)
+                        for s, z in profile)
+    n = len(profile)
+    faces = [tuple(reversed(range(n))), tuple(range(n, 2*n))]
+    faces.extend((i, (i+1)%n, (i+1)%n+n, i+n) for i in range(n))
+    if _signed_volume(vertices, faces) < 0.0:
+        faces = [tuple(reversed(face)) for face in faces]
+    fragment = MeshFragment("SIDE_BOARD", ordinal, tuple(vertices), tuple(faces))
+    validate_mesh_fragments((fragment,))
+    return fragment
+
+
+def trim_prism_fragment_against_shared_board(fragment, shared_interface,
+                                             thickness, z_min, z_max):
+    """Clip a constant-height production prism outside the shared board strip.
+
+    Non-prismatic/profiled parts and partial-height intersections are retained
+    for the caller's more detailed splitter; supported SQUARE Compact-U parts
+    use this deterministic capped path.
+    """
+    vertices = tuple(fragment.vertices)
+    if len(vertices) % 2:
+        return fragment
+    n = len(vertices) // 2
+    if n < 3 or any(math.dist(vertices[i][:2], vertices[i+n][:2]) > EPS_LENGTH
+                    for i in range(n)):
+        return fragment
+    bottom = min(vertex[2] for vertex in vertices)
+    top = max(vertex[2] for vertex in vertices)
+    if top <= z_min + EPS_LENGTH or bottom >= z_max - EPS_LENGTH:
+        return fragment
+    # A partial-height intersection must not erase the full strip. Split the
+    # vertical ranges into capped prisms and clip only the overlapping range.
+    start, end = shared_interface
+    tangent, _ = _unit(_sub(end, start), "shared center seam")
+    normal = (-tangent[1], tangent[0]); half = float(thickness) / 2.0
+    polygon = tuple(vertex[:2] for vertex in vertices[:n])
+    centroid_v = sum(_dot(_sub(point, start), normal) for point in polygon) / n
+    sign = 1.0 if centroid_v >= 0.0 else -1.0
+    limit = half
+    def distance(point): return sign * _dot(_sub(point, start), normal) - limit
+    clipped = []
+    for a, b in zip(polygon, polygon[1:] + polygon[:1]):
+        da, db = distance(a), distance(b)
+        inside_a, inside_b = da >= -EPS_LENGTH, db >= -EPS_LENGTH
+        if inside_a: clipped.append(a)
+        if inside_a != inside_b:
+            ratio = da / (da - db)
+            clipped.append((a[0] + ratio * (b[0] - a[0]),
+                            a[1] + ratio * (b[1] - a[1])))
+    clipped = list(_deduplicate(clipped))
+    changed = True
+    while changed and len(clipped) > 3:
+        changed = False
+        for index in range(len(clipped)):
+            a, b, c = (clipped[index - 1], clipped[index],
+                       clipped[(index + 1) % len(clipped)])
+            if abs(_cross(_sub(b, a), _sub(c, b))) <= 1e-12:
+                del clipped[index]; changed = True; break
+    if len(clipped) < 3:
+        return None
+    overlap_low, overlap_high = max(bottom, z_min), min(top, z_max)
+    pieces = []
+    if bottom < overlap_low - EPS_LENGTH:
+        pieces.append(_variable_prism(polygon, (bottom,)*n,
+                                      (overlap_low,)*n,
+                                      fragment.part_type, fragment.ordinal))
+    pieces.append(_variable_prism(
+        tuple(clipped), (overlap_low,)*len(clipped),
+        (overlap_high,)*len(clipped), fragment.part_type, fragment.ordinal))
+    if overlap_high < top - EPS_LENGTH:
+        pieces.append(_variable_prism(polygon, (overlap_high,)*n, (top,)*n,
+                                      fragment.part_type, fragment.ordinal))
+    return tuple(pieces)
+
+
+def build_high_side_closure_fragment(frame, relief, z_entry, z_exit,
+                                     ordinal=11999):
+    """Emit a closed local wedge owning the exact A_low/A_high/J_high face."""
+    low, high = sorted((float(z_entry), float(z_exit)))
+    high_point = relief.exit if z_exit >= z_entry else relief.entry
+    other = relief.entry if z_exit >= z_entry else relief.exit
+    vertices = ((frame.inner_pivot[0], frame.inner_pivot[1], low),
+                (frame.inner_pivot[0], frame.inner_pivot[1], high),
+                (high_point[0], high_point[1], high),
+                (other[0], other[1], low))
+    faces = ((0, 2, 1), (0, 3, 2), (0, 1, 3), (1, 2, 3))
+    if _signed_volume(vertices, faces) < 0.0:
+        faces = tuple(tuple(reversed(face)) for face in faces)
+    fragment = MeshFragment("UNDERBODY", ordinal, vertices, faces)
+    validate_mesh_fragments((fragment,))
+    return fragment
+
+
 def build_winder_side_board_fragments(frame, cells, tread_tops, stations,
                                       lower_zs, side, ascent_direction,
                                       thickness, reveal, mode,
@@ -449,5 +566,8 @@ def build_sloped_underbody_fragments(frame, cells, tread_tops, body_depth,
         (z_low + core_thickness, z0 + core_thickness,
          zn + core_thickness),
         "UNDERBODY", ordinal_start + len(fragments)))
+    closure = build_high_side_closure_fragment(
+        frame, relief, z0, zn, ordinal_start + 99)
+    fragments.append(closure)
     return tuple(fragments), relief, stations, high_side_pivot_closure(
         frame, relief, z0, zn)

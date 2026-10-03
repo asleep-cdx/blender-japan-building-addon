@@ -1198,8 +1198,9 @@ def build_winder_finish_fragments(layout, fields):
         validate_stepped_underbody_thickness,
     )
     from .stair_winder_finish import (
-        build_shared_center_board_fragment, build_winder_side_board_fragments,
-        compact_grouped_height,
+        build_shared_profile_component, build_winder_side_board_fragments,
+        compact_center_side, compact_grouped_height, side_enabled,
+        union_profile_rectangles,
         build_sloped_underbody_fragments,
         build_stepped_underbody_fragments,
         resolve_sloped_stations, resolve_stepped_underbody, stepped_patch_z,
@@ -1241,6 +1242,7 @@ def build_winder_finish_fragments(layout, fields):
             grouped[first] = (middle, None); grouped[second] = (None, middle)
         grouped_middle = middle
     result = []
+    turn_finish = {}
     for turn_index, (spec, cells) in enumerate(zip(layout.turn_specs,
                                                    layout.turn_cells)):
         if spec.turn_mode != TURN_WINDER:
@@ -1275,6 +1277,7 @@ def build_winder_finish_fragments(layout, fields):
                     z_entry=z_entry, z_exit=z_exit))
             result.extend(fragments)
             lower = [station.z for station in stations]
+        turn_finish[turn_index] = (stations, tuple(lower), turn_tops)
         for side, enabled in (("LEFT", fields.left_side_board_enabled),
                               ("RIGHT", fields.right_side_board_enabled)):
             if enabled:
@@ -1283,18 +1286,28 @@ def build_winder_finish_fragments(layout, fields):
                     lower, side, layout.ascent_direction, board_thickness,
                     reveal, fields.side_board_mode,
                     12000 + turn_index * 1000 + (0 if side == "LEFT" else 500)))
-    if (layout.u_classification == "COMPACT_U" and layout.shared_interface
-            and (fields.left_side_board_enabled
-                 or fields.right_side_board_enabled)):
-        if grouped_middle is None:
-            adjoining = [stepped_patch_z(turn_tops[-1], depth, layout.base_z)
-                         for turn_tops in tops]
-            shared_lower = max(adjoining)
-        else:
-            shared_lower = grouped_middle
-        result.append(build_shared_center_board_fragment(
-            layout.shared_interface, shared_lower,
-            shared_lower + depth + reveal, board_thickness, 14000))
+    if layout.u_classification == "COMPACT_U" and layout.shared_interface:
+        seam_length = math.hypot(*_sub(layout.shared_interface[1],
+                                       layout.shared_interface[0]))
+        contributors = []
+        for turn_index, frame in enumerate(layout.turns):
+            center_side = compact_center_side(frame, layout.ascent_direction)
+            if not side_enabled(fields, center_side):
+                continue
+            stations, lower, turn_tops = turn_finish[turn_index]
+            station_index = (-1 if turn_index == 0 else 0)
+            lower_z = lower[station_index]
+            walking_index = (-1 if station_index == -1 else 0)
+            upper_z = turn_tops[walking_index] + reveal
+            contributors.append((0.0, seam_length, lower_z, upper_z))
+        ordinal = 14000
+        for group in union_profile_rectangles(contributors):
+            s0 = min(rect[0] for rect in group); s1 = max(rect[1] for rect in group)
+            z0 = min(rect[2] for rect in group); z1 = max(rect[3] for rect in group)
+            profile = ((s0, z0), (s1, z0), (s1, z1), (s0, z1))
+            result.append(build_shared_profile_component(
+                layout.shared_interface, profile, board_thickness, ordinal))
+            ordinal += 1
     return tuple(result)
 
 
@@ -1314,7 +1327,32 @@ def prepare_winder_geometry(points, ascent_direction, base_z_mm,
     fragments = build_winder_fragments(layout)
     fields = finish.get("residential_fields")
     if finish.get("assembly_mode") == "STANDARD_RESIDENTIAL":
-        fragments += build_winder_finish_fragments(layout, fields)
+        finish_fragments = build_winder_finish_fragments(layout, fields)
+        if layout.u_classification == "COMPACT_U":
+            from .stair_winder_finish import trim_prism_fragment_against_shared_board
+            shared = tuple(part for part in finish_fragments
+                           if 14000 <= part.ordinal < 14100)
+            candidates = fragments + tuple(part for part in finish_fragments
+                                            if part not in shared)
+            for board in shared:
+                z_min = min(vertex[2] for vertex in board.vertices)
+                z_max = max(vertex[2] for vertex in board.vertices)
+                resolved = []
+                for part in candidates:
+                    if part.part_type not in ("TREAD", "RISER", "UNDERBODY"):
+                        resolved.append(part); continue
+                    trimmed = trim_prism_fragment_against_shared_board(
+                        part, layout.shared_interface,
+                        float(fields.side_board_thickness_mm) / _MM_PER_METRE,
+                        z_min, z_max)
+                    if trimmed is None:
+                        continue
+                    resolved.extend(trimmed if isinstance(trimmed, tuple)
+                                    else (trimmed,))
+                candidates = tuple(resolved)
+            fragments = candidates + shared
+        else:
+            fragments += finish_fragments
     mesh = assemble_stair_mesh(fragments)
     return layout, fragments, StairMeshData(mesh.vertices, mesh.faces,
                                             mesh.face_roles)
