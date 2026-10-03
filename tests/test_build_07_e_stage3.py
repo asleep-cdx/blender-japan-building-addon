@@ -25,6 +25,7 @@ from japanese_house_modeler.stair_winder_finish import (
     resolve_stepped_underbody, shared_edge_splits, stepped_patch_z,
     subtract_box_intersection, symmetric_board_component,
     union_profile_rectangles, world_side_for_uphill,
+    exact_rectangle_union_components, rectangle_component_boundaries,
 )
 
 L=((0,0),(0,2.2),(-2.2,2.2)); IDS=("p0","t","p2")
@@ -97,12 +98,17 @@ class BoardAndIntegrationTests(unittest.TestCase):
         f=ResidentialFields(left_side_board_enabled=False,right_side_board_enabled=False)
         _x,_p,m=prepare_winder_geometry(L,*BASE,point_ids=IDS,assembly_mode="STANDARD_RESIDENTIAL",residential_fields=f)
         self.assertTrue(set(m.face_roles)<=set(("TREAD","RISER","UNDERSIDE","SIDE_BOARD")))
-    def test_34_k_finish_unchanged(self):
-        x=layout(); before=resolve_physical_winder_plans(x.turn,x.cells,"FORWARD",x.nosing,x.riser_thickness)[0].inner_trim.chord
+    def test_34_piecewise_terminal_alignment_is_production_authority(self):
+        x=layout(); before=resolve_physical_winder_plans(x.turn,x.cells,"FORWARD",x.nosing,x.riser_thickness)
         f=ResidentialFields(left_side_board_enabled=False,right_side_board_enabled=False)
         y,_p,_m=prepare_winder_geometry(L,*BASE,point_ids=IDS,assembly_mode="STANDARD_RESIDENTIAL",residential_fields=f)
-        after=resolve_physical_winder_plans(y.turn,y.cells,"FORWARD",y.nosing,y.riser_thickness)[0].inner_trim.chord
+        after=resolve_physical_winder_plans(y.turn,y.cells,"FORWARD",y.nosing,y.riser_thickness)
         self.assertEqual(before,after)
+        trim=after[0].inner_trim
+        def cross(line,p):
+            a,b=line; return (b[0]-a[0])*(p[1]-a[1])-(b[1]-a[1])*(p[0]-a[0])
+        self.assertAlmostEqual(cross(trim.entry_terminal,after[0].inner_front),0)
+        self.assertAlmostEqual(cross(trim.exit_terminal,after[-1].inner_rear),0)
     def test_35_deterministic(self):
         f=ResidentialFields(left_side_board_enabled=False,right_side_board_enabled=False)
         a=prepare_winder_geometry(L,*BASE,point_ids=IDS,assembly_mode="STANDARD_RESIDENTIAL",residential_fields=f)[2]
@@ -204,5 +210,14 @@ class BoardAndIntegrationTests(unittest.TestCase):
             ordinals=[p.ordinal for p in parts if p.part_type==role]
             self.assertLess(len(set(ordinals)),len(ordinals))
             self.assertTrue(all(len(p.faces)>=4 for p in parts if p.part_type==role))
+
+    def test_49_exact_l_profile_has_one_shell_and_missing_corner(self):
+        components=exact_rectangle_union_components(((0,2,0,1),(0,1,1,2)))
+        self.assertEqual(len(components),1)
+        loops=rectangle_component_boundaries(components[0])
+        self.assertEqual(len(loops),1)
+        self.assertIn((1.0,1.0),loops[0])
+        area=abs(sum(loops[0][i][0]*loops[0][(i+1)%len(loops[0])][1]-loops[0][(i+1)%len(loops[0])][0]*loops[0][i][1] for i in range(len(loops[0])))/2)
+        self.assertEqual(area,3.0)
 
 if __name__ == "__main__": unittest.main()

@@ -482,22 +482,35 @@ class PhysicalBoundaryRuntimeRegressionTests(unittest.TestCase):
         return ((point[0] - pivot[0]) * trim.bisector[0]
                 + (point[1] - pivot[1]) * trim.bisector[1])
 
-    def _assert_common_chord(self, resolved, plans):
+    @staticmethod
+    def _on_line(line, point):
+        a, b = line
+        return abs((b[0]-a[0])*(point[1]-a[1])
+                   -(b[1]-a[1])*(point[0]-a[0]))
+
+    def _assert_piecewise_trim(self, resolved, plans, frame=None):
+        frame = resolved.turn if frame is None else frame
         trim = plans[0].inner_trim
         for plan in plans:
             self.assertIs(plan.inner_trim, trim)
-            for point in plan.inner_edge:
+        self.assertLess(self._on_line(trim.entry_terminal,
+                                     plans[0].inner_front), 1e-9)
+        self.assertLess(self._on_line(trim.exit_terminal,
+                                     plans[-1].inner_rear), 1e-9)
+        for index, plan in enumerate(plans):
+            for point in plan.inner_edge[(1 if index == 0 else 0):
+                                         (1 if index == len(plans)-1 else 2)]:
                 self.assertAlmostEqual(
-                    self._height(trim, resolved.turn.inner_pivot, point),
+                    self._height(trim, frame.inner_pivot, point),
                     trim.h_finish)
 
     def test_83_exact90_all_inner_edges_use_one_chord(self):
         resolved, groups = self._plans()
-        self._assert_common_chord(resolved, groups[0])
+        self._assert_piecewise_trim(resolved, groups[0])
 
     def test_84_63degree_all_inner_edges_use_one_chord(self):
         resolved, groups = self._plans(degrees=63)
-        self._assert_common_chord(resolved, groups[0])
+        self._assert_piecewise_trim(resolved, groups[0])
 
     def test_85_63degree_inner_edges_are_finite(self):
         _resolved, groups = self._plans(degrees=63)
@@ -516,23 +529,21 @@ class PhysicalBoundaryRuntimeRegressionTests(unittest.TestCase):
             self.assertAlmostEqual(self._distance(
                 plan.front_boundary, plan.exposed_front_edge[1]), .005)
 
-    def test_88_no_tread_vertex_is_on_pivot_side(self):
+    def test_88_piecewise_terminal_transitions_are_finite(self):
         resolved, groups = self._plans(degrees=63)
         trim = groups[0][0].inner_trim
         for plan in groups[0]:
             for point in plan.polygon:
-                self.assertGreaterEqual(
-                    self._height(trim, resolved.turn.inner_pivot, point),
-                    trim.h_finish - 1e-6)
+                self.assertTrue(all(math.isfinite(value) for value in point))
+            self.assertGreater(math.dist(*plan.inner_edge), 1e-6)
 
-    def test_89_riser_inner_points_use_same_chord(self):
+    def test_89_riser_terminals_use_straight_references(self):
         resolved, groups = self._plans(degrees=63)
         trim = groups[0][0].inner_trim
-        for plan in groups[0]:
-            for point in (plan.riser_polygon[0], plan.riser_polygon[-1]):
-                self.assertAlmostEqual(
-                    self._height(trim, resolved.turn.inner_pivot, point),
-                    trim.h_finish)
+        self.assertLess(self._on_line(trim.entry_terminal,
+                                     groups[0][0].riser_polygon[0]), 1e-9)
+        self.assertLess(self._on_line(trim.entry_terminal,
+                                     groups[0][0].riser_polygon[-1]), 1e-9)
 
     def test_90_shared_back_survives_chord_trim(self):
         _resolved, groups = self._plans(degrees=63)
@@ -557,11 +568,7 @@ class PhysicalBoundaryRuntimeRegressionTests(unittest.TestCase):
             U, U_IDS, 900, patterns=("BF_1", "BF_2"))
         self.assertIsNot(groups[0][0].inner_trim, groups[1][0].inner_trim)
         for frame, plans in zip(resolved.turns, groups):
-            for plan in plans:
-                for point in plan.inner_edge:
-                    self.assertAlmostEqual(self._height(
-                        plan.inner_trim, frame.inner_pivot, point),
-                        plan.inner_trim.h_finish)
+            self._assert_piecewise_trim(resolved, plans, frame)
 
     def test_94_compact_u_keeps_independent_chords_and_shared_middle(self):
         resolved, groups = self._plans(
@@ -571,6 +578,8 @@ class PhysicalBoundaryRuntimeRegressionTests(unittest.TestCase):
                           resolved.turns[0].exit_outer),
                          (resolved.turns[1].inner_pivot,
                           resolved.turns[1].entry_outer))
+        for frame, plans in zip(resolved.turns, groups):
+            self._assert_piecewise_trim(resolved, plans, frame)
 
     def test_95_reverse_chord_is_geometry_equivalent(self):
         forward, fg = self._plans()
@@ -580,14 +589,15 @@ class PhysicalBoundaryRuntimeRegressionTests(unittest.TestCase):
         self.assertEqual(set(fg[0][0].inner_trim.chord),
                          set(rg[0][0].inner_trim.chord))
         self.assertEqual(forward.turn.inner_pivot, reverse.turn.inner_pivot)
+        self._assert_piecewise_trim(reverse, rg[0])
 
     def test_96_width650_exact90_remains_valid(self):
         resolved, groups = self._plans(width=650)
-        self._assert_common_chord(resolved, groups[0])
+        self._assert_piecewise_trim(resolved, groups[0])
 
     def test_97_width650_63degree_remains_valid(self):
         resolved, groups = self._plans(width=650, degrees=63)
-        self._assert_common_chord(resolved, groups[0])
+        self._assert_piecewise_trim(resolved, groups[0])
 
     def test_98_chord_and_trim_repeat_deterministically(self):
         first = self._plans(degrees=63)[1]

@@ -266,6 +266,36 @@ def exact_rectangle_union_components(rectangles, eps=1.0e-9):
     return tuple(tuple(group) for _, group in sorted(groups.items()))
 
 
+def rectangle_component_boundaries(component):
+    """Cancel internal grid edges and trace deterministic external loops."""
+    edges = set()
+    for x0,x1,z0,z1 in component:
+        ring=((x0,z0),(x1,z0),(x1,z1),(x0,z1))
+        for edge in zip(ring,ring[1:]+ring[:1]):
+            reverse=(edge[1],edge[0])
+            if reverse in edges: edges.remove(reverse)
+            else: edges.add(edge)
+    loops=[]
+    while edges:
+        first=min(edges); edges.remove(first)
+        loop=[first[0],first[1]]
+        while loop[-1] != loop[0]:
+            choices=sorted(edge for edge in edges if edge[0]==loop[-1])
+            if not choices: raise ValueError("GEOMETRY_INVALID: profile union boundary")
+            edge=choices[0];edges.remove(edge);loop.append(edge[1])
+        loop.pop()
+        # remove collinear grid stations while preserving every profile corner
+        changed=True
+        while changed and len(loop)>3:
+            changed=False
+            for i in range(len(loop)):
+                if abs(_cross(_sub(loop[i],loop[i-1]),
+                              _sub(loop[(i+1)%len(loop)],loop[i])))<=1e-12:
+                    del loop[i];changed=True;break
+        loops.append(tuple(loop))
+    return tuple(loops)
+
+
 def symmetric_board_component(polygon, thickness):
     half = float(thickness) / 2.0
     if half <= 0.0: raise ValueError("GEOMETRY_INVALID: board thickness")
@@ -612,16 +642,8 @@ def build_sloped_underbody_fragments(frame, cells, tread_tops, body_depth,
     # A finite triangular core closes the pivot.  Its bottom is horizontal at
     # z_low; the explicit high-side triangle remains discoverable through
     # high_side_pivot_closure and its walls are part of this closed solid.
-    z_low = min(z0, zn)
-    core_thickness = min(float(body_depth), float(tread_thickness)) / 2.0
-    if core_thickness <= 1e-9:
-        raise ValueError("GEOMETRY_INVALID: Winder pivot-core clearance")
-    fragments.append(_variable_prism(
-        (frame.inner_pivot, relief.entry, relief.exit),
-        (z_low, z0, zn),
-        (z_low + core_thickness, z0 + core_thickness,
-         zn + core_thickness),
-        "UNDERBODY", ordinal_start + len(fragments)))
+    # The finite tetrahedral core owns the high-side closure itself.  Do not
+    # also emit the earlier overlapping triangular prism.
     closure = build_high_side_closure_fragment(
         frame, relief, z0, zn, ordinal_start + 99)
     fragments.append(closure)
