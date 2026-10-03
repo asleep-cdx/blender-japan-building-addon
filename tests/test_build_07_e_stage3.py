@@ -28,6 +28,8 @@ from japanese_house_modeler.stair_winder_finish import (
     union_profile_rectangles, world_side_for_uphill,
     exact_rectangle_union_components, rectangle_component_boundaries,
     _variable_prism, trim_prism_fragment_against_shared_board,
+    build_stepped_underbody_fragments,
+    compact_contributor_authority, propagate_semantic_edge_splits,
 )
 
 L=((0,0),(0,2.2),(-2.2,2.2)); IDS=("p0","t","p2")
@@ -228,21 +230,34 @@ class BoardAndIntegrationTests(unittest.TestCase):
         resolved=resolve_winder_layout(U,"FORWARD",0,2800,17,750,30,20,point_ids=UIDS,turn_specs=specs,tread_front_overhang_mm=5)
         original=build_winder_finish_fragments(resolved,fields)
         _x,trimmed,_m=prepare_winder_geometry(U,"FORWARD",0,2800,17,750,30,20,point_ids=UIDS,turn_specs=specs,assembly_mode="STANDARD_RESIDENTIAL",residential_fields=fields,tread_front_overhang_mm=5)
-        source={(p.ordinal,round(v[0],9),round(v[1],9)):set() for p in original if p.part_type=="UNDERBODY" for v in p.vertices}
-        for p in original:
-            if p.part_type=="UNDERBODY":
-                for v in p.vertices: source[(p.ordinal,round(v[0],9),round(v[1],9))].add(round(v[2],9))
-        output={}
-        for p in trimmed:
-            if p.part_type=="UNDERBODY":
-                for v in p.vertices:
-                    output.setdefault((p.ordinal,round(v[0],9),round(v[1],9)),set()).add(round(v[2],9))
-        retained=0
-        for key,zs in source.items():
-            if key in output:
-                matches=zs & output[key]
-                retained+=len(matches)
-        self.assertGreater(retained,0)
+        board=next(p for p in trimmed if 14000<=p.ordinal<14100)
+        a,b=resolved.shared_interface; dx,dy=b[0]-a[0],b[1]-a[1]
+        length=math.hypot(dx,dy); tangent=(dx/length,dy/length)
+        normal=(-tangent[1],tangent[0]); half=.018/2
+        z0=min(v[2] for v in board.vertices); z1=max(v[2] for v in board.vertices)
+        output={(p.ordinal,v) for p in trimmed if p.part_type=="UNDERBODY"
+                for v in p.vertices}
+        expected=[]
+        for part in original:
+            if part.part_type!="UNDERBODY" or part.ordinal%100==99: continue
+            for vertex in part.vertices:
+                delta=(vertex[0]-a[0],vertex[1]-a[1])
+                s=delta[0]*tangent[0]+delta[1]*tangent[1]
+                v=delta[0]*normal[0]+delta[1]*normal[1]
+                safely_outside=(s<-1e-9 or s>length+1e-9
+                                or abs(v)>half+1e-9
+                                or vertex[2]<z0-1e-9
+                                or vertex[2]>z1+1e-9)
+                if safely_outside: expected.append((part.ordinal,vertex))
+        self.assertTrue(expected)
+        self.assertTrue(all(item in output for item in expected))
+        self.assertTrue(all(validate_mesh_fragments((p,)) for p in trimmed
+                            if p.part_type=="UNDERBODY"))
+        again=prepare_winder_geometry(U,"FORWARD",0,2800,17,750,30,20,
+            point_ids=UIDS,turn_specs=specs,
+            assembly_mode="STANDARD_RESIDENTIAL",residential_fields=fields,
+            tread_front_overhang_mm=5)[1]
+        self.assertEqual(trimmed,again)
 
     def test_51_mixed_z_contour_keeps_partial_capped_remnant(self):
         source=_variable_prism(((0,-1),(1,-1),(1,1),(0,1)),
@@ -264,11 +279,39 @@ class BoardAndIntegrationTests(unittest.TestCase):
 
     def test_52_compact_front_profiles_complete_with_center_board(self):
         specs=(TurnSpec("a","WINDER","EQUAL_3"),TurnSpec("b","WINDER","EQUAL_3"))
-        for mode in ("SQUARE","BEVEL","ROUND"):
-            fields=ResidentialFields(underside_mode="SLOPED_CLOSED",side_board_mode="SLOPED",tread_front_overhang_mm=5,tread_front_edge_mode=mode,tread_front_edge_size_mm=2)
-            _x,parts,mesh=prepare_winder_geometry(U,"FORWARD",0,2800,17,750,30,20,point_ids=UIDS,turn_specs=specs,assembly_mode="STANDARD_RESIDENTIAL",residential_fields=fields,tread_front_overhang_mm=5,tread_front_edge_mode=mode,tread_front_edge_size_mm=2)
-            self.assertIn("SIDE_BOARD",mesh.face_roles)
-            self.assertTrue(all(len(p.faces)>=4 for p in parts))
+        profiled_candidates=set()
+        for width in (900,750,650):
+            compact=((0,0),(0,2.2),(width/1000,2.2),(width/1000,0))
+            for direction in ("FORWARD","REVERSE"):
+                for mode in ("SQUARE","BEVEL","ROUND"):
+                    fields=ResidentialFields(underside_mode="SLOPED_CLOSED",side_board_mode="SLOPED",tread_front_overhang_mm=5,tread_front_edge_mode=mode,tread_front_edge_size_mm=2)
+                    resolved,parts,mesh=prepare_winder_geometry(compact,direction,0,2800,17,width,30,20,point_ids=UIDS,turn_specs=specs,assembly_mode="STANDARD_RESIDENTIAL",residential_fields=fields,tread_front_overhang_mm=5,tread_front_edge_mode=mode,tread_front_edge_size_mm=2)
+                    self.assertIn("SIDE_BOARD",mesh.face_roles)
+                    self.assertTrue(all(len(p.faces)>=4 for p in parts))
+                    board=next(p for p in parts if 14000<=p.ordinal<14100)
+                    a,b=resolved.shared_interface; length=math.dist(a,b)
+                    tangent=((b[0]-a[0])/length,(b[1]-a[1])/length)
+                    normal=(-tangent[1],tangent[0]); half=.018/2
+                    z0=min(v[2] for v in board.vertices)
+                    z1=max(v[2] for v in board.vertices)
+                    for part in (p for p in parts if p.part_type in
+                                 ("TREAD","RISER","UNDERBODY")):
+                        ss=[(v[0]-a[0])*tangent[0]+(v[1]-a[1])*tangent[1]
+                            for v in part.vertices]
+                        vv=[(v[0]-a[0])*normal[0]+(v[1]-a[1])*normal[1]
+                            for v in part.vertices]
+                        overlaps=(max(ss)>1e-9 and min(ss)<length-1e-9
+                                  and max(v[2] for v in part.vertices)>z0+1e-9
+                                  and min(v[2] for v in part.vertices)<z1-1e-9)
+                        if overlaps:
+                            crosses=min(vv)<-half+1e-9 and max(vv)>half-1e-9
+                            if mode in ("BEVEL","ROUND") and part.part_type=="TREAD":
+                                if crosses: profiled_candidates.add(mode)
+                            else:
+                                self.assertFalse(crosses,(width,direction,mode,
+                                                         part.part_type,
+                                                         part.ordinal))
+        self.assertEqual(profiled_candidates,{"BEVEL","ROUND"})
 
     def test_53_compact_terminal_profiles_are_constant_cross_sections(self):
         specs=(TurnSpec("a","WINDER","EQUAL_3"),TurnSpec("b","WINDER","EQUAL_3"))
@@ -325,5 +368,112 @@ class BoardAndIntegrationTests(unittest.TestCase):
                 self.assertEqual(core_z,strip_z)
                 self.assertEqual(len(core_z),2)
                 self.assertIn(station.z,core_z)
+
+    def test_56_stepped_union_owns_dividers_once(self):
+        fixtures=[]
+        for direction in ("FORWARD","REVERSE"):
+            fixtures.append((L,direction,750))
+        fixtures.append((L,"FORWARD",650))
+        angle=math.radians(63)
+        fixtures.append((((0,0),(0,2.2),
+                          (-2.2*math.sin(angle),2.2+2.2*math.cos(angle))),
+                         "FORWARD",750))
+        for points,direction,width in fixtures:
+            resolved=resolve_winder_layout(
+                points,direction,0,2800,16,width,30,20,point_ids=IDS)
+            tops=winder_tread_tops(resolved)[0]
+            turn_tops=(tops if direction=="FORWARD" else tuple(reversed(tops)))
+            plans=resolve_stepped_underbody(
+                resolved.cells,turn_tops,.15,0,tread_thickness=.03)
+            fragment=build_stepped_underbody_fragments(plans)[0]
+            self.assertTrue(validate_mesh_fragments((fragment,)))
+            geometric_faces=[]
+            for face in fragment.faces:
+                geometric_faces.append(frozenset(fragment.vertices[i]
+                                                  for i in face))
+            self.assertEqual(len(geometric_faces),len(set(geometric_faces)))
+            for plan in plans:
+                expected={(p[0],p[1],plan.visible_z) for p in plan.polygon}
+                self.assertIn(frozenset(expected),geometric_faces)
+            self.assertIn(resolved.turn.outer_corner,
+                          {v[:2] for v in fragment.vertices})
+
+    def test_57_equal_stepped_levels_have_no_divider_wall(self):
+        resolved=layout()
+        plans=resolve_stepped_underbody(
+            resolved.cells,(.20,.20,.20),.15,0,tread_thickness=.03)
+        fragment=build_stepped_underbody_fragments(plans)[0]
+        for first,second in zip(resolved.cells,resolved.cells[1:]):
+            endpoints={resolved.turn.inner_pivot,first.polygon[-1]}
+            divider_faces=[face for face in fragment.faces
+                           if {fragment.vertices[i][:2] for i in face}
+                           <= endpoints
+                           and len({fragment.vertices[i][2]
+                                    for i in face})>1]
+            self.assertEqual(divider_faces,[])
+
+    def test_58_compact_contributors_use_source_terminal_authority(self):
+        specs=(TurnSpec("a","WINDER","EQUAL_3"),
+               TurnSpec("b","WINDER","EQUAL_3"))
+        for width in (900,750,650):
+            compact=((0,0),(0,2.2),(width/1000.0,2.2),
+                     (width/1000.0,0))
+            for direction in ("FORWARD","REVERSE"):
+                resolved=resolve_winder_layout(
+                    compact,direction,0,2800,17,width,30,20,
+                    point_ids=UIDS,turn_specs=specs)
+                seam=math.dist(*resolved.shared_interface)
+                for tops in winder_tread_tops(resolved):
+                    terminal=tops[-1] if direction=="FORWARD" else tops[0]
+                    authority=compact_contributor_authority(
+                        seam,max(0,terminal-.15),terminal,.04)
+                    self.assertEqual(authority.s_start,0.0)
+                    self.assertEqual(authority.s_end,seam)
+                    self.assertEqual(authority.lower_start,
+                                     authority.lower_end)
+                    self.assertEqual(authority.upper_start,
+                                     authority.upper_end)
+        # Full-width rectangles can join or remain vertically separated, but
+        # their complement cannot be enclosed in (s,z), hence no profile hole.
+
+    def test_59_semantic_registry_runs_in_production_path(self):
+        fields=ResidentialFields(underside_mode="SLOPED_CLOSED",
+                                 side_board_mode="SLOPED")
+        _x,parts,_mesh=prepare_winder_geometry(
+            L,*BASE,point_ids=IDS,assembly_mode="STANDARD_RESIDENTIAL",
+            residential_fields=fields)
+        self.assertEqual(parts,propagate_semantic_edge_splits(parts))
+
+    def test_60_compact_boards_share_butt_planes(self):
+        specs=(TurnSpec("a","WINDER","EQUAL_3"),
+               TurnSpec("b","WINDER","EQUAL_3"))
+        for direction in ("FORWARD","REVERSE"):
+            for underside,board_mode in (("STEPPED_CLOSED","STEPPED"),
+                                         ("SLOPED_CLOSED","SLOPED")):
+                fields=ResidentialFields(underside_mode=underside,
+                                         side_board_mode=board_mode)
+                resolved,parts,_mesh=prepare_winder_geometry(
+                    U,direction,0,2800,17,750,30,20,point_ids=UIDS,
+                    turn_specs=specs,assembly_mode="STANDARD_RESIDENTIAL",
+                    residential_fields=fields)
+                a,b=resolved.shared_interface
+                length=math.dist(a,b); tangent=((b[0]-a[0])/length,
+                                                (b[1]-a[1])/length)
+                ordinary=[p for p in parts if p.part_type=="SIDE_BOARD"
+                          and p.ordinal<14000]
+                shared=[p for p in parts if 14000<=p.ordinal<14100]
+                self.assertTrue(ordinary and shared)
+                for part in ordinary+shared:
+                    stations=[(v[0]-a[0])*tangent[0]
+                              +(v[1]-a[1])*tangent[1]
+                              for v in part.vertices]
+                    self.assertGreaterEqual(min(stations),-1e-9)
+                    self.assertLessEqual(max(stations),length+1e-9)
+                    self.assertTrue(validate_mesh_fragments((part,)))
+                shared_stations={round((v[0]-a[0])*tangent[0]
+                                       +(v[1]-a[1])*tangent[1],9)
+                                 for p in shared for v in p.vertices}
+                self.assertIn(0.0,shared_stations)
+                self.assertIn(round(length,9),shared_stations)
 
 if __name__ == "__main__": unittest.main()

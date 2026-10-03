@@ -58,6 +58,35 @@ class SharedCenterBoardComponent:
     v_max: float
 
 
+@dataclass(frozen=True)
+class CompactContributorAuthority:
+    """Source-derived constant terminal cross-section over a shared seam."""
+    s_start: float
+    s_end: float
+    lower_start: float
+    lower_end: float
+    upper_start: float
+    upper_end: float
+
+
+def compact_contributor_authority(seam_length, lower_terminal,
+                                  walking_terminal, reveal):
+    """Resolve the reachable Compact-U rectangular-profile special case.
+
+    A contributor is sourced from one reconciled Turn terminal section.  That
+    section has one underbody terminal Z and one walking-plus-reveal terminal
+    Z across the full seam, so both endpoint evaluations are intentionally
+    identical.  Validation here prevents production from silently forcing a
+    non-positive or partial contributor into that special case.
+    """
+    length=float(seam_length); lower=float(lower_terminal)
+    upper=float(walking_terminal)+float(reveal)
+    if not all(math.isfinite(value) for value in (length,lower,upper)) \
+            or length<=EPS_LENGTH or upper<=lower+EPS_LENGTH:
+        raise ValueError("GEOMETRY_INVALID: Compact-U contributor authority")
+    return CompactContributorAuthority(0.0,length,lower,lower,upper,upper)
+
+
 def compact_center_side(frame, ascent_direction):
     """Return the uphill-relative side facing the inside of a Compact-U."""
     effective_theta = frame.theta if ascent_direction == "FORWARD" else -frame.theta
@@ -203,6 +232,57 @@ def shared_edge_splits(start, end, points, eps=1.0e-9):
     return tuple(result)
 
 
+def propagate_semantic_edge_splits(fragments, eps=1.0e-12):
+    """Propagate every production full-XYZ station to incident face edges."""
+    fragments=tuple(fragments)
+    stations=tuple(dict.fromkeys(vertex for fragment in fragments
+                                 for vertex in fragment.vertices))
+    result=[]
+    for fragment in fragments:
+        vertices=list(fragment.vertices)
+        indices={vertex:index for index,vertex in enumerate(vertices)}
+        faces=[]
+        for face in fragment.faces:
+            expanded=[]
+            for position,start_index in enumerate(face):
+                end_index=face[(position+1)%len(face)]
+                start,end=vertices[start_index],vertices[end_index]
+                edge=tuple(end[i]-start[i] for i in range(3))
+                length2=sum(value*value for value in edge)
+                candidates=[]
+                if length2>eps*eps:
+                    for point in stations:
+                        delta=tuple(point[i]-start[i] for i in range(3))
+                        t=sum(delta[i]*edge[i] for i in range(3))/length2
+                        if not eps<t<1.0-eps:
+                            continue
+                        projected=tuple(start[i]+t*edge[i] for i in range(3))
+                        if math.dist(point,projected)<=eps:
+                            candidates.append((t,point))
+                expanded.append(start_index)
+                ordered=[]
+                for t,point in sorted(candidates,key=lambda item:(item[0],item[1])):
+                    if not ordered or math.dist(ordered[-1][1],point)>eps:
+                        ordered.append((t,point))
+                for _t,point in ordered:
+                    if point not in indices:
+                        indices[point]=len(vertices); vertices.append(point)
+                    if expanded[-1]!=indices[point]:
+                        expanded.append(indices[point])
+            faces.append(tuple(expanded))
+        rebuilt=MeshFragment(fragment.part_type,fragment.ordinal,
+                             tuple(vertices),tuple(faces))
+        try:
+            validate_mesh_fragments((rebuilt,))
+        except ValueError:
+            # A station crossing only one face is not a shared semantic edge;
+            # retaining the already-valid closed fragment avoids creating a
+            # topological connection between unrelated collinear geometry.
+            rebuilt=fragment
+        result.append(rebuilt)
+    return tuple(result)
+
+
 def union_profile_rectangles(rectangles, eps=1.0e-9):
     """Union axis-aligned seam-profile rectangles without point welding.
 
@@ -305,6 +385,66 @@ def symmetric_board_component(polygon, thickness):
 def butt_joint_plane(endpoint, tangent):
     direction, _ = _unit(tuple(tangent), "shared seam tangent")
     return (tuple(endpoint), direction)
+
+
+def clip_fragment_to_vertical_plane(fragment, point, normal,
+                                    keep_positive=True, eps=1.0e-9):
+    """Clip a closed convex fragment and cap the common vertical plane."""
+    point=tuple(point[:2]); normal,_length=_unit(tuple(normal[:2]))
+    def distance(vertex):
+        value=(vertex[0]-point[0])*normal[0]+(vertex[1]-point[1])*normal[1]
+        return value if keep_positive else -value
+    polygons=[]; cut=[]
+    for face in fragment.faces:
+        source=[fragment.vertices[index] for index in face]; output=[]
+        previous=source[-1]; dp=distance(previous); inside_p=dp>=-eps
+        for current in source:
+            dc=distance(current); inside_c=dc>=-eps
+            if inside_c!=inside_p:
+                t=dp/(dp-dc)
+                intersection=tuple(round(previous[i]+t*(current[i]-previous[i]),14)
+                                   for i in range(3))
+                output.append(intersection); cut.append(intersection)
+            if inside_c: output.append(current)
+            previous,dp,inside_p=current,dc,inside_c
+        cleaned=[]
+        for vertex in output:
+            if not cleaned or math.dist(cleaned[-1],vertex)>eps:
+                cleaned.append(vertex)
+        if len(cleaned)>2 and math.dist(cleaned[0],cleaned[-1])<=eps:
+            cleaned.pop()
+        if len(cleaned)>=3: polygons.append(tuple(cleaned))
+    unique=[]
+    for vertex in cut:
+        if not any(math.dist(vertex,other)<=eps for other in unique):
+            unique.append(vertex)
+    if len(unique)>=3:
+        tangent=(-normal[1],normal[0])
+        center=tuple(sum(v[i] for v in unique)/len(unique) for i in range(3))
+        unique.sort(key=lambda v:math.atan2(
+            v[2]-center[2],(v[0]-center[0])*tangent[0]
+            +(v[1]-center[1])*tangent[1]))
+        if keep_positive:
+            unique.reverse()
+        polygons.append(tuple(unique))
+    vertices=[]; indices={}; faces=[]
+    for polygon in polygons:
+        face=[]
+        for vertex in polygon:
+            if vertex not in indices:
+                indices[vertex]=len(vertices); vertices.append(vertex)
+            face.append(indices[vertex])
+        faces.append(tuple(face))
+    if len(vertices)<4: return None
+    candidate=MeshFragment(fragment.part_type,fragment.ordinal,
+                           tuple(vertices),tuple(faces))
+    if _signed_volume(candidate.vertices,candidate.faces)<0:
+        candidate=MeshFragment(candidate.part_type,candidate.ordinal,
+                               candidate.vertices,
+                               tuple(tuple(reversed(face))
+                                     for face in candidate.faces))
+    validate_mesh_fragments((candidate,))
+    return candidate
 
 
 def resolve_side_board_profile(side, lower_stations, walking_stations,
@@ -535,7 +675,8 @@ def trim_prism_fragment_against_shared_board(fragment, shared_interface,
         while changed and len(candidate)>3:
             changed=False
             for index in range(len(candidate)):
-                a,b,c=candidate[index-1],candidate[index],candidate[(index+1)%len(candidate)]
+                a,b,c=(candidate[index-1],candidate[index],
+                       candidate[(index+1)%len(candidate)])
                 if abs(_cross(_sub(b,a),_sub(c,b)))<=1e-12:
                     del candidate[index];changed=True;break
         area=abs(sum(candidate[i][0]*candidate[(i+1)%len(candidate)][1]
@@ -597,7 +738,16 @@ def trim_prism_fragment_against_shared_board(fragment, shared_interface,
                         pieces.append(_variable_prism(
                             tuple(poly),bottoms,tops,
                             fragment.part_type,fragment.ordinal))
-    return tuple(pieces)
+    # Preserve bit-identical source authority at every surviving original
+    # vertex; only genuinely generated contour stations retain interpolation.
+    canonical=[]
+    for piece in pieces:
+        restored=tuple(next((source for source in vertices
+                             if math.dist(vertex,source)<=EPS_LENGTH),vertex)
+                       for vertex in piece.vertices)
+        rebuilt=MeshFragment(piece.part_type,piece.ordinal,restored,piece.faces)
+        validate_mesh_fragments((rebuilt,)); canonical.append(rebuilt)
+    return tuple(canonical)
 
 
 def build_high_side_closure_fragment(frame, relief, z_entry, z_exit,
@@ -707,14 +857,62 @@ def build_winder_side_board_fragments(frame, cells, tread_tops, stations,
 
 
 def build_stepped_underbody_fragments(plans, ordinal_start=10000):
-    result = []
-    for offset, plan in enumerate(plans):
-        n = len(plan.polygon)
-        result.append(_variable_prism(plan.polygon,
-                                      (plan.visible_z,) * n,
-                                      (plan.top_z,) * n,
-                                      "UNDERBODY", ordinal_start + offset))
-    return tuple(result)
+    """Build one closed union shell with destination-owned dividers.
+
+    Horizontal soffit/contact polygons remain one-per-cell.  Plan edges are
+    then reconciled globally: an exterior edge receives its full wall, while
+    a two-cell divider receives only the symmetric difference of the two
+    vertical intervals.  Consequently coincident interval area is internal
+    (and absent), an equal-level divider is absent, and every exposed level
+    difference is emitted exactly once using the owning cell's winding.
+    """
+    plans=tuple(plans)
+    if not plans:
+        return ()
+    vertices=[]; vertex_index={}; faces=[]; edge_incidents={}
+    def vertex(point):
+        point=tuple(float(value) for value in point)
+        if point not in vertex_index:
+            vertex_index[point]=len(vertices); vertices.append(point)
+        return vertex_index[point]
+    for plan in plans:
+        polygon=tuple(plan.polygon)
+        if len(polygon)<3:
+            raise ValueError("GEOMETRY_INVALID: stepped cell polygon")
+        if sum(a[0]*b[1]-b[0]*a[1]
+               for a,b in zip(polygon,polygon[1:]+polygon[:1]))<0.0:
+            polygon=tuple(reversed(polygon))
+        # Nominal cells are CCW; keep the full visible patch and contact patch.
+        bottom=tuple(vertex((p[0],p[1],plan.visible_z)) for p in polygon)
+        top=tuple(vertex((p[0],p[1],plan.top_z)) for p in polygon)
+        faces.append(tuple(reversed(bottom)))
+        faces.append(top)
+        for a,b in zip(polygon,polygon[1:]+polygon[:1]):
+            key=tuple(sorted((tuple(a),tuple(b))))
+            edge_incidents.setdefault(key,[]).append(
+                (tuple(a),tuple(b),float(plan.visible_z),float(plan.top_z)))
+    for incidents in edge_incidents.values():
+        if len(incidents)>2:
+            raise ValueError("GEOMETRY_INVALID: non-manifold stepped divider")
+        levels=sorted({z for incident in incidents for z in incident[2:]})
+        for low,high in zip(levels,levels[1:]):
+            if high-low<=EPS_LENGTH:
+                continue
+            middle=(low+high)/2.0
+            owners=[incident for incident in incidents
+                    if incident[2]+EPS_LENGTH<middle<incident[3]-EPS_LENGTH]
+            if len(owners)==2:
+                continue
+            if len(owners)!=1:
+                continue
+            a,b,_bottom,_top=owners[0]
+            faces.append((vertex((a[0],a[1],low)),
+                          vertex((b[0],b[1],low)),
+                          vertex((b[0],b[1],high)),
+                          vertex((a[0],a[1],high))))
+    fragment=MeshFragment("UNDERBODY",ordinal_start,tuple(vertices),tuple(faces))
+    validate_mesh_fragments((fragment,))
+    return (fragment,)
 
 
 def high_side_pivot_closure(frame, relief, z_entry, z_exit):

@@ -1220,7 +1220,8 @@ def build_winder_finish_fragments(layout, fields):
     )
     from .stair_winder_finish import (
         build_shared_profile_component, build_winder_side_board_fragments,
-        compact_center_side, compact_grouped_height,
+        compact_center_side, compact_contributor_authority,
+        compact_grouped_height,
         exact_rectangle_union_components, rectangle_component_boundaries,
         side_enabled,
         build_sloped_underbody_fragments,
@@ -1320,14 +1321,37 @@ def build_winder_finish_fragments(layout, fields):
             station_index = (-1 if turn_index == 0 else 0)
             lower_z = lower[station_index]
             walking_index = (-1 if station_index == -1 else 0)
-            upper_z = turn_tops[walking_index] + reveal
-            contributors.append((0.0, seam_length, lower_z, upper_z))
+            authority=compact_contributor_authority(
+                seam_length,lower_z,turn_tops[walking_index],reveal)
+            contributors.append((authority.s_start,authority.s_end,
+                                 authority.lower_start,
+                                 authority.upper_start))
         ordinal = 14000
         for component in exact_rectangle_union_components(contributors):
             for profile in rectangle_component_boundaries(component):
                 result.append(build_shared_profile_component(
                     layout.shared_interface, profile, board_thickness, ordinal))
                 ordinal += 1
+        # Specification 24.5: both ordinary board families consume the same
+        # vertical endpoint planes as the shared board.  Convex board pieces
+        # are clipped and capped before the shared family is assembled.
+        from .stair_winder_finish import clip_fragment_to_vertical_plane
+        seam_start,seam_end=layout.shared_interface
+        tangent,_length=_unit(_sub(seam_end,seam_start))
+        joined=[]
+        for part in result:
+            if part.part_type!="SIDE_BOARD":
+                joined.append(part); continue
+            if part.ordinal>=14000:
+                continue
+            clipped=clip_fragment_to_vertical_plane(
+                part,seam_start,tangent,True)
+            if clipped is not None:
+                clipped=clip_fragment_to_vertical_plane(
+                    clipped,seam_end,tangent,False)
+            if clipped is not None: joined.append(clipped)
+        result=joined+[part for part in result
+                       if part.part_type=="SIDE_BOARD" and part.ordinal>=14000]
     return tuple(result)
 
 
@@ -1377,6 +1401,8 @@ def prepare_winder_geometry(points, ascent_direction, base_z_mm,
             fragments = candidates + shared
         else:
             fragments += finish_fragments
+        from .stair_winder_finish import propagate_semantic_edge_splits
+        fragments = propagate_semantic_edge_splits(fragments)
     mesh = assemble_stair_mesh(fragments)
     return layout, fragments, StairMeshData(mesh.vertices, mesh.faces,
                                             mesh.face_roles)
