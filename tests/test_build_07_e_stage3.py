@@ -297,4 +297,33 @@ class BoardAndIntegrationTests(unittest.TestCase):
             self.assertTrue(expected.issubset(vertices))
             self.assertGreaterEqual(sum(len(face)==3 for face in core.faces),len(stations))
 
+    def test_55_pivot_core_and_strips_share_contact_xyz(self):
+        for degrees in (90,63):
+            angle=math.radians(degrees)
+            points=((0,0),(0,2.2),
+                    (-2.2*math.sin(angle),2.2+2.2*math.cos(angle)))
+            fields=ResidentialFields(
+                underside_mode="SLOPED_CLOSED",
+                left_side_board_enabled=False,
+                right_side_board_enabled=False)
+            resolved=resolve_winder_layout(points,*BASE,point_ids=IDS)
+            tops=winder_tread_tops(resolved)[0]
+            _relief,stations=resolve_sloped_stations(
+                resolved.turn,resolved.cells,max(0,tops[0]-.15),
+                max(0,tops[-1]-.15),resolved.riser_thickness)
+            _x,parts,_m=prepare_winder_geometry(
+                points,*BASE,point_ids=IDS,
+                assembly_mode="STANDARD_RESIDENTIAL",
+                residential_fields=fields)
+            core=next(p for p in parts if p.ordinal==11099)
+            strips=[p for p in parts if 11000<=p.ordinal<11099]
+            for station in stations:
+                xy=(station.inner[0],station.inner[1])
+                core_z={v[2] for v in core.vertices if v[:2]==xy}
+                strip_z={v[2] for p in strips for v in p.vertices
+                         if v[:2]==xy}
+                self.assertEqual(core_z,strip_z)
+                self.assertEqual(len(core_z),2)
+                self.assertIn(station.z,core_z)
+
 if __name__ == "__main__": unittest.main()

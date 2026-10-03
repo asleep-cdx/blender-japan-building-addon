@@ -618,17 +618,30 @@ def build_high_side_closure_fragment(frame, relief, z_entry, z_exit,
     return fragment
 
 
-def build_pivot_core_fragment(frame, stations, shell_thickness,
+def build_pivot_core_fragment(frame, stations, contact_zs,
                               ordinal=11999):
-    """Build one closed pivot core using every exact relief station P_k."""
+    """Build one closed pivot core from shared soffit/contact stations.
+
+    ``stations`` supplies the visible-soffit ``P_k`` vertices and
+    ``contact_zs`` supplies the physical-contact ``C_k`` heights used by the
+    adjacent strips.  Keeping these as inputs (rather than inventing a core
+    thickness) makes both sides of every core/strip interface bit-identical.
+    """
     stations=tuple(stations)
+    contact_zs=tuple(float(value) for value in contact_zs)
     if len(stations)<2: raise ValueError("GEOMETRY_INVALID: pivot stations")
+    if len(contact_zs)!=len(stations):
+        raise ValueError("GEOMETRY_INVALID: pivot contact stations")
+    if any(contact<=station.z+EPS_LENGTH
+           for station,contact in zip(stations,contact_zs)):
+        raise ValueError("GEOMETRY_INVALID: pivot contact clearance")
     z0,zn=stations[0].z,stations[-1].z
     low,high=min(z0,zn),max(z0,zn)
     bottom=[(frame.inner_pivot[0],frame.inner_pivot[1],low)]
     bottom.extend((s.inner[0],s.inner[1],s.z) for s in stations)
     top=[(frame.inner_pivot[0],frame.inner_pivot[1],high)]
-    top.extend((s.inner[0],s.inner[1],s.z+shell_thickness) for s in stations)
+    top.extend((s.inner[0],s.inner[1],contact)
+               for s,contact in zip(stations,contact_zs))
     vertices=tuple(bottom+top); count=len(bottom); faces=[]
     for k in range(1,count-1):
         faces.append((0,k+1,k))
@@ -750,20 +763,19 @@ def build_sloped_underbody_fragments(frame, cells, tread_tops, body_depth,
         contact_a, contact_b = contact_at(a.fraction), contact_at(b.fraction)
         if a.z >= contact_a - 1e-9 or b.z >= contact_b - 1e-9:
             raise ValueError("GEOMETRY_INVALID: Winder contact clearance")
-        shell = min(contact_a - a.z, contact_b - b.z)
         polygon = (a.inner, a.outer, b.outer, b.inner)
         fragments.append(_variable_prism(
             polygon, (a.z, a.z, b.z, b.z),
-            (a.z + shell, a.z + shell, b.z + shell, b.z + shell),
+            (contact_a, contact_a, contact_b, contact_b),
             "UNDERBODY", ordinal_start + index))
     # A finite triangular core closes the pivot.  Its bottom is horizontal at
     # z_low; the explicit high-side triangle remains discoverable through
     # high_side_pivot_closure and its walls are part of this closed solid.
     # The finite tetrahedral core owns the high-side closure itself.  Do not
     # also emit the earlier overlapping triangular prism.
-    core=build_pivot_core_fragment(
-        frame,stations,min(float(body_depth),float(tread_thickness))/2.0,
-        ordinal_start+99)
+    contact_zs=tuple(contact_at(station.fraction) for station in stations)
+    core=build_pivot_core_fragment(frame,stations,contact_zs,
+                                   ordinal_start+99)
     fragments.append(core)
     return tuple(fragments), relief, stations, high_side_pivot_closure(
         frame, relief, z0, zn)
