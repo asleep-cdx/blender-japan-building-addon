@@ -229,6 +229,8 @@ def _prepare_candidate(values):
             tread_front_overhang_mm=values["residential"].tread_front_overhang_mm,
             tread_front_edge_mode=values["residential"].tread_front_edge_mode,
             tread_front_edge_size_mm=values["residential"].tread_front_edge_size_mm,
+            assembly_mode=values.get("assembly_mode"),
+            residential_fields=values["residential"],
             allocation=allocation or None)
         key = ("manual_riser_allocation"
                if values.get("riser_distribution_mode") == RISER_DISTRIBUTION_MANUAL

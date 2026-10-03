@@ -235,7 +235,7 @@ class JHM_PT_house_modeler(bpy.types.Panel):
                 residential = selected_box.column()
                 residential.enabled = operation_allowed(
                     "EDIT_RESIDENTIAL", issues, stair.assembly_mode) \
-                    and stair.stair_schema_version <= 4
+                    and stair.stair_schema_version <= 5
                 residential.operator("jhm.edit_residential_stair", text="住宅階段仕様を変更")
                 residential.operator("jhm.edit_stair_materials", text="階段部材Materialを変更")
             repair = selected_box.row()

@@ -140,12 +140,15 @@ class PhysicalWinderBoundary:
 
 @dataclass(frozen=True)
 class PhysicalWinderInnerTrim:
-    """One Turn-local common physical finish chord."""
+    """Piecewise physical finish: Straight terminals plus interior chord."""
     bisector: tuple
     h_finish: float
     entry_point: tuple
     exit_point: tuple
     chord: tuple
+    entry_terminal: tuple = ()
+    exit_terminal: tuple = ()
+    transition_segments: tuple = ()
 
 
 @dataclass(frozen=True)
@@ -613,19 +616,35 @@ def resolve_physical_winder_plans(frame, cells, ascent_direction,
             or entry_t >= entry_length - EPS_LENGTH
             or exit_t >= exit_length - EPS_LENGTH):
         raise ValueError("GEOMETRY_INVALID: common inner finish chordがTurn内に収まりません。")
+    if ascent_direction == "FORWARD":
+        entry_axis = getattr(frame, "incoming", (-entry_ray[1], entry_ray[0]))
+        exit_axis = getattr(frame, "outgoing", (-exit_ray[1], exit_ray[0]))
+    else:
+        entry_axis = getattr(frame, "outgoing", (-exit_ray[1], exit_ray[0]))
+        exit_axis = getattr(frame, "incoming", (-entry_ray[1], entry_ray[0]))
+    entry_terminal = (frame.inner_pivot,
+                      _add(frame.inner_pivot, entry_axis))
+    exit_terminal = (frame.inner_pivot,
+                     _add(frame.inner_pivot, exit_axis))
     inner_trim = PhysicalWinderInnerTrim(
         bisector, h_finish, entry_point, exit_point,
-        (entry_point, exit_point))
+        (entry_point, exit_point), entry_terminal, exit_terminal)
     plans = []
     for index, cell in enumerate(ordered):
         front, rear = boundaries[index], boundaries[index + 1]
         inner_miter = raw_miters[index]
+        front_trim_origin, front_trim_direction = (
+            (frame.inner_pivot, entry_axis) if index == 0
+            else (finish_origin, finish_direction))
+        rear_trim_origin, rear_trim_direction = (
+            (frame.inner_pivot, exit_axis) if index == len(ordered) - 1
+            else (finish_origin, finish_direction))
         inner_front = _line_intersection(
             front.nose_origin, front.direction,
-            finish_origin, finish_direction)
+            front_trim_origin, front_trim_direction)
         inner_rear = _line_intersection(
             rear.back_origin, rear.direction,
-            finish_origin, finish_direction)
+            rear_trim_origin, rear_trim_direction)
         if math.hypot(*_sub(inner_rear, inner_front)) <= EPS_LENGTH:
             raise ValueError("GEOMETRY_INVALID: physical Winder inner edgeが短すぎます。")
         front_outer, front_station, _ = _trim_semantic_line(
@@ -643,9 +662,6 @@ def resolve_physical_winder_plans(frame, cells, ascent_direction,
         polygon = _deduplicate((inner_front, *outer, inner_rear))
         if len(polygon) < 3 or polygon_area(polygon) <= EPS_AREA:
             raise ValueError("GEOMETRY_INVALID: physical Winder common inner trimが不正です。")
-        if any(_dot(_sub(point, frame.inner_pivot), bisector)
-               < h_finish - EPS_LENGTH for point in polygon):
-            raise ValueError("GEOMETRY_INVALID: physical vertexがinner finish chordを越えます。")
         front_edge = (inner_front, front_outer)
         rear_edge = (inner_rear, rear_outer)
         if plans:
@@ -656,11 +672,11 @@ def resolve_physical_winder_plans(frame, cells, ascent_direction,
                 front.nominal_face)
             first_back_inner = _line_intersection(
                 front.back_origin, front.direction,
-                finish_origin, finish_direction)
+                frame.inner_pivot, entry_axis)
             riser_back = (first_back_inner, first_back_outer)
         face_inner = _line_intersection(
             front.nominal_face[0], front.direction,
-            finish_origin, finish_direction)
+            front_trim_origin, front_trim_direction)
         riser_polygon = _deduplicate((face_inner, front.nominal_face[1],
                                       riser_back[1], riser_back[0]))
         if len(riser_polygon) < 3 or polygon_area(riser_polygon) <= EPS_AREA:
@@ -669,7 +685,12 @@ def resolve_physical_winder_plans(frame, cells, ascent_direction,
             cell.index, polygon, front_edge, rear_edge, inner_miter,
             inner_front, inner_rear, (inner_front, inner_rear), inner_trim,
             front, rear, riser_polygon, riser_back))
-    return tuple(plans)
+    transitions = tuple(segment for segment in (
+        (plans[0].inner_front, plans[0].inner_rear),
+        (plans[-1].inner_front, plans[-1].inner_rear))
+        if math.dist(*segment) > EPS_LENGTH)
+    revised = replace(inner_trim, transition_segments=transitions)
+    return tuple(replace(plan, inner_trim=revised) for plan in plans)
 
 
 def allocate_straight_events(runs, overall_riser_count, landing_count,
@@ -1160,6 +1181,180 @@ def build_winder_fragments(layout):
     return fragments
 
 
+def winder_tread_tops(layout):
+    """Return destination tread-top Zs keyed by canonical Turn index.
+
+    The walk is ascent-local, while the result remains keyed to persistent
+    canonical Turn identity.  This is also the Stage-3 REVERSE authority.
+    """
+    components = []
+    for index, count in enumerate(layout.straight_allocation):
+        components.append(("STRAIGHT", index, count))
+        if index < len(layout.turn_specs):
+            components.append((layout.turn_specs[index].turn_mode, index,
+                               (layout.winder_counts[index]
+                                if layout.turn_specs[index].turn_mode == TURN_WINDER
+                                else 1)))
+    if layout.ascent_direction == "REVERSE":
+        components.reverse()
+    counter = 0
+    result = {index: [] for index in range(len(layout.turn_specs))}
+    for kind, index, count in components:
+        if kind == "STRAIGHT":
+            counter += count
+        elif kind == TURN_LANDING:
+            counter += 1
+        else:
+            for _ in range(count):
+                counter += 1
+                result[index].append(layout.base_z + counter * layout.actual_riser)
+    return tuple(tuple(result[index]) for index in range(len(layout.turn_specs)))
+
+
+def build_winder_finish_fragments(layout, fields):
+    """Build schema-5 Stage-3 body after all top geometry has resolved."""
+    from .stair_residential import (
+        STEPPED_CLOSED, validate_nosing_board_compatibility,
+        validate_side_board_reveal, validate_stepped_closure_depth,
+        validate_stepped_underbody_thickness,
+    )
+    from .stair_winder_finish import (
+        build_shared_profile_component, build_winder_side_board_fragments,
+        compact_center_side, compact_contributor_authority,
+        compact_grouped_height,
+        exact_rectangle_union_components, rectangle_component_boundaries,
+        side_enabled,
+        build_sloped_underbody_fragments,
+        build_stepped_underbody_fragments,
+        resolve_sloped_stations, resolve_stepped_underbody, stepped_patch_z,
+    )
+    if fields is None:
+        return ()
+    positive_goings = [run / count for run, count in
+                       zip(layout.straight_runs, layout.straight_allocation)
+                       if count and run > EPS_LENGTH]
+    going = min(positive_goings or (layout.actual_riser,))
+    depth = validate_stepped_closure_depth(fields, layout.actual_riser, going)
+    validate_stepped_underbody_thickness(
+        fields, layout.actual_riser, layout.tread_thickness,
+        layout.riser_thickness)
+    validate_nosing_board_compatibility(
+        fields, going, layout.tread_thickness, layout.actual_riser)
+    reveal = (validate_side_board_reveal(
+        fields, layout.actual_riser, going)
+        if fields.left_side_board_enabled or fields.right_side_board_enabled
+        else float(fields.side_board_reveal_mm) / _MM_PER_METRE)
+    board_thickness = float(fields.side_board_thickness_mm) / _MM_PER_METRE
+    tops = winder_tread_tops(layout)
+    grouped = {}
+    grouped_middle = None
+    if (fields.underside_mode != STEPPED_CLOSED
+            and layout.u_classification == "COMPACT_U"
+            and layout.straight_allocation[1] == 0
+            and all(spec.turn_mode == TURN_WINDER
+                    for spec in layout.turn_specs)):
+        order = ([0, 1] if layout.ascent_direction == "FORWARD" else [1, 0])
+        first, second = order
+        a = stepped_patch_z(tops[first][0], depth, layout.base_z)
+        b = stepped_patch_z(tops[second][-1], depth, layout.base_z)
+        middle = compact_grouped_height(
+            a, b, layout.winder_counts[first], layout.winder_counts[second])
+        if layout.ascent_direction == "FORWARD":
+            grouped[first] = (None, middle); grouped[second] = (middle, None)
+        else:
+            grouped[first] = (middle, None); grouped[second] = (None, middle)
+        grouped_middle = middle
+    result = []
+    turn_finish = {}
+    for turn_index, (spec, cells) in enumerate(zip(layout.turn_specs,
+                                                   layout.turn_cells)):
+        if spec.turn_mode != TURN_WINDER:
+            continue
+        ascent_tops = tops[turn_index]
+        turn_tops = (ascent_tops if layout.ascent_direction == "FORWARD"
+                     else tuple(reversed(ascent_tops)))
+        if fields.underside_mode == STEPPED_CLOSED:
+            plans = resolve_stepped_underbody(
+                cells, turn_tops, depth, layout.base_z,
+                turn_index=turn_index, tread_thickness=layout.tread_thickness)
+            result.extend(build_stepped_underbody_fragments(
+                plans, 10000 + turn_index * 100))
+            _relief, stations = resolve_sloped_stations(
+                layout.turns[turn_index], cells,
+                plans[0].visible_z, plans[-1].visible_z,
+                layout.riser_thickness)
+            lower = []
+            for station in stations:
+                fraction = min(station.fraction, 1.0 - 1e-12)
+                index = next(i for i, cell in enumerate(cells)
+                             if cell.front_fraction - 1e-9 <= fraction
+                             <= cell.rear_fraction + 1e-9)
+                lower.append(plans[index].visible_z)
+        else:
+            z_entry, z_exit = grouped.get(turn_index, (None, None))
+            fragments, _relief, stations, _closure = (
+                build_sloped_underbody_fragments(
+                    layout.turns[turn_index], cells, turn_tops, depth,
+                    layout.base_z, layout.riser_thickness,
+                    layout.tread_thickness, 11000 + turn_index * 100,
+                    z_entry=z_entry, z_exit=z_exit))
+            result.extend(fragments)
+            lower = [station.z for station in stations]
+        turn_finish[turn_index] = (stations, tuple(lower), turn_tops)
+        for side, enabled in (("LEFT", fields.left_side_board_enabled),
+                              ("RIGHT", fields.right_side_board_enabled)):
+            if enabled:
+                result.extend(build_winder_side_board_fragments(
+                    layout.turns[turn_index], cells, turn_tops, stations,
+                    lower, side, layout.ascent_direction, board_thickness,
+                    reveal, fields.side_board_mode,
+                    12000 + turn_index * 1000 + (0 if side == "LEFT" else 500)))
+    if layout.u_classification == "COMPACT_U" and layout.shared_interface:
+        seam_length = math.hypot(*_sub(layout.shared_interface[1],
+                                       layout.shared_interface[0]))
+        contributors = []
+        for turn_index, frame in enumerate(layout.turns):
+            center_side = compact_center_side(frame, layout.ascent_direction)
+            if not side_enabled(fields, center_side):
+                continue
+            stations, lower, turn_tops = turn_finish[turn_index]
+            station_index = (-1 if turn_index == 0 else 0)
+            lower_z = lower[station_index]
+            walking_index = (-1 if station_index == -1 else 0)
+            authority=compact_contributor_authority(
+                seam_length,lower_z,turn_tops[walking_index],reveal)
+            contributors.append((authority.s_start,authority.s_end,
+                                 authority.lower_start,
+                                 authority.upper_start))
+        ordinal = 14000
+        for component in exact_rectangle_union_components(contributors):
+            for profile in rectangle_component_boundaries(component):
+                result.append(build_shared_profile_component(
+                    layout.shared_interface, profile, board_thickness, ordinal))
+                ordinal += 1
+        # Specification 24.5: both ordinary board families consume the same
+        # vertical endpoint planes as the shared board.  Convex board pieces
+        # are clipped and capped before the shared family is assembled.
+        from .stair_winder_finish import clip_fragment_to_vertical_plane
+        seam_start,seam_end=layout.shared_interface
+        tangent,_length=_unit(_sub(seam_end,seam_start))
+        joined=[]
+        for part in result:
+            if part.part_type!="SIDE_BOARD":
+                joined.append(part); continue
+            if part.ordinal>=14000:
+                continue
+            clipped=clip_fragment_to_vertical_plane(
+                part,seam_start,tangent,True)
+            if clipped is not None:
+                clipped=clip_fragment_to_vertical_plane(
+                    clipped,seam_end,tangent,False)
+            if clipped is not None: joined.append(clipped)
+        result=joined+[part for part in result
+                       if part.part_type=="SIDE_BOARD" and part.ordinal>=14000]
+    return tuple(result)
+
+
 def prepare_winder_geometry(points, ascent_direction, base_z_mm,
                             floor_to_floor_mm, riser_count, stair_width_mm,
                             tread_thickness_mm, riser_thickness_mm, *,
@@ -1174,6 +1369,40 @@ def prepare_winder_geometry(points, ascent_direction, base_z_mm,
         turn_mode=turn_mode, turn_specs=turn_specs,
         allocation=allocation, **finish)
     fragments = build_winder_fragments(layout)
+    fields = finish.get("residential_fields")
+    if finish.get("assembly_mode") == "STANDARD_RESIDENTIAL":
+        finish_fragments = build_winder_finish_fragments(layout, fields)
+        if layout.u_classification == "COMPACT_U":
+            from .stair_winder_finish import trim_prism_fragment_against_shared_board
+            shared = tuple(part for part in finish_fragments
+                           if 14000 <= part.ordinal < 14100)
+            candidates = fragments + tuple(part for part in finish_fragments
+                                            if part not in shared)
+            for board in shared:
+                z_min = min(vertex[2] for vertex in board.vertices)
+                z_max = max(vertex[2] for vertex in board.vertices)
+                seam_start, seam_end = layout.shared_interface
+                seam_direction, _ = _unit(_sub(seam_end, seam_start))
+                board_s = [_dot(_sub(vertex[:2], seam_start), seam_direction)
+                           for vertex in board.vertices]
+                resolved = []
+                for part in candidates:
+                    if part.part_type not in ("TREAD", "RISER", "UNDERBODY"):
+                        resolved.append(part); continue
+                    trimmed = trim_prism_fragment_against_shared_board(
+                        part, layout.shared_interface,
+                        float(fields.side_board_thickness_mm) / _MM_PER_METRE,
+                        z_min, z_max, min(board_s), max(board_s))
+                    if trimmed is None:
+                        continue
+                    resolved.extend(trimmed if isinstance(trimmed, tuple)
+                                    else (trimmed,))
+                candidates = tuple(resolved)
+            fragments = candidates + shared
+        else:
+            fragments += finish_fragments
+        from .stair_winder_finish import propagate_semantic_edge_splits
+        fragments = propagate_semantic_edge_splits(fragments)
     mesh = assemble_stair_mesh(fragments)
     return layout, fragments, StairMeshData(mesh.vertices, mesh.faces,
                                             mesh.face_roles)
