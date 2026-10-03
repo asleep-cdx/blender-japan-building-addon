@@ -618,6 +618,45 @@ def build_high_side_closure_fragment(frame, relief, z_entry, z_exit,
     return fragment
 
 
+def build_pivot_core_fragment(frame, stations, shell_thickness,
+                              ordinal=11999):
+    """Build one closed pivot core using every exact relief station P_k."""
+    stations=tuple(stations)
+    if len(stations)<2: raise ValueError("GEOMETRY_INVALID: pivot stations")
+    z0,zn=stations[0].z,stations[-1].z
+    low,high=min(z0,zn),max(z0,zn)
+    bottom=[(frame.inner_pivot[0],frame.inner_pivot[1],low)]
+    bottom.extend((s.inner[0],s.inner[1],s.z) for s in stations)
+    top=[(frame.inner_pivot[0],frame.inner_pivot[1],high)]
+    top.extend((s.inner[0],s.inner[1],s.z+shell_thickness) for s in stations)
+    vertices=tuple(bottom+top); count=len(bottom); faces=[]
+    for k in range(1,count-1):
+        faces.append((0,k+1,k))
+        faces.append((count,count+k,count+k+1))
+        faces.append((k,k+1,count+k+1,count+k))
+    # End sides. Split the high side so A_low/A_high/J_high is an explicit,
+    # uniquely owned semantic triangle.
+    high_index=1 if z0>=zn else count-1
+    low_index=count-1 if high_index==1 else 1
+    faces.append((0,low_index,count+low_index,count))
+    faces.append((0,count,high_index))
+    faces.append((high_index,count,count+high_index))
+    center=tuple(sum(v[i] for v in vertices)/len(vertices) for i in range(3))
+    oriented=[]
+    for face in faces:
+        a,b,c=(vertices[face[i]] for i in range(3))
+        ab=tuple(b[i]-a[i] for i in range(3));ac=tuple(c[i]-a[i] for i in range(3))
+        normal=(ab[1]*ac[2]-ab[2]*ac[1],ab[2]*ac[0]-ab[0]*ac[2],ab[0]*ac[1]-ab[1]*ac[0])
+        fc=tuple(sum(vertices[j][i] for j in face)/len(face) for i in range(3))
+        if sum(normal[i]*(fc[i]-center[i]) for i in range(3))<0:
+            face=tuple(reversed(face))
+        oriented.append(face)
+    faces=oriented
+    fragment=MeshFragment("UNDERBODY",ordinal,vertices,tuple(faces))
+    validate_mesh_fragments((fragment,))
+    return fragment
+
+
 def build_winder_side_board_fragments(frame, cells, tread_tops, stations,
                                       lower_zs, side, ascent_direction,
                                       thickness, reveal, mode,
@@ -722,8 +761,9 @@ def build_sloped_underbody_fragments(frame, cells, tread_tops, body_depth,
     # high_side_pivot_closure and its walls are part of this closed solid.
     # The finite tetrahedral core owns the high-side closure itself.  Do not
     # also emit the earlier overlapping triangular prism.
-    closure = build_high_side_closure_fragment(
-        frame, relief, z0, zn, ordinal_start + 99)
-    fragments.append(closure)
+    core=build_pivot_core_fragment(
+        frame,stations,min(float(body_depth),float(tread_thickness))/2.0,
+        ordinal_start+99)
+    fragments.append(core)
     return tuple(fragments), relief, stations, high_side_pivot_closure(
         frame, relief, z0, zn)

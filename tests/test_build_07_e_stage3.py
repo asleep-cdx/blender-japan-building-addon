@@ -18,6 +18,7 @@ from japanese_house_modeler.stair_turn import (
     winder_tread_tops, build_winder_finish_fragments,
 )
 from japanese_house_modeler.stair_residential import ResidentialFields
+from japanese_house_modeler.stair_geometry import _signed_volume, validate_mesh_fragments
 from japanese_house_modeler.stair_winder_finish import (
     butt_joint_plane, compact_grouped_height, divider_closure_indices,
     high_side_pivot_closure, pivot_relief, ray_relief_intersection,
@@ -190,7 +191,7 @@ class BoardAndIntegrationTests(unittest.TestCase):
         _x,parts,_m=prepare_winder_geometry(L,*BASE,point_ids=IDS,assembly_mode="STANDARD_RESIDENTIAL",residential_fields=fields)
         closure=[p for p in parts if p.part_type=="UNDERBODY" and p.ordinal==11099]
         self.assertEqual(len(closure),1)
-        self.assertEqual(len(closure[0].vertices),4)
+        self.assertGreater(len(closure[0].vertices),4)
         self.assertTrue(any(len(face)==3 for face in closure[0].faces))
 
     def test_47_compact_shared_board_trims_production_roles(self):
@@ -254,6 +255,12 @@ class BoardAndIntegrationTests(unittest.TestCase):
         self.assertTrue(any(abs(v[2]-.2)<1e-9 and .2<v[0]<.8 for v in vertices))
         self.assertTrue(any(abs(v[2]-.1)<1e-9 for v in vertices))
         self.assertTrue(all(p.part_type=="UNDERBODY" and len(p.faces)>=4 for p in pieces))
+        self.assertTrue(all(validate_mesh_fragments((p,)) for p in pieces))
+        retained=sum(_signed_volume(p.vertices,p.faces) for p in pieces)
+        self.assertAlmostEqual(retained,1.2-.231,places=9)
+        again=trim_prism_fragment_against_shared_board(
+            source,((0,0),(1,0)),1.0,.2,.6,.2,.8)
+        self.assertEqual(pieces,again)
 
     def test_52_compact_front_profiles_complete_with_center_board(self):
         specs=(TurnSpec("a","WINDER","EQUAL_3"),TurnSpec("b","WINDER","EQUAL_3"))
@@ -275,5 +282,19 @@ class BoardAndIntegrationTests(unittest.TestCase):
         for part in shared:
             zs=sorted(set(round(v[2],9) for v in part.vertices))
             self.assertEqual(len(zs),2)
+
+    def test_54_pivot_core_reuses_all_relief_station_xyz(self):
+        for degrees in (90,63):
+            angle=math.radians(degrees); points=((0,0),(0,2.2),(-2.2*math.sin(angle),2.2+2.2*math.cos(angle)))
+            fields=ResidentialFields(underside_mode="SLOPED_CLOSED",left_side_board_enabled=False,right_side_board_enabled=False)
+            resolved=resolve_winder_layout(points,*BASE,point_ids=IDS)
+            tops=winder_tread_tops(resolved)[0]
+            _relief,stations=resolve_sloped_stations(resolved.turn,resolved.cells,max(0,tops[0]-.15),max(0,tops[-1]-.15),resolved.riser_thickness)
+            _x,parts,_m=prepare_winder_geometry(points,*BASE,point_ids=IDS,assembly_mode="STANDARD_RESIDENTIAL",residential_fields=fields)
+            core=next(p for p in parts if p.ordinal==11099)
+            vertices=set(core.vertices)
+            expected={(s.inner[0],s.inner[1],s.z) for s in stations}
+            self.assertTrue(expected.issubset(vertices))
+            self.assertGreaterEqual(sum(len(face)==3 for face in core.faces),len(stations))
 
 if __name__ == "__main__": unittest.main()
