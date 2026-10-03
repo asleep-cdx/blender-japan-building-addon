@@ -384,6 +384,23 @@ def _variable_prism(polygon, bottom, top, role, ordinal):
     faces = ([(0, i + 1, i) for i in range(1, n - 1)]
              + [(n, n + i, n + i + 1) for i in range(1, n - 1)])
     faces += [(i, (i+1)%n, (i+1)%n+n, i+n) for i in range(n)]
+    # Horizontal clipping may make top and bottom meet on a contour. Collapse
+    # those exact 3D vertices and discard only the resulting zero-area faces.
+    unique=[]; remap={}
+    for index,vertex in enumerate(vertices):
+        target=next((i for i,item in enumerate(unique)
+                     if math.dist(vertex,item)<=1e-12),None)
+        if target is None: target=len(unique);unique.append(vertex)
+        remap[index]=target
+    cleaned=[]
+    for face in faces:
+        mapped=[]
+        for index in face:
+            value=remap[index]
+            if not mapped or mapped[-1]!=value: mapped.append(value)
+        if len(mapped)>1 and mapped[0]==mapped[-1]: mapped.pop()
+        if len(set(mapped))>=3: cleaned.append(tuple(mapped))
+    vertices,faces=tuple(unique),cleaned
     if _signed_volume(vertices, faces) < 0.0:
         faces = [tuple(reversed(face)) for face in faces]
     fragment = MeshFragment(role, ordinal, vertices, tuple(faces))
@@ -536,16 +553,50 @@ def trim_prism_fragment_against_shared_board(fragment, shared_interface,
             fragment.part_type, fragment.ordinal))
     center=list(_deduplicate(center))
     if len(center)>=3:
-        bottoms=tuple(source_z(point,source_bottom) for point in center)
-        tops=tuple(source_z(point,source_top) for point in center)
-        if all(value < z_min-EPS_LENGTH for value in bottoms):
-            pieces.append(_variable_prism(
-                tuple(center), bottoms, tuple(min(z_min,t) for t in tops),
-                fragment.part_type, fragment.ordinal))
-        if all(value > z_max+EPS_LENGTH for value in tops):
-            pieces.append(_variable_prism(
-                tuple(center), tuple(max(z_max,b) for b in bottoms), tops,
-                fragment.part_type, fragment.ordinal))
+        def contour(poly, values, bound, keep_below):
+            out=[]
+            for a,b in zip(poly,poly[1:]+poly[:1]):
+                va,vb=values(a),values(b)
+                da=(bound-va) if keep_below else (va-bound)
+                db=(bound-vb) if keep_below else (vb-bound)
+                ia,ib=da>=-EPS_LENGTH,db>=-EPS_LENGTH
+                if ia: out.append(a)
+                if ia != ib:
+                    t=da/(da-db)
+                    out.append((a[0]+t*(b[0]-a[0]),a[1]+t*(b[1]-a[1])))
+            return list(_deduplicate(out))
+        bottom_at=lambda p:source_z(p,source_bottom)
+        top_at=lambda p:source_z(p,source_top)
+        # Triangulation makes both source Z fields linear on every clipping
+        # domain, so z=z_min/z_max contours are exact straight segments.
+        for index in range(1,len(center)-1):
+            triangle=[center[0],center[index],center[index+1]]
+            lower_domain=contour(triangle,bottom_at,z_min,True)
+            lower_native=contour(lower_domain,top_at,z_min,True) if lower_domain else []
+            lower_cap=contour(lower_domain,top_at,z_min,False) if lower_domain else []
+            for poly,use_cap in ((lower_native,False),(lower_cap,True)):
+                if len(poly)>=3:
+                    bottoms=tuple(bottom_at(p) for p in poly)
+                    tops=(tuple(z_min for _ in poly) if use_cap
+                          else tuple(top_at(p) for p in poly))
+                    if all(t-b>=-EPS_LENGTH for b,t in zip(bottoms,tops)) \
+                            and any(t-b>EPS_LENGTH for b,t in zip(bottoms,tops)):
+                        pieces.append(_variable_prism(
+                            tuple(poly),bottoms,tops,
+                            fragment.part_type,fragment.ordinal))
+            upper_domain=contour(triangle,top_at,z_max,False)
+            upper_native=contour(upper_domain,bottom_at,z_max,False) if upper_domain else []
+            upper_cap=contour(upper_domain,bottom_at,z_max,True) if upper_domain else []
+            for poly,use_cap in ((upper_native,False),(upper_cap,True)):
+                if len(poly)>=3:
+                    bottoms=(tuple(bottom_at(p) for p in poly) if not use_cap
+                             else tuple(z_max for _ in poly))
+                    tops=tuple(top_at(p) for p in poly)
+                    if all(t-b>=-EPS_LENGTH for b,t in zip(bottoms,tops)) \
+                            and any(t-b>EPS_LENGTH for b,t in zip(bottoms,tops)):
+                        pieces.append(_variable_prism(
+                            tuple(poly),bottoms,tops,
+                            fragment.part_type,fragment.ordinal))
     return tuple(pieces)
 
 

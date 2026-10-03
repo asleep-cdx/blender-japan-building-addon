@@ -26,6 +26,7 @@ from japanese_house_modeler.stair_winder_finish import (
     subtract_box_intersection, symmetric_board_component,
     union_profile_rectangles, world_side_for_uphill,
     exact_rectangle_union_components, rectangle_component_boundaries,
+    _variable_prism, trim_prism_fragment_against_shared_board,
 )
 
 L=((0,0),(0,2.2),(-2.2,2.2)); IDS=("p0","t","p2")
@@ -241,5 +242,38 @@ class BoardAndIntegrationTests(unittest.TestCase):
                 matches=zs & output[key]
                 retained+=len(matches)
         self.assertGreater(retained,0)
+
+    def test_51_mixed_z_contour_keeps_partial_capped_remnant(self):
+        source=_variable_prism(((0,-1),(1,-1),(1,1),(0,1)),
+                               (.1,.3,.3,.1),(.8,.8,.8,.8),
+                               "UNDERBODY",77)
+        pieces=trim_prism_fragment_against_shared_board(
+            source,((0,0),(1,0)),1.0,.2,.6,.2,.8)
+        self.assertGreater(len(pieces),0)
+        vertices=[v for p in pieces for v in p.vertices]
+        self.assertTrue(any(abs(v[2]-.2)<1e-9 and .2<v[0]<.8 for v in vertices))
+        self.assertTrue(any(abs(v[2]-.1)<1e-9 for v in vertices))
+        self.assertTrue(all(p.part_type=="UNDERBODY" and len(p.faces)>=4 for p in pieces))
+
+    def test_52_compact_front_profiles_complete_with_center_board(self):
+        specs=(TurnSpec("a","WINDER","EQUAL_3"),TurnSpec("b","WINDER","EQUAL_3"))
+        for mode in ("SQUARE","BEVEL","ROUND"):
+            fields=ResidentialFields(underside_mode="SLOPED_CLOSED",side_board_mode="SLOPED",tread_front_overhang_mm=5,tread_front_edge_mode=mode,tread_front_edge_size_mm=2)
+            _x,parts,mesh=prepare_winder_geometry(U,"FORWARD",0,2800,17,750,30,20,point_ids=UIDS,turn_specs=specs,assembly_mode="STANDARD_RESIDENTIAL",residential_fields=fields,tread_front_overhang_mm=5,tread_front_edge_mode=mode,tread_front_edge_size_mm=2)
+            self.assertIn("SIDE_BOARD",mesh.face_roles)
+            self.assertTrue(all(len(p.faces)>=4 for p in parts))
+
+    def test_53_compact_terminal_profiles_are_constant_cross_sections(self):
+        specs=(TurnSpec("a","WINDER","EQUAL_3"),TurnSpec("b","WINDER","EQUAL_3"))
+        fields=ResidentialFields(underside_mode="SLOPED_CLOSED",side_board_mode="SLOPED")
+        resolved=resolve_winder_layout(U,"FORWARD",0,2800,17,750,30,20,point_ids=UIDS,turn_specs=specs)
+        parts=build_winder_finish_fragments(resolved,fields)
+        shared=[p for p in parts if 14000<=p.ordinal<14100]
+        self.assertTrue(shared)
+        # Supported contributors span the whole reconciled cross-section and
+        # have one lower/upper Z at each terminal, so holes are unreachable.
+        for part in shared:
+            zs=sorted(set(round(v[2],9) for v in part.vertices))
+            self.assertEqual(len(zs),2)
 
 if __name__ == "__main__": unittest.main()
