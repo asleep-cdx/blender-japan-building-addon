@@ -1160,6 +1160,70 @@ def build_winder_fragments(layout):
     return fragments
 
 
+def winder_tread_tops(layout):
+    """Return destination tread-top Zs keyed by canonical Turn index.
+
+    The walk is ascent-local, while the result remains keyed to persistent
+    canonical Turn identity.  This is also the Stage-3 REVERSE authority.
+    """
+    components = []
+    for index, count in enumerate(layout.straight_allocation):
+        components.append(("STRAIGHT", index, count))
+        if index < len(layout.turn_specs):
+            components.append((layout.turn_specs[index].turn_mode, index,
+                               (layout.winder_counts[index]
+                                if layout.turn_specs[index].turn_mode == TURN_WINDER
+                                else 1)))
+    if layout.ascent_direction == "REVERSE":
+        components.reverse()
+    counter = 0
+    result = {index: [] for index in range(len(layout.turn_specs))}
+    for kind, index, count in components:
+        if kind == "STRAIGHT":
+            counter += count
+        elif kind == TURN_LANDING:
+            counter += 1
+        else:
+            for _ in range(count):
+                counter += 1
+                result[index].append(layout.base_z + counter * layout.actual_riser)
+    return tuple(tuple(result[index]) for index in range(len(layout.turn_specs)))
+
+
+def build_winder_finish_fragments(layout, fields):
+    """Build schema-5 Stage-3 body after all top geometry has resolved."""
+    from .stair_residential import STEPPED_CLOSED
+    from .stair_winder_finish import (
+        build_sloped_underbody_fragments,
+        build_stepped_underbody_fragments,
+        resolve_stepped_underbody,
+    )
+    if fields is None:
+        return ()
+    depth = float(fields.side_board_band_width_mm) / _MM_PER_METRE
+    tops = winder_tread_tops(layout)
+    result = []
+    for turn_index, (spec, cells) in enumerate(zip(layout.turn_specs,
+                                                   layout.turn_cells)):
+        if spec.turn_mode != TURN_WINDER:
+            continue
+        turn_tops = tops[turn_index]
+        if fields.underside_mode == STEPPED_CLOSED:
+            plans = resolve_stepped_underbody(
+                cells, turn_tops, depth, layout.base_z,
+                turn_index=turn_index, tread_thickness=layout.tread_thickness)
+            result.extend(build_stepped_underbody_fragments(
+                plans, 10000 + turn_index * 100))
+        else:
+            fragments, _relief, _stations, _closure = (
+                build_sloped_underbody_fragments(
+                    layout.turns[turn_index], cells, turn_tops, depth,
+                    layout.base_z, layout.riser_thickness,
+                    layout.tread_thickness, 11000 + turn_index * 100))
+            result.extend(fragments)
+    return tuple(result)
+
+
 def prepare_winder_geometry(points, ascent_direction, base_z_mm,
                             floor_to_floor_mm, riser_count, stair_width_mm,
                             tread_thickness_mm, riser_thickness_mm, *,
@@ -1174,6 +1238,9 @@ def prepare_winder_geometry(points, ascent_direction, base_z_mm,
         turn_mode=turn_mode, turn_specs=turn_specs,
         allocation=allocation, **finish)
     fragments = build_winder_fragments(layout)
+    fields = finish.get("residential_fields")
+    if finish.get("assembly_mode") == "STANDARD_RESIDENTIAL":
+        fragments += build_winder_finish_fragments(layout, fields)
     mesh = assemble_stair_mesh(fragments)
     return layout, fragments, StairMeshData(mesh.vertices, mesh.faces,
                                             mesh.face_roles)
