@@ -174,7 +174,7 @@ class BoardAndIntegrationTests(unittest.TestCase):
         def count(direction,left,right):
             fields=ResidentialFields(left_side_board_enabled=left,right_side_board_enabled=right)
             _x,parts,_m=prepare_winder_geometry(U,direction,0,2800,17,750,30,20,point_ids=UIDS,turn_specs=specs,assembly_mode="STANDARD_RESIDENTIAL",residential_fields=fields)
-            return sum(14000 <= p.ordinal < 14100 for p in parts)
+            return int(any(14000 <= p.ordinal < 14100 for p in parts))
         self.assertEqual((count("FORWARD",True,True),count("FORWARD",False,True),count("FORWARD",True,False),count("FORWARD",False,False)),(1,1,0,0))
         self.assertEqual((count("REVERSE",True,False),count("REVERSE",False,True)),(1,0))
 

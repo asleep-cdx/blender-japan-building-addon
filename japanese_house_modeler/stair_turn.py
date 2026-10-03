@@ -1199,8 +1199,8 @@ def build_winder_finish_fragments(layout, fields):
     )
     from .stair_winder_finish import (
         build_shared_profile_component, build_winder_side_board_fragments,
-        compact_center_side, compact_grouped_height, side_enabled,
-        union_profile_rectangles,
+        compact_center_side, compact_grouped_height,
+        exact_rectangle_union_components, side_enabled,
         build_sloped_underbody_fragments,
         build_stepped_underbody_fragments,
         resolve_sloped_stations, resolve_stepped_underbody, stepped_patch_z,
@@ -1301,13 +1301,12 @@ def build_winder_finish_fragments(layout, fields):
             upper_z = turn_tops[walking_index] + reveal
             contributors.append((0.0, seam_length, lower_z, upper_z))
         ordinal = 14000
-        for group in union_profile_rectangles(contributors):
-            s0 = min(rect[0] for rect in group); s1 = max(rect[1] for rect in group)
-            z0 = min(rect[2] for rect in group); z1 = max(rect[3] for rect in group)
-            profile = ((s0, z0), (s1, z0), (s1, z1), (s0, z1))
-            result.append(build_shared_profile_component(
-                layout.shared_interface, profile, board_thickness, ordinal))
-            ordinal += 1
+        for component in exact_rectangle_union_components(contributors):
+            for s0, s1, z0, z1 in component:
+                profile = ((s0, z0), (s1, z0), (s1, z1), (s0, z1))
+                result.append(build_shared_profile_component(
+                    layout.shared_interface, profile, board_thickness, ordinal))
+                ordinal += 1
     return tuple(result)
 
 
@@ -1337,6 +1336,10 @@ def prepare_winder_geometry(points, ascent_direction, base_z_mm,
             for board in shared:
                 z_min = min(vertex[2] for vertex in board.vertices)
                 z_max = max(vertex[2] for vertex in board.vertices)
+                seam_start, seam_end = layout.shared_interface
+                seam_direction, _ = _unit(_sub(seam_end, seam_start))
+                board_s = [_dot(_sub(vertex[:2], seam_start), seam_direction)
+                           for vertex in board.vertices]
                 resolved = []
                 for part in candidates:
                     if part.part_type not in ("TREAD", "RISER", "UNDERBODY"):
@@ -1344,7 +1347,7 @@ def prepare_winder_geometry(points, ascent_direction, base_z_mm,
                     trimmed = trim_prism_fragment_against_shared_board(
                         part, layout.shared_interface,
                         float(fields.side_board_thickness_mm) / _MM_PER_METRE,
-                        z_min, z_max)
+                        z_min, z_max, min(board_s), max(board_s))
                     if trimmed is None:
                         continue
                     resolved.extend(trimmed if isinstance(trimmed, tuple)

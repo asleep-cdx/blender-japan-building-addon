@@ -230,6 +230,42 @@ def union_profile_rectangles(rectangles, eps=1.0e-9):
     return tuple(tuple(group) for _, group in sorted(groups.items()))
 
 
+def exact_rectangle_union_components(rectangles, eps=1.0e-9):
+    """Return exact, disjoint rectangles for each edge-connected union.
+
+    Grid decomposition preserves every absent L-shaped region.  Cells touching
+    at a point are deliberately assigned to different components.
+    """
+    rects = tuple(tuple(map(float, rectangle)) for rectangle in rectangles)
+    if not rects:
+        return ()
+    xs = sorted({value for r in rects for value in r[:2]})
+    zs = sorted({value for r in rects for value in r[2:]})
+    cells = []
+    for x0, x1 in zip(xs, xs[1:]):
+        for z0, z1 in zip(zs, zs[1:]):
+            if x1-x0 <= eps or z1-z0 <= eps: continue
+            cx, cz = (x0+x1)/2.0, (z0+z1)/2.0
+            if any(r[0]-eps <= cx <= r[1]+eps and
+                   r[2]-eps <= cz <= r[3]+eps for r in rects):
+                cells.append((x0,x1,z0,z1))
+    parent = list(range(len(cells)))
+    def root(i):
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]; i = parent[i]
+        return i
+    for i, a in enumerate(cells):
+        for j, b in enumerate(cells[:i]):
+            vertical = (abs(a[1]-b[0]) <= eps or abs(b[1]-a[0]) <= eps) \
+                and min(a[3],b[3])-max(a[2],b[2]) > eps
+            horizontal = (abs(a[3]-b[2]) <= eps or abs(b[3]-a[2]) <= eps) \
+                and min(a[1],b[1])-max(a[0],b[0]) > eps
+            if vertical or horizontal: parent[root(i)] = root(j)
+    groups = {}
+    for i, cell in enumerate(cells): groups.setdefault(root(i), []).append(cell)
+    return tuple(tuple(group) for _, group in sorted(groups.items()))
+
+
 def symmetric_board_component(polygon, thickness):
     half = float(thickness) / 2.0
     if half <= 0.0: raise ValueError("GEOMETRY_INVALID: board thickness")
@@ -373,7 +409,8 @@ def build_shared_profile_component(shared_interface, profile, thickness,
 
 
 def trim_prism_fragment_against_shared_board(fragment, shared_interface,
-                                             thickness, z_min, z_max):
+                                             thickness, z_min, z_max,
+                                             s_min=0.0, s_max=None):
     """Clip a constant-height production prism outside the shared board strip.
 
     Non-prismatic/profiled parts and partial-height intersections are retained
@@ -394,42 +431,61 @@ def trim_prism_fragment_against_shared_board(fragment, shared_interface,
     # A partial-height intersection must not erase the full strip. Split the
     # vertical ranges into capped prisms and clip only the overlapping range.
     start, end = shared_interface
-    tangent, _ = _unit(_sub(end, start), "shared center seam")
+    tangent, seam_length = _unit(_sub(end, start), "shared center seam")
+    if s_max is None: s_max = seam_length
     normal = (-tangent[1], tangent[0]); half = float(thickness) / 2.0
     polygon = tuple(vertex[:2] for vertex in vertices[:n])
-    centroid_v = sum(_dot(_sub(point, start), normal) for point in polygon) / n
-    sign = 1.0 if centroid_v >= 0.0 else -1.0
-    limit = half
-    def distance(point): return sign * _dot(_sub(point, start), normal) - limit
-    clipped = []
-    for a, b in zip(polygon, polygon[1:] + polygon[:1]):
-        da, db = distance(a), distance(b)
-        inside_a, inside_b = da >= -EPS_LENGTH, db >= -EPS_LENGTH
-        if inside_a: clipped.append(a)
-        if inside_a != inside_b:
-            ratio = da / (da - db)
-            clipped.append((a[0] + ratio * (b[0] - a[0]),
-                            a[1] + ratio * (b[1] - a[1])))
-    clipped = list(_deduplicate(clipped))
-    changed = True
-    while changed and len(clipped) > 3:
-        changed = False
-        for index in range(len(clipped)):
-            a, b, c = (clipped[index - 1], clipped[index],
-                       clipped[(index + 1) % len(clipped)])
-            if abs(_cross(_sub(b, a), _sub(c, b))) <= 1e-12:
-                del clipped[index]; changed = True; break
-    if len(clipped) < 3:
-        return None
+    def clip(poly, value, bound, keep_greater):
+        out=[]
+        for a,b in zip(poly,poly[1:]+poly[:1]):
+            da=(value(a)-bound)*(1 if keep_greater else -1)
+            db=(value(b)-bound)*(1 if keep_greater else -1)
+            ia,ib=da>=-EPS_LENGTH,db>=-EPS_LENGTH
+            if ia: out.append(a)
+            if ia != ib:
+                ratio=da/(da-db)
+                out.append((a[0]+ratio*(b[0]-a[0]),a[1]+ratio*(b[1]-a[1])))
+        return list(_deduplicate(out))
+    sval=lambda p:_dot(_sub(p,start),tangent)
+    vval=lambda p:_dot(_sub(p,start),normal)
+    middle=clip(list(polygon),sval,float(s_min),True)
+    middle=clip(middle,sval,float(s_max),False) if middle else []
+    plan_pieces=[]
+    before=clip(list(polygon),sval,float(s_min),False)
+    after=clip(list(polygon),sval,float(s_max),True)
+    negative=clip(middle,vval,-half,False) if middle else []
+    positive=clip(middle,vval,half,True) if middle else []
+    for candidate in (before,negative,positive,after):
+        cleaned=[]
+        for point in candidate:
+            if not cleaned or math.dist(point,cleaned[-1])>EPS_LENGTH:
+                cleaned.append(point)
+        if len(cleaned)>1 and math.dist(cleaned[0],cleaned[-1])<=EPS_LENGTH:
+            cleaned.pop()
+        candidate=cleaned
+        changed=True
+        while changed and len(candidate)>3:
+            changed=False
+            for index in range(len(candidate)):
+                a,b,c=candidate[index-1],candidate[index],candidate[(index+1)%len(candidate)]
+                if abs(_cross(_sub(b,a),_sub(c,b)))<=1e-12:
+                    del candidate[index];changed=True;break
+        area=abs(sum(candidate[i][0]*candidate[(i+1)%len(candidate)][1]
+                     -candidate[(i+1)%len(candidate)][0]*candidate[i][1]
+                     for i in range(len(candidate)))/2.0) if len(candidate)>=3 else 0.0
+        if len(candidate)>=3 and area>EPS_LENGTH*EPS_LENGTH:
+            plan_pieces.append(tuple(candidate))
+    if not plan_pieces: return None
     overlap_low, overlap_high = max(bottom, z_min), min(top, z_max)
     pieces = []
     if bottom < overlap_low - EPS_LENGTH:
         pieces.append(_variable_prism(polygon, (bottom,)*n,
                                       (overlap_low,)*n,
                                       fragment.part_type, fragment.ordinal))
-    pieces.append(_variable_prism(
-        tuple(clipped), (overlap_low,)*len(clipped),
-        (overlap_high,)*len(clipped), fragment.part_type, fragment.ordinal))
+    for plan in plan_pieces:
+        pieces.append(_variable_prism(
+            plan, (overlap_low,)*len(plan), (overlap_high,)*len(plan),
+            fragment.part_type, fragment.ordinal))
     if overlap_high < top - EPS_LENGTH:
         pieces.append(_variable_prism(polygon, (overlap_high,)*n, (top,)*n,
                                       fragment.part_type, fragment.ordinal))
