@@ -19,8 +19,10 @@ from japanese_house_modeler.stair_landing_finish import (
 )
 from japanese_house_modeler.stair_body_interfaces import (
     ResidentialBodyComponent, _canonical_values, _snap, body_port,
+    join_body_component_surfaces, port_surface_ownership,
     resolve_body_interface,
 )
+from japanese_house_modeler.stair_geometry import MeshFragment
 from japanese_house_modeler.stair_turn import EPS_LENGTH
 from japanese_house_modeler.stair_turn import (
     TurnSpec, polygon_area, resolve_winder_layout, TURN_LANDING, WINDER_NONE,
@@ -459,6 +461,34 @@ class GeneralizedLandingFinishTests(unittest.TestCase):
     def test_snap_failure_is_geometry_invalid(self):
         with self.assertRaisesRegex(ValueError,"GEOMETRY_INVALID"):
             _snap(2.0,(0.0,1.0))
+
+    def test_production_surface_join_consumes_body_interface(self):
+        faces=((0,3,2,1),(4,5,6,7),(0,1,5,4),(1,2,6,5),
+               (2,3,7,6),(3,0,4,7))
+        def box(x0,x1,z1,ordinal):
+            vertices=((x0,0,0),(x1,0,0),(x1,1,0),(x0,1,0),
+                      (x0,0,z1),(x1,0,z1),(x1,1,z1),(x0,1,z1))
+            return MeshFragment("UNDERBODY",ordinal,vertices,faces)
+        seam=((0,0),(0,1))
+        low=body_port("EXIT",seam,((0,0),(1,0),(1,1),(0,1)))
+        high=body_port("ENTRY",seam,((0,0),(1,0),(1,2),(0,2)))
+        source=ResidentialBodyComponent(("STRAIGHT",0),"STRAIGHT_FLIGHT",0,
+                                        None,(box(-1,0,1,1),),None,low)
+        destination=ResidentialBodyComponent(("WINDER",0),"WINDER",1,None,
+                                             (box(0,1,2,2),),high,None)
+        self.assertTrue(port_surface_ownership(source,"EXIT").face_indices)
+        self.assertTrue(port_surface_ownership(destination,"ENTRY").face_indices)
+        joined=join_body_component_surfaces((source,destination),(seam,))
+        self.assertTrue(validate_mesh_fragments((joined.fragment,)))
+        interface=joined.interfaces[0]
+        self.assertEqual(interface.closure_owner,destination.identity)
+        self.assertAlmostEqual(sum((q1-q0)*(z1-z0)
+            for q0,q1,z0,z1 in interface.transition_cells),1.0)
+        self.assertEqual(joined.transition_owners,(destination.identity,))
+        # No positive-area cap remains over the common overlap z=[0,1].
+        coplanar=[face for face in joined.fragment.faces
+                  if all(abs(joined.fragment.vertices[i][0])<1e-12 for i in face)]
+        self.assertEqual(len(coplanar),1)
 
 
 if __name__=="__main__": unittest.main()
