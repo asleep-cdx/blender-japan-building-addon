@@ -15,6 +15,8 @@ class LandingBodyPort:
     soffit_edge: tuple
     contact_edge: tuple
     stations: tuple
+    profile_qz: tuple
+    profile_xyz: tuple
 
 
 @dataclass(frozen=True)
@@ -33,6 +35,9 @@ class GeneralizedLandingFinishAuthority:
     cavity: tuple
     skirt: tuple
     board_footprint: tuple
+    b_entry: object
+    b_exit: object
+    o_outer: object
     entry_port: LandingBodyPort
     exit_port: LandingBodyPort
     outside_side: str
@@ -112,6 +117,19 @@ def resolve_generalized_landing_finish(frame, width, z_top, base_z,
                                        underside_mode="STEPPED_CLOSED",
                                        ascent_direction="FORWARD"):
     """Resolve immutable non-right Landing plan/Z/port authority."""
+    dimensions=(width,tread_thickness,riser_thickness,body_depth)
+    if (underside_mode not in ("STEPPED_CLOSED","SLOPED_CLOSED")
+            or not all(math.isfinite(float(value)) and float(value)>0.0
+                       for value in dimensions)
+            or not math.isfinite(float(underside_thickness))
+            or (underside_mode=="SLOPED_CLOSED"
+                and float(underside_thickness)<=0.0)
+            or not math.isfinite(float(board_thickness))
+            or float(board_thickness)<0.0
+            or not math.isfinite(float(board_reveal))
+            or not math.isfinite(float(z_top))
+            or not math.isfinite(float(base_z))):
+        raise ValueError("GEOMETRY_INVALID: Landing finish authority")
     if ascent_direction not in ("FORWARD","REVERSE"):
         raise ValueError("GEOMETRY_INVALID: Landing ascent direction")
     entry_outer,exit_outer=(
@@ -134,7 +152,7 @@ def resolve_generalized_landing_finish(frame, width, z_top, base_z,
     cavity = validate_simple_polygon((i, a_entry, o_inner, a_exit))
     skirt = validate_simple_polygon(
         (entry, outer, exit_, a_exit, o_inner, a_entry))
-    board = ()
+    board = (); b_entry=b_exit=o_outer=None
     if float(board_thickness) > 0.0:
         b_entry, b_exit, o_outer = _offset_authority(
             semantic, float(board_thickness), outward=True)
@@ -153,14 +171,29 @@ def resolve_generalized_landing_finish(frame, width, z_top, base_z,
                    (end[0], end[1], z_contact))
         soffit = ((i[0], i[1], z_soffit),
                   (end[0], end[1], z_soffit))
-        stations = (i, breakpoint, end) if underside_mode == "SLOPED_CLOSED" else (i, end)
-        return LandingBodyPort(name, (i, end), soffit, contact, stations)
+        width_q=math.dist(i,end); q_a=math.dist(i,breakpoint)
+        if underside_mode == "SLOPED_CLOSED":
+            stations=(i,breakpoint,end)
+            profile=((0.0,z_soffit),(width_q,z_soffit),
+                     (width_q,z_contact),(q_a,z_contact),
+                     (q_a,z_slab_top),(0.0,z_slab_top))
+        else:
+            stations=(i,end)
+            profile=((0.0,z_soffit),(width_q,z_soffit),
+                     (width_q,z_contact),(0.0,z_contact))
+        profile=validate_simple_polygon(profile)
+        direction=_unit(_sub(end,i))
+        world=tuple((i[0]+direction[0]*q,i[1]+direction[1]*q,z)
+                    for q,z in profile)
+        return LandingBodyPort(name,(i,end),soffit,contact,stations,
+                               profile,world)
     cross = _cross(_sub(entry, i), _sub(exit_, i))
     outside = "RIGHT" if cross > 0.0 else "LEFT"
     return GeneralizedLandingFinishAuthority(
         footprint, (i, entry), (i, exit_), (entry, outer, exit_),
         z_top, z_contact, z_soffit, z_slab_top, a_entry, a_exit,
-        o_inner, cavity, skirt, board, port("ENTRY", entry, a_entry),
+        o_inner, cavity, skirt, board, b_entry, b_exit, o_outer,
+        port("ENTRY", entry, a_entry),
         port("EXIT", exit_, a_exit), outside)
 
 
@@ -179,6 +212,8 @@ def _prism(polygon, bottom, top, part_type, ordinal):
 
 def build_generalized_landing_body(authority, underside_mode):
     """Build closed non-right Landing UNDERBODY candidate fragments."""
+    if underside_mode not in ("STEPPED_CLOSED","SLOPED_CLOSED"):
+        raise ValueError("GEOMETRY_INVALID: Landing underside mode")
     if underside_mode == "STEPPED_CLOSED":
         return (_prism(authority.footprint, authority.z_soffit,
                        authority.z_contact, "UNDERBODY", 17000),)
