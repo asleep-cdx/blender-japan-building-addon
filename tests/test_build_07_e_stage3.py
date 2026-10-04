@@ -36,6 +36,7 @@ from japanese_house_modeler.stair_winder_finish import (
     exact_rectangle_union_components, rectangle_component_boundaries,
     _variable_prism, trim_prism_fragment_against_shared_board,
     build_stepped_underbody_fragments,
+    canonical_physical_winder_cell_bindings,
     resolve_physical_stepped_body_cells,
     compact_contributor_authority, propagate_semantic_edge_splits,
 )
@@ -240,14 +241,41 @@ class SteppedTests(unittest.TestCase):
                     physical=resolve_physical_winder_plans(
                         resolved.turn,resolved.cells,direction,resolved.nosing,
                         resolved.riser_thickness)
+                    bindings=canonical_physical_winder_cell_bindings(
+                        resolved.cells,physical,turn_tops)
+                    self.assertEqual(tuple((b.cell_index,b.physical_plan.cell_index)
+                                           for b in bindings),((1,1),(2,2),(3,3)))
                     body,plans=resolve_physical_stepped_body_cells(
                         resolved.cells,physical,turn_tops,.15,resolved.base_z,
                         tread_thickness=resolved.tread_thickness)
+                    def area(polygon):
+                        return abs(sum(a[0]*b[1]-a[1]*b[0]
+                                       for a,b in zip(
+                                           polygon,polygon[1:]+polygon[:1]))/2)
+                    for binding,authority in zip(bindings,body):
+                        height=authority.top_z-authority.visible_z
+                        raw=area(binding.cell.polygon)*height
+                        excluded=constant_prism_intersection_volume(
+                            binding.cell.polygon,
+                            (authority.visible_z,authority.top_z),
+                            binding.physical_plan.riser_polygon,
+                            (binding.tread_top_z-resolved.actual_riser,
+                             binding.tread_top_z-resolved.tread_thickness))
+                        final=sum(area(plan.polygon)*height for plan in plans
+                                  if plan.cell_index==binding.cell_index)
+                        self.assertAlmostEqual(raw,final+excluded,places=11)
+                        if resolved.turn.outer_corner in binding.cell.polygon:
+                            self.assertTrue(any(
+                                resolved.turn.outer_corner in plan.polygon
+                                for plan in plans
+                                if plan.cell_index==binding.cell_index))
                     self.assertEqual((body,plans),resolve_physical_stepped_body_cells(
                         resolved.cells,physical,turn_tops,.15,resolved.base_z,
                         tread_thickness=resolved.tread_thickness))
                     for plan in plans:
-                        for top,part in zip(turn_tops,physical):
+                        for binding in bindings:
+                            top=binding.tread_top_z
+                            part=binding.physical_plan
                             self.assertAlmostEqual(constant_prism_intersection_volume(
                                 plan.polygon,(plan.visible_z,plan.top_z),
                                 part.riser_polygon,
@@ -258,6 +286,31 @@ class SteppedTests(unittest.TestCase):
                                 part.polygon,
                                 (top-resolved.tread_thickness,top)),0.0,places=11)
                     validate_mesh_fragments(build_stepped_underbody_fragments(plans))
+                    produced,parts,_mesh=prepare_winder_geometry(
+                        points,direction,0,2800,16,width,30,20,point_ids=IDS,
+                        assembly_mode="STANDARD_RESIDENTIAL",
+                        residential_fields=fields)
+                    self.assertEqual(produced, resolved)
+                    validate_mesh_fragments(tuple(
+                        part for part in parts if part.part_type=="UNDERBODY"))
+
+    def test_08d_reverse_binding_is_canonical(self):
+        resolved=resolve_winder_layout(
+            L,"REVERSE",*BASE[1:],point_ids=IDS)
+        physical=resolve_physical_winder_plans(
+            resolved.turn,resolved.cells,resolved.ascent_direction,
+            resolved.nosing,resolved.riser_thickness)
+        self.assertEqual(tuple(plan.cell_index for plan in physical),(3,2,1))
+        ascent_tops=winder_tread_tops(resolved)[0]
+        canonical_tops=tuple(reversed(ascent_tops))
+        bindings=canonical_physical_winder_cell_bindings(
+            resolved.cells,physical,canonical_tops)
+        self.assertEqual(tuple(cell.index for cell in resolved.cells),(1,2,3))
+        self.assertEqual(tuple((binding.cell.index,
+                                binding.physical_plan.cell_index)
+                               for binding in bindings),((1,1),(2,2),(3,3)))
+        self.assertEqual(tuple(binding.tread_top_z for binding in bindings),
+                         canonical_tops)
 
 class SlopedTests(unittest.TestCase):
     def setUp(self):
@@ -274,6 +327,7 @@ class SlopedTests(unittest.TestCase):
     def test_17_arbitrary_angle(self):
         a=math.radians(63); pts=((0,0),(0,2.2),(-2.2*math.sin(a),2.2+2.2*math.cos(a)))
         x=layout(pts,IDS); r,s=resolve_sloped_stations(x.turn,x.cells,.1,.4,x.riser_thickness); self.assertGreater(len(s),4)
+
     def test_17a_complete_terminal_part_selection_matrix(self):
         for degrees in (90,63):
             angle=math.radians(degrees)

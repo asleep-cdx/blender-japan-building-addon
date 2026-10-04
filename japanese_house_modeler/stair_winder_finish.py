@@ -50,6 +50,15 @@ class PhysicalWinderBodyCell:
 
 
 @dataclass(frozen=True)
+class PhysicalWinderCellBinding:
+    """Canonical identity binding for one nominal/physical/body-Z cell."""
+    cell_index: int
+    cell: object
+    physical_plan: object
+    tread_top_z: float
+
+
+@dataclass(frozen=True)
 class WinderPivotRelief:
     rho: float
     entry: tuple
@@ -140,20 +149,41 @@ def resolve_stepped_underbody(cells, tread_tops, body_depth, base_z, *,
     return tuple(plans)
 
 
+def canonical_physical_winder_cell_bindings(cells,physical_plans,tread_tops):
+    """Reconcile ascent-local physical plans to canonical cell identity."""
+    if not (len(cells) == len(physical_plans) == len(tread_tops)):
+        raise ValueError("GEOMETRY_INVALID: physical Winder body count")
+    canonical_indices=tuple(cell.index for cell in cells)
+    if len(set(canonical_indices))!=len(canonical_indices):
+        raise ValueError("GEOMETRY_INVALID: duplicate nominal Winder cell")
+    physical_by_index={}
+    for physical in physical_plans:
+        index=physical.cell_index
+        if index not in canonical_indices or index in physical_by_index:
+            raise ValueError("GEOMETRY_INVALID: physical Winder cell identity")
+        physical_by_index[index]=physical
+    if set(physical_by_index)!=set(canonical_indices):
+        raise ValueError("GEOMETRY_INVALID: incomplete physical Winder cells")
+    return tuple(PhysicalWinderCellBinding(
+        cell.index,cell,physical_by_index[cell.index],float(top))
+        for cell,top in zip(cells,tread_tops))
+
+
 def resolve_physical_stepped_body_cells(cells, physical_plans, tread_tops,
                                         body_depth, base_z, *, turn_index=0,
                                         tread_thickness=0.03):
-    """Consume Stage-2 Riser-back authority for STEPPED body footprints.
+    """Subtract each accepted Stage-2 ``riser_polygon`` from its nominal cell.
 
-    The nominal cell is clipped by the exact ``riser_back_edge`` half-plane.
-    This is the exact nominal-minus-Riser intersection for the supported front
-    strip and avoids importing the TREAD nosing footprint into the body.
+    ``riser_back_edge`` remains explicit physical-front metadata, while the
+    complete Riser polygon is the subtraction authority.  Inputs are reconciled
+    by canonical ``cell_index``; physical-plan tuple position is never identity.
     """
-    if not (len(cells) == len(physical_plans) == len(tread_tops)):
-        raise ValueError("GEOMETRY_INVALID: physical Winder body count")
+    bindings=canonical_physical_winder_cell_bindings(
+        cells,physical_plans,tread_tops)
     authorities=[]; plans=[]
-    for index,(cell,physical,top) in enumerate(
-            zip(cells,physical_plans,tread_tops)):
+    for index,binding in enumerate(bindings):
+        cell=binding.cell; physical=binding.physical_plan
+        top=binding.tread_top_z
         back=tuple(physical.riser_back_edge)
         if len(back)!=2:
             raise ValueError("GEOMETRY_INVALID: physical Winder body boundary")
