@@ -17,6 +17,10 @@ from japanese_house_modeler.stair_turn import (
     resolve_winder_layout, resolve_nominal_cells, resolve_physical_winder_plans,
     winder_tread_tops, build_winder_finish_fragments,
 )
+from japanese_house_modeler.stair_terminal_stack import (
+    RISER_MEDIATED_INTERFACE, classify_straight_winder_terminal,
+    straight_terminal_stack,
+)
 from japanese_house_modeler.stair_residential import ResidentialFields
 from japanese_house_modeler.stair_geometry import _signed_volume, validate_mesh_fragments
 from japanese_house_modeler.stair_winder_finish import (
@@ -54,6 +58,85 @@ class SteppedTests(unittest.TestCase):
     def test_06_exit_neighbor_owner(self): self.assertFalse(self.plans[-1].exit_closure)
     def test_07_outer_corner_preserved(self): self.assertIn(self.x.turn.outer_corner,self.plans[1].polygon)
     def test_08_shell_does_not_move_patch(self): self.assertEqual(stepped_patch_z(.3,.15,0),.15)
+
+    def test_08a_riser_mediated_terminal_audit(self):
+        fields=ResidentialFields(underside_mode="STEPPED_CLOSED",
+                                 left_side_board_enabled=False,
+                                 right_side_board_enabled=False)
+        resolved,parts,_mesh=prepare_winder_geometry(
+            L,*BASE,point_ids=IDS,assembly_mode="STANDARD_RESIDENTIAL",
+            residential_fields=fields)
+        straight_count=resolved.straight_allocation[0]
+        tread=next(part for part in parts
+                   if part.part_type=="TREAD" and part.ordinal==2*straight_count-1)
+        riser=next(part for part in parts
+                   if part.part_type=="RISER" and part.ordinal==2*straight_count)
+        underbody=next(part for part in parts
+                       if part.part_type=="UNDERBODY" and part.ordinal==10000)
+        snapshot=(tread,riser,underbody)
+        semantic=resolved.turn.inner_pivot
+        incoming=resolved.turn.incoming
+        left=(-incoming[1],incoming[0])
+        stack=straight_terminal_stack(
+            "EXIT",semantic,incoming,left,resolved.riser_thickness,
+            riser,tread,None)
+        authority=classify_straight_winder_terminal(
+            stack,(resolved.turn.inner_pivot,resolved.turn.entry_outer),
+            ("STRAIGHT",0),("WINDER",0))
+        self.assertEqual(authority.interface_class,RISER_MEDIATED_INTERFACE)
+        self.assertAlmostEqual(authority.plane_offset,resolved.riser_thickness)
+        entry_stack=straight_terminal_stack(
+            "ENTRY",resolved.turn.inner_pivot,resolved.turn.outgoing,
+            (-resolved.turn.outgoing[1],resolved.turn.outgoing[0]),
+            resolved.riser_thickness,riser,tread,None)
+        entry_authority=classify_straight_winder_terminal(
+            entry_stack,(resolved.turn.inner_pivot,resolved.turn.exit_outer),
+            ("WINDER",0),("STRAIGHT",1))
+        self.assertEqual(entry_authority.interface_class,
+                         RISER_MEDIATED_INTERFACE)
+        self.assertAlmostEqual(entry_authority.plane_offset,
+                               resolved.riser_thickness)
+
+        # Convex clipping gives exact plan area for the square-profile Tread
+        # against nominal Winder cell 1; both have constant Z intervals here.
+        tread_plan=[]
+        z_tread=(min(v[2] for v in tread.vertices),max(v[2] for v in tread.vertices))
+        for vertex in tread.vertices:
+            point=vertex[:2]
+            if point not in tread_plan: tread_plan.append(point)
+        # Order the rectangular footprint around its centroid.
+        center=(sum(p[0] for p in tread_plan)/len(tread_plan),
+                sum(p[1] for p in tread_plan)/len(tread_plan))
+        tread_plan.sort(key=lambda p:math.atan2(p[1]-center[1],p[0]-center[0]))
+        subject=list(tread_plan)
+        signed=lambda poly:sum(a[0]*b[1]-a[1]*b[0]
+                               for a,b in zip(poly,poly[1:]+poly[:1]))/2
+        clip=list(resolved.cells[0].polygon)
+        if signed(clip)<0: clip.reverse()
+        for a,b in zip(clip,clip[1:]+clip[:1]):
+            output=[]
+            for p,q in zip(subject,subject[1:]+subject[:1]):
+                cross=lambda x:(b[0]-a[0])*(x[1]-a[1])-(b[1]-a[1])*(x[0]-a[0])
+                ip,iq=cross(p)>=-1e-12,cross(q)>=-1e-12
+                if ip: output.append(p)
+                if ip!=iq:
+                    dp=(q[0]-p[0],q[1]-p[1]); edge=(b[0]-a[0],b[1]-a[1])
+                    den=dp[0]*edge[1]-dp[1]*edge[0]
+                    t=((a[0]-p[0])*edge[1]-(a[1]-p[1])*edge[0])/den
+                    output.append((p[0]+t*dp[0],p[1]+t*dp[1]))
+            subject=output
+        area=abs(signed(subject))
+        plan=resolve_stepped_underbody(
+            resolved.cells,winder_tread_tops(resolved)[0],.15,0,
+            tread_thickness=resolved.tread_thickness)[0]
+        z_overlap=max(0,min(z_tread[1],plan.top_z)-max(z_tread[0],plan.visible_z))
+        self.assertGreater(area,0.0)  # plan overlap is intentional proximity
+        self.assertEqual(z_overlap,0.0)  # but physical volume is disjoint
+        z_riser=(min(v[2] for v in riser.vertices),max(v[2] for v in riser.vertices))
+        riser_overlap=max(0,min(z_riser[1],plan.top_z)
+                          -max(z_riser[0],plan.visible_z))
+        self.assertEqual(riser_overlap,0.0)
+        self.assertEqual((tread,riser,underbody),snapshot)
 
 class SlopedTests(unittest.TestCase):
     def setUp(self):

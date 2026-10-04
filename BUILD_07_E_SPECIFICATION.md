@@ -1095,6 +1095,20 @@ classification。The symmetric difference retains separate `SOURCE_ONLY` and
 `DESTINATION_ONLY` cells for later face orientation。If both occupied profiles
 match, both sets are empty and no transition-closure owner exists。
 
+Stage-3 distinguishes the walking/top semantic interface from the physical
+UNDERBODY terminal。`COPLANAR_BODY_INTERFACE` applies only when actual body
+ports share one plane and therefore consumes the `BodyInterface` region
+algebra directly。Straight/Turn boundaries are initially
+`RISER_MEDIATED_INTERFACE`: accepted 07-C Riser thickness remains physical,
+so the Straight UNDERBODY terminal is offset from the Turn walking plane and
+must not be extended, clipped, or joined by an invented UNDERSIDE filler。
+Accepted TREAD/RISER geometry is never moved by Stage-3。
+
+An exact zero-volume contact between different accepted roles may be recorded
+as `PHYSICAL_CONTACT` only when it is internal, intentional, non-visible, and
+has no third duplicate finish face。Same-role coincident finish faces and every
+positive-volume overlap remain forbidden。
+
 ## 17.2 Winder
 
 Arbitrary-angle Winder production minimum：same generalized envelope + EQUAL patterns。
