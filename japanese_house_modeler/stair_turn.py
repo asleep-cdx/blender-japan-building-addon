@@ -1159,36 +1159,21 @@ def build_winder_fragments(layout):
                 riser.polygon, top - layout.actual_riser,
                 top - layout.tread_thickness, "RISER", ordinal))
         else:
-            cells = layout.turn_cells[turn_index]
-            if layout.ascent_direction == "REVERSE":
-                cells = tuple(reversed(cells))
-            precision_plans=(resolve_physical_winder_plans(
+            plans=resolve_physical_winder_plans(
                 layout.turns[turn_index],layout.turn_cells[turn_index],
                 layout.ascent_direction,layout.nosing,layout.riser_thickness)
-                if layout.front_edge_mode!="SQUARE" else ())
-            for cell_position,cell in enumerate(cells):
+            for plan in plans:
                 counter += 1
                 top = layout.base_z + counter * layout.actual_riser
-                precision=(precision_plans[cell_position]
-                           if precision_plans else None)
-                tread_polygon=(precision.polygon if precision else
-                    physical_winder_tread_polygon(
-                        cell, layout.ascent_direction,
-                        layout.turns[turn_index].inner_pivot, layout.nosing,
-                        layout.riser_thickness))
-                riser=(precision if precision else resolve_winder_riser_plan(
-                    cell, layout.ascent_direction,
-                    layout.turns[turn_index].inner_pivot,
-                    layout.riser_thickness))
                 ordinal += 1
                 fragments.append(_profiled_prism(
-                    tread_polygon, top-layout.tread_thickness, top,
-                    (precision.exposed_front_edge if precision else riser.front),
-                    layout.front_edge_mode,layout.front_edge_size,
+                    plan.polygon,top-layout.tread_thickness,top,
+                    plan.exposed_front_edge,layout.front_edge_mode,
+                    layout.front_edge_size,
                     "TREAD", ordinal))
                 ordinal += 1
                 fragments.append(_polygon_prism(
-                    (precision.riser_polygon if precision else riser.polygon),
+                    plan.riser_polygon,
                     top-layout.actual_riser,top-layout.tread_thickness,
                     "RISER", ordinal))
     fragments = tuple(fragments)

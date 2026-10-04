@@ -399,6 +399,58 @@ class SharedAndCompactTests(unittest.TestCase):
     def test_28_butt_plane(self): self.assertEqual(butt_joint_plane((1,2,3),(0,2))[1],(0,1))
 
 class BoardAndIntegrationTests(unittest.TestCase):
+    def test_28_physical_winder_top_is_used_for_every_edge_mode(self):
+        for direction in ("FORWARD","REVERSE"):
+            for mode in ("SQUARE","BEVEL","ROUND"):
+                finish=dict(tread_front_overhang_mm=(0 if mode=="SQUARE" else 5),
+                            tread_front_edge_mode=mode,
+                            tread_front_edge_size_mm=2)
+                resolved,parts,_mesh=prepare_winder_geometry(
+                    L,direction,*BASE[1:],point_ids=IDS,
+                    assembly_mode="STANDARD_RESIDENTIAL",
+                    residential_fields=ResidentialFields(
+                        underside_mode="SLOPED_CLOSED"),**finish)
+                plans=resolve_physical_winder_plans(
+                    resolved.turn,resolved.cells,direction,resolved.nosing,
+                    resolved.riser_thickness)
+                self.assertEqual(len(plans),3)
+                start=straight_component_events(resolved)[0].final_riser_ordinal
+                treads=[next(part for part in parts
+                             if part.part_type=="TREAD"
+                             and part.ordinal==start+1+2*index)
+                        for index in range(3)]
+                for plan,tread in zip(plans,treads):
+                    self.assertGreater(abs(sum(
+                        a[0]*b[1]-a[1]*b[0]
+                        for a,b in zip(plan.polygon,
+                                       plan.polygon[1:]+plan.polygon[:1]))),0)
+                    emitted={vertex[:2] for vertex in tread.vertices}
+                    self.assertTrue(set(plan.polygon).issubset(emitted))
+                    self.assertNotEqual(tuple(plan.polygon),
+                                        tuple(resolved.cells[plan.cell_index-1].polygon))
+
+    def test_28aa_physical_top_angle_and_underbody_matrix(self):
+        for degrees in (90,63):
+            angle=math.radians(degrees)
+            points=((0,0),(0,2.2),
+                    (-2.2*math.sin(angle),2.2+2.2*math.cos(angle)))
+            for underside in ("STEPPED_CLOSED","SLOPED_CLOSED"):
+                fields=ResidentialFields(underside_mode=underside,
+                                         left_side_board_enabled=False,
+                                         right_side_board_enabled=False)
+                first=prepare_winder_geometry(
+                    points,*BASE,point_ids=IDS,
+                    assembly_mode="STANDARD_RESIDENTIAL",
+                    residential_fields=fields)
+                second=prepare_winder_geometry(
+                    points,*BASE,point_ids=IDS,
+                    assembly_mode="STANDARD_RESIDENTIAL",
+                    residential_fields=fields)
+                self.assertEqual(first,second)
+                self.assertEqual(sum(part.part_type=="TREAD" for part in first[1]),15)
+                self.assertGreaterEqual(sum(part.part_type=="UNDERBODY"
+                                            for part in first[1]),3)
+
     def test_28a_r1_straight_and_landing_bodies(self):
         fields=ResidentialFields()
         _layout,parts,_mesh=prepare_winder_geometry(
