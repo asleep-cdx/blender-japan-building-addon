@@ -248,6 +248,77 @@ class GeneralizedLandingFinishTests(unittest.TestCase):
         interface=resolve_body_interface(source,destination)
         self.assertFalse(interface.transition_cells)
         self.assertTrue(interface.overlap_cells)
+        self.assertIsNone(interface.closure_owner)
+
+    def test_body_interface_authority_matrix(self):
+        segment=((2.0,3.0),(3.0,3.0))
+        def component(identity, profile, *, entry=False, reverse=False,
+                      breaks=()):
+            edge=tuple(reversed(segment)) if reverse else segment
+            width=1.0
+            local=tuple((width-q,z) for q,z in profile) if reverse else profile
+            local_breaks=tuple((width-q,z) for q,z in breaks) if reverse else breaks
+            port=body_port(identity[0],edge,local,local_breaks)
+            return ResidentialBodyComponent(identity,"WINDER",identity[1],None,(),
+                port if entry else None,None if entry else port)
+        rectangle=((0,0),(1,0),(1,1),(0,1))
+        cases=(
+            (rectangle,rectangle),
+            (((0,0),(1,0),(1,.5),(0,.5)),rectangle),
+            (rectangle,((0,0),(1,0),(1,.5),(0,.5))),
+            (((0,0),(1,0),(1,2),(.5,2),(.5,1),(0,1)),rectangle),
+            (((0,0),(1,0),(1,1),(0,1)),((0,2),(1,2),(1,3),(0,3))),
+        )
+        def area(cells): return sum((b-a)*(d-c) for a,b,c,d in cells)
+        def polygon_area(poly):
+            return abs(sum(a[0]*b[1]-a[1]*b[0]
+                           for a,b in zip(poly,poly[1:]+poly[:1])))/2
+        for index,(left,right) in enumerate(cases):
+            source=component(("S",index),left)
+            destination=component(("D",index),right,entry=True)
+            result=resolve_body_interface(source,destination)
+            with self.subTest(index=index):
+                self.assertAlmostEqual(polygon_area(left),
+                    area(result.overlap_cells)+area(result.source_only_cells))
+                self.assertAlmostEqual(polygon_area(right),
+                    area(result.overlap_cells)+area(result.destination_only_cells))
+                self.assertAlmostEqual(area(result.transition_cells),
+                    area(result.source_only_cells)+area(result.destination_only_cells))
+                self.assertTrue(all((b-a)*(d-c)>1e-12
+                                    for a,b,c,d in result.transition_cells))
+                self.assertEqual(result,resolve_body_interface(source,destination))
+        self.assertFalse(resolve_body_interface(
+            component(("S",9),cases[-1][0]),
+            component(("D",9),cases[-1][1],entry=True)).overlap_cells)
+
+    def test_reversed_port_and_eps_values_normalize(self):
+        profile=((0,0),(1,0),(1,1),(0,1))
+        source=ResidentialBodyComponent(("S",0),"WINDER",0,None,(),None,
+            body_port("EXIT",((0,0),(1,0)),profile,((.25,.5),)))
+        direct=ResidentialBodyComponent(("D",0),"LANDING",1,None,(),
+            body_port("ENTRY",((0,0),(1,0)),profile,((.25,.5),)),None)
+        reverse=ResidentialBodyComponent(("D",0),"LANDING",1,None,(),
+            body_port("ENTRY",((1,0),(0,0)),
+                      tuple((1-q,z) for q,z in profile),((.75,.5),)),None)
+        a=resolve_body_interface(source,direct)
+        b=resolve_body_interface(source,reverse)
+        self.assertEqual(a,b)
+        self.assertIn(.25,a.q_stations)
+        self.assertIn(.5,a.z_stations)
+        station=next(s for s in a.stations if s.q==.25 and s.z==.5)
+        self.assertEqual(station.xyz,(.25,0.0,.5))
+        perturbed=ResidentialBodyComponent(("D",0),"LANDING",1,None,(),
+            body_port("ENTRY",((0,0),(1+1e-10,0)),
+                ((0,1e-10),(1+1e-10,1e-10),(1+1e-10,1),(0,1))),None)
+        c=resolve_body_interface(source,perturbed)
+        self.assertEqual(c.q_stations,(0.0,.25,1.0))
+        self.assertEqual(c.z_stations,(0.0,.5,1.0))
+        self.assertFalse(c.transition_cells)
+
+    def test_diagonal_body_port_is_rejected(self):
+        with self.assertRaisesRegex(ValueError,"non-rectilinear"):
+            body_port("INVALID",((0,0),(1,0)),
+                      ((0,0),(1,0),(1,1),(.5,2),(0,1)))
 
 
 if __name__=="__main__": unittest.main()

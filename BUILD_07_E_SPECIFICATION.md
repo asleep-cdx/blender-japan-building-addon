@@ -1073,6 +1073,18 @@ interface face。Zero-middle Turn pairs use the layout's reconciled shared
 interface。Resolution and final-shell validation occur during candidate
 preparation; invalid topology raises `GEOMETRY_INVALID` before Scene mutation。
 
+Component-local ports may list the physical segment in either direction;
+they are transformed into the semantic inner-to-outer canonical q direction
+before comparison。The currently supported body-port cross-sections are
+rectilinear in `(q,z)`; a diagonal profile is `GEOMETRY_INVALID` rather than
+being approximated by the rectangular cell algebra。Profile vertices and all
+named semantic breakpoints jointly define the common q/z split stations。
+`EPS_LENGTH`-equivalent stations canonicalize with source authority taking
+deterministic precedence, and sliver intervals/cells are discarded before
+classification。The symmetric difference retains separate `SOURCE_ONLY` and
+`DESTINATION_ONLY` cells for later face orientation。If both occupied profiles
+match, both sets are empty and no transition-closure owner exists。
+
 ## 17.2 Winder
 
 Arbitrary-angle Winder production minimum：same generalized envelope + EQUAL patterns。
