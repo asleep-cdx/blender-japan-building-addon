@@ -18,8 +18,10 @@ from japanese_house_modeler.stair_landing_finish import (
     prepare_generalized_landing_finish, resolve_generalized_landing_finish,
 )
 from japanese_house_modeler.stair_body_interfaces import (
-    ResidentialBodyComponent, body_port, resolve_body_interface,
+    ResidentialBodyComponent, _canonical_values, _snap, body_port,
+    resolve_body_interface,
 )
+from japanese_house_modeler.stair_turn import EPS_LENGTH
 from japanese_house_modeler.stair_turn import (
     TurnSpec, polygon_area, resolve_winder_layout, TURN_LANDING, WINDER_NONE,
 )
@@ -408,6 +410,55 @@ class GeneralizedLandingFinishTests(unittest.TestCase):
             with self.subTest(segment=segment,breaks=breaks):
                 with self.assertRaisesRegex(ValueError,"GEOMETRY_INVALID"):
                     body_port("INVALID",segment,shape,breaks)
+
+    def test_eps_clusters_are_bounded_not_transitively_chained(self):
+        eps=EPS_LENGTH
+        cases=(
+            ((0,1),(.9*eps,1),(1.8*eps,1)),
+            ((0,0),(.9*eps,1),(1.8*eps,1)),
+            ((0,1),(.9*eps,0),(1.8*eps,1)),
+        )
+        for values in cases:
+            with self.subTest(values=values):
+                stations=_canonical_values(values)
+                self.assertGreaterEqual(len(stations),2)
+                self.assertEqual(stations,_canonical_values(tuple(reversed(values))))
+                for value,_priority in values:
+                    self.assertLessEqual(abs(value-_snap(value,stations)),eps)
+        semantic_first=_canonical_values(cases[1])
+        self.assertEqual(semantic_first[0],0.0)
+        self.assertNotEqual(semantic_first[-1],0.0)
+        semantic_middle=_canonical_values(cases[2])
+        self.assertEqual(semantic_middle[0],.9*eps)
+
+    def test_eps_chain_is_bounded_for_q_z_and_role_reversal(self):
+        eps=EPS_LENGTH
+        # The scalar authority is shared by q and z; exercise both axes through
+        # complete ports and exchange source/destination ownership.
+        profile=((0,0),(1,0),(1,1),(0,1))
+        a=body_port("A",((0,0),(1,0)),profile,
+                    ((.9*eps,.9*eps,"MIDDLE"),))
+        b=body_port("B",((0,0),(1,0)),profile,
+                    ((1.8*eps,1.8*eps,"HIGH"),))
+        forward=resolve_body_interface(
+            ResidentialBodyComponent(("A",0),"WINDER",0,None,(),None,a),
+            ResidentialBodyComponent(("B",1),"LANDING",1,None,(),b,None))
+        reverse=resolve_body_interface(
+            ResidentialBodyComponent(("B",1),"LANDING",0,None,(),None,b),
+            ResidentialBodyComponent(("A",0),"WINDER",1,None,(),a,None))
+        self.assertEqual(forward.q_stations,reverse.q_stations)
+        self.assertEqual(forward.z_stations,reverse.z_stations)
+        self.assertGreaterEqual(len([q for q in forward.q_stations
+                                    if q <= 2*eps]),2)
+        self.assertGreaterEqual(len([z for z in forward.z_stations
+                                    if z <= 2*eps]),2)
+        for value in (0,.9*eps,1.8*eps):
+            self.assertLessEqual(abs(value-_snap(value,forward.q_stations)),eps)
+            self.assertLessEqual(abs(value-_snap(value,forward.z_stations)),eps)
+
+    def test_snap_failure_is_geometry_invalid(self):
+        with self.assertRaisesRegex(ValueError,"GEOMETRY_INVALID"):
+            _snap(2.0,(0.0,1.0))
 
 
 if __name__=="__main__": unittest.main()

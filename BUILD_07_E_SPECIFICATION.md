@@ -1087,7 +1087,9 @@ never fabricated from the q-by-z Cartesian product。
 `EPS_LENGTH`-equivalent stations prefer named semantic authority over ordinary
 profile authority; same-priority ties use the stable numeric minimum, making
 canonicalization traversal-independent。Pair provenance survives snapping to
-the final canonical coordinates。Non-finite interface input is
+the final canonical coordinates。EPS clustering is bounded against one cluster
+anchor; it is not transitive nearest-neighbor chaining, and no cluster spans
+more than `EPS_LENGTH`。Non-finite interface input is
 `GEOMETRY_INVALID`, and sliver intervals/cells are discarded before
 classification。The symmetric difference retains separate `SOURCE_ONLY` and
 `DESTINATION_ONLY` cells for later face orientation。If both occupied profiles

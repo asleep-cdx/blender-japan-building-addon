@@ -169,7 +169,9 @@ def _canonical_values(values):
     ordered = sorted((float(value), int(priority)) for value, priority in values)
     clusters = []
     for item in ordered:
-        if not clusters or item[0] - clusters[-1][-1][0] > EPS_LENGTH:
+        # Anchor each cluster at its minimum.  Comparing only with the prior
+        # item would incorrectly chain 0, .9*EPS, and 1.8*EPS together.
+        if not clusters or item[0] - clusters[-1][0][0] > EPS_LENGTH:
             clusters.append([item])
         else:
             clusters[-1].append(item)
@@ -180,8 +182,11 @@ def _canonical_values(values):
 
 
 def _snap(value, stations):
-    return next(station for station in stations
-                if abs(value - station) <= EPS_LENGTH)
+    candidates = tuple(station for station in stations
+                       if abs(value - station) <= EPS_LENGTH)
+    if not candidates:
+        raise ValueError("GEOMETRY_INVALID: interface station cannot be snapped")
+    return min(candidates, key=lambda station: (abs(value - station), station))
 
 
 def _snap_port(port, qs, zs, segment, direction):
