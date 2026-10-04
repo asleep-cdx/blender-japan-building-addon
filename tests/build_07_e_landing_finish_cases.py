@@ -17,6 +17,9 @@ from japanese_house_modeler.stair_landing_finish import (
     build_generalized_landing_body, build_generalized_landing_side_board,
     prepare_generalized_landing_finish, resolve_generalized_landing_finish,
 )
+from japanese_house_modeler.stair_body_interfaces import (
+    ResidentialBodyComponent, body_port, resolve_body_interface,
+)
 from japanese_house_modeler.stair_turn import (
     TurnSpec, polygon_area, resolve_winder_layout, TURN_LANDING, WINDER_NONE,
 )
@@ -216,6 +219,35 @@ class GeneralizedLandingFinishTests(unittest.TestCase):
         _parts=build_generalized_landing_body(a,"SLOPED_CLOSED")
         _boards=build_generalized_landing_side_board(a,True,.04)
         self.assertEqual(frame,snapshot)
+
+    def test_component_interface_region_algebra(self):
+        segment=((0,0),(1,0))
+        source_port=body_port("EXIT",segment,
+            ((0,0),(1,0),(1,1),(0,1)))
+        destination_port=body_port("ENTRY",segment,
+            ((0,0),(1,0),(1,2),(.5,2),(.5,1),(0,1)))
+        source=ResidentialBodyComponent(("WINDER",0),"WINDER",0,None,(),
+                                        None,source_port)
+        destination=ResidentialBodyComponent(("STRAIGHT",1),
+            "STRAIGHT_FLIGHT",1,None,(),destination_port,None)
+        interface=resolve_body_interface(source,destination)
+        self.assertEqual(interface.closure_owner,destination.identity)
+        self.assertEqual(interface.overlap_cells,((0.0,.5,0.0,1.0),
+                                                   (.5,1.0,0.0,1.0)))
+        self.assertEqual(interface.transition_cells,((.5,1.0,1.0,2.0),))
+        self.assertEqual(interface,
+                         resolve_body_interface(source,destination))
+
+    def test_matching_component_profiles_have_no_transition(self):
+        port=body_port("PORT",((0,0),(1,0)),
+                       ((0,0),(1,0),(1,1),(0,1)))
+        source=ResidentialBodyComponent(("LANDING",0),"LANDING",0,None,(),
+                                        None,port)
+        destination=ResidentialBodyComponent(("WINDER",1),"WINDER",1,None,(),
+                                             port,None)
+        interface=resolve_body_interface(source,destination)
+        self.assertFalse(interface.transition_cells)
+        self.assertTrue(interface.overlap_cells)
 
 
 if __name__=="__main__": unittest.main()

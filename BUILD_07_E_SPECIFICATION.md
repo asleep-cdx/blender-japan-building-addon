@@ -1047,9 +1047,31 @@ outside side。Offset both outer edges outward by real perpendicular thickness
 interval `Z_soffit -> Z_top+reveal` for either Side Board mode。Invalid offset
 or miter geometry raises `GEOMETRY_INVALID`。
 
+`B_entry` and `B_exit` lie on the supporting lines of `I->E_in` and
+`I->E_out`; positive outward thickness normally places them beyond the finite
+walking-interface segments。Collinearity, perpendicular thickness, and the
+`O_outer` miter—not finite-segment containment—are authoritative。
+
 All authority resolution and UNDERBODY/SIDE_BOARD construction is pure
 candidate preparation。Exact 90° continues to call the accepted schema-4
 production code unchanged。
+
+### 17.1.2 Schema-5 Residential body components and interfaces
+
+Stage-3 resolves ascent-local `STRAIGHT_FLIGHT`, `LANDING`, and `WINDER`
+components from the same event/allocation sequence as top geometry。Each keeps
+its accepted/local body authority and exposes semantic ENTRY/EXIT occupied
+profiles in one interface-local `(q,z)` frame。REVERSE reverses traversal and
+ownership without changing canonical identity。
+
+Each consecutive pair uses one canonical frame with semantic inner `q=0` and
+outer `q=width` endpoints。After normalization,
+`R_overlap=R_source∩R_destination` is internal contact and leaves no duplicate
+interface face。`R_transition=R_source△R_destination` is emitted exactly once
+and owned by the destination。An exact profile match leaves no exposed
+interface face。Zero-middle Turn pairs use the layout's reconciled shared
+interface。Resolution and final-shell validation occur during candidate
+preparation; invalid topology raises `GEOMETRY_INVALID` before Scene mutation。
 
 ## 17.2 Winder
 
