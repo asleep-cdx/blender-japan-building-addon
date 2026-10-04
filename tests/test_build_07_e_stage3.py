@@ -39,6 +39,7 @@ from japanese_house_modeler.stair_winder_finish import (
     canonical_physical_winder_cell_bindings,
     resolve_physical_stepped_body_cells,
     compact_contributor_authority, propagate_semantic_edge_splits,
+    sloped_contact_at,
 )
 
 L=((0,0),(0,2.2),(-2.2,2.2)); IDS=("p0","t","p2")
@@ -327,6 +328,60 @@ class SlopedTests(unittest.TestCase):
     def test_17_arbitrary_angle(self):
         a=math.radians(63); pts=((0,0),(0,2.2),(-2.2*math.sin(a),2.2+2.2*math.cos(a)))
         x=layout(pts,IDS); r,s=resolve_sloped_stations(x.turn,x.cells,.1,.4,x.riser_thickness); self.assertGreater(len(s),4)
+
+    def test_17a_safe_contact_uses_lower_incident_tread(self):
+        tops=winder_tread_tops(self.x)[0]
+        boundary=self.x.cells[1].front_fraction
+        old=max(tops[0],tops[1])-self.x.tread_thickness
+        safe=sloped_contact_at(self.x.cells,tops,
+                               self.x.tread_thickness,boundary)
+        self.assertEqual(safe,min(tops[0],tops[1])
+                         -self.x.tread_thickness)
+        self.assertGreater(old,safe)
+
+    def test_17b_safe_contact_matrix_and_pivot_core(self):
+        fields=ResidentialFields(underside_mode="SLOPED_CLOSED",
+                                 left_side_board_enabled=True,
+                                 right_side_board_enabled=True)
+        for degrees in (90,63):
+            angle=math.radians(degrees)
+            points=((0,0),(0,2.2),
+                    (-2.2*math.sin(angle),2.2+2.2*math.cos(angle)))
+            for direction in ("FORWARD","REVERSE"):
+                resolved=resolve_winder_layout(
+                    points,direction,*BASE[1:],point_ids=IDS)
+                ascent=winder_tread_tops(resolved)[0]
+                tops=(ascent if direction=="FORWARD"
+                      else tuple(reversed(ascent)))
+                plans_before=resolve_physical_winder_plans(
+                    resolved.turn,resolved.cells,direction,resolved.nosing,
+                    resolved.riser_thickness)
+                for boundary in range(1,len(resolved.cells)):
+                    fraction=resolved.cells[boundary].front_fraction
+                    contact=sloped_contact_at(
+                        resolved.cells,tops,resolved.tread_thickness,fraction)
+                    self.assertLessEqual(contact,tops[boundary-1]
+                                         -resolved.tread_thickness+1e-9)
+                    self.assertLessEqual(contact,tops[boundary]
+                                         -resolved.tread_thickness+1e-9)
+                first=prepare_winder_geometry(
+                    points,direction,*BASE[1:],point_ids=IDS,
+                    assembly_mode="STANDARD_RESIDENTIAL",
+                    residential_fields=fields)
+                second=prepare_winder_geometry(
+                    points,direction,*BASE[1:],point_ids=IDS,
+                    assembly_mode="STANDARD_RESIDENTIAL",
+                    residential_fields=fields)
+                self.assertEqual(first,second)
+                core=next(part for part in first[1]
+                          if part.part_type=="UNDERBODY" and part.ordinal==11099)
+                self.assertLessEqual(max(v[2] for v in core.vertices),
+                                     max(tops)-resolved.tread_thickness+1e-9)
+                self.assertTrue(any(part.part_type=="SIDE_BOARD"
+                                    for part in first[1]))
+                self.assertEqual(plans_before,resolve_physical_winder_plans(
+                    resolved.turn,resolved.cells,direction,resolved.nosing,
+                    resolved.riser_thickness))
 
     def test_17a_complete_terminal_part_selection_matrix(self):
         for degrees in (90,63):

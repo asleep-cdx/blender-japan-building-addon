@@ -5,7 +5,7 @@ managed Stair and deliberately consume the nominal/physical Stage-2 plans.
 Distances are metres and Z values are world coordinates.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import math
 
 from .stair_geometry import MeshFragment, _signed_volume, validate_mesh_fragments
@@ -895,37 +895,23 @@ def build_pivot_core_fragment(frame, stations, contact_zs,
     if any(contact<=station.z+EPS_LENGTH
            for station,contact in zip(stations,contact_zs)):
         raise ValueError("GEOMETRY_INVALID: pivot contact clearance")
-    z0,zn=stations[0].z,stations[-1].z
-    low,high=min(z0,zn),max(z0,zn)
-    bottom=[(frame.inner_pivot[0],frame.inner_pivot[1],low)]
-    bottom.extend((s.inner[0],s.inner[1],s.z) for s in stations)
-    top=[(frame.inner_pivot[0],frame.inner_pivot[1],high)]
-    top.extend((s.inner[0],s.inner[1],contact)
-               for s,contact in zip(stations,contact_zs))
-    vertices=tuple(bottom+top); count=len(bottom); faces=[]
-    for k in range(1,count-1):
-        faces.append((0,k+1,k))
-        faces.append((count,count+k,count+k+1))
-        faces.append((k,k+1,count+k+1,count+k))
-    # End sides. Split the high side so A_low/A_high/J_high is an explicit,
-    # uniquely owned semantic triangle.
-    high_index=1 if z0>=zn else count-1
-    low_index=count-1 if high_index==1 else 1
-    faces.append((0,low_index,count+low_index,count))
-    faces.append((0,count,high_index))
-    faces.append((high_index,count,count+high_index))
-    center=tuple(sum(v[i] for v in vertices)/len(vertices) for i in range(3))
-    oriented=[]
-    for face in faces:
-        a,b,c=(vertices[face[i]] for i in range(3))
-        ab=tuple(b[i]-a[i] for i in range(3));ac=tuple(c[i]-a[i] for i in range(3))
-        normal=(ab[1]*ac[2]-ab[2]*ac[1],ab[2]*ac[0]-ab[0]*ac[2],ab[0]*ac[1]-ab[1]*ac[0])
-        fc=tuple(sum(vertices[j][i] for j in face)/len(face) for i in range(3))
-        if sum(normal[i]*(fc[i]-center[i]) for i in range(3))<0:
-            face=tuple(reversed(face))
-        oriented.append(face)
-    faces=oriented
-    fragment=MeshFragment("UNDERBODY",ordinal,vertices,tuple(faces))
+    # One common high pivot vertex can rise above the low incident tread.
+    # Build deterministic closed fan wedges instead; each wedge's pivot top is
+    # limited by the lower of its two incident contact authorities.
+    pieces=[]
+    pivot=tuple(frame.inner_pivot)
+    for index,(a,b) in enumerate(zip(stations,stations[1:])):
+        pivot_bottom=min(a.z,b.z)
+        pivot_top=min(contact_zs[index],contact_zs[index+1])
+        pieces.append(_variable_prism(
+            (pivot,a.inner,b.inner),(pivot_bottom,a.z,b.z),
+            (pivot_top,contact_zs[index],contact_zs[index+1]),
+            "UNDERBODY",ordinal))
+    vertices=[];faces=[]
+    for piece in pieces:
+        offset=len(vertices);vertices.extend(piece.vertices)
+        faces.extend(tuple(offset+i for i in face) for face in piece.faces)
+    fragment=MeshFragment("UNDERBODY",ordinal,tuple(vertices),tuple(faces))
     validate_mesh_fragments((fragment,))
     return fragment
 
@@ -1035,6 +1021,24 @@ def high_side_pivot_closure(frame, relief, z_entry, z_exit):
              (endpoint[0], endpoint[1], high)))
 
 
+def sloped_contact_at(cells,tread_tops,tread_thickness,fraction):
+    """Return the fast-r1 top limit below every incident physical tread."""
+    fraction=float(fraction)
+    if fraction<=1e-12:
+        return float(tread_tops[0])-float(tread_thickness)
+    if fraction>=1.0-1e-12:
+        return float(tread_tops[-1])-float(tread_thickness)
+    for boundary in range(1,len(cells)):
+        if abs(fraction-cells[boundary].front_fraction)<=1e-9:
+            return (min(float(tread_tops[boundary-1]),
+                        float(tread_tops[boundary]))
+                    -float(tread_thickness))
+    cell_index=next(i for i,cell in enumerate(cells)
+                    if cell.front_fraction-1e-9<=fraction
+                    <=cell.rear_fraction+1e-9)
+    return float(tread_tops[cell_index])-float(tread_thickness)
+
+
 def build_sloped_underbody_fragments(frame, cells, tread_tops, body_depth,
                                      base_z, riser_thickness, tread_thickness,
                                      ordinal_start=11000, z_entry=None,
@@ -1046,23 +1050,18 @@ def build_sloped_underbody_fragments(frame, cells, tread_tops, body_depth,
           if z_entry is None else float(z_entry))
     zn = (stepped_patch_z(tread_tops[-1], body_depth, base_z)
           if z_exit is None else float(z_exit))
+    def contact_at(fraction):
+        return sloped_contact_at(cells,tread_tops,tread_thickness,fraction)
     relief, stations = resolve_sloped_stations(
         frame, cells, z0, zn, riser_thickness)
+    # Compact-U or steep grouped endpoints can make the straight lower chord
+    # cross a newly lowered safe contact.  Preserve endpoints and the resolved
+    # plan stations while recessing only offending interior soffit stations.
+    stations=tuple(replace(station,z=min(
+        station.z,contact_at(station.fraction)-10.0*EPS_LENGTH))
+        if 1e-12<station.fraction<1.0-1e-12 else station
+        for station in stations)
     fragments = []
-    def contact_at(fraction):
-        if fraction <= 1e-12:
-            return float(tread_tops[0]) - float(tread_thickness)
-        if fraction >= 1.0 - 1e-12:
-            return float(tread_tops[-1]) - float(tread_thickness)
-        for boundary in range(1, len(cells)):
-            if abs(fraction - cells[boundary].front_fraction) <= 1e-9:
-                return (max(float(tread_tops[boundary - 1]),
-                            float(tread_tops[boundary]))
-                        - float(tread_thickness))
-        cell_index = next(i for i, cell in enumerate(cells)
-                          if cell.front_fraction - 1e-9 <= fraction
-                          <= cell.rear_fraction + 1e-9)
-        return float(tread_tops[cell_index]) - float(tread_thickness)
     for index, (a, b) in enumerate(zip(stations, stations[1:])):
         middle = (a.fraction + b.fraction) / 2.0
         cell_index = next(i for i, cell in enumerate(cells)
