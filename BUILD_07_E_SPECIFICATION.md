@@ -1073,14 +1073,22 @@ interface face。Zero-middle Turn pairs use the layout's reconciled shared
 interface。Resolution and final-shell validation occur during candidate
 preparation; invalid topology raises `GEOMETRY_INVALID` before Scene mutation。
 
-Component-local ports may list the physical segment in either direction;
-they are transformed into the semantic inner-to-outer canonical q direction
-before comparison。The currently supported body-port cross-sections are
+Canonical q is supplied by explicit semantic `INNER -> OUTER` interface
+authority, never inferred from source order or world-coordinate sorting。
+Component-local source and destination ports may list the physical segment in
+either direction; both are transformed into that canonical q direction before
+comparison。The currently supported body-port cross-sections are
 rectilinear in `(q,z)`; a diagonal profile is `GEOMETRY_INVALID` rather than
 being approximated by the rectangular cell algebra。Profile vertices and all
-named semantic breakpoints jointly define the common q/z split stations。
-`EPS_LENGTH`-equivalent stations canonicalize with source authority taking
-deterministic precedence, and sliver intervals/cells are discarded before
+named semantic breakpoints jointly define the common q/z split stations。Grid
+stations used by cell algebra are distinct from actual profile/named station
+pairs; provenance belongs only to an actual canonicalized `(q,z)` pair and is
+never fabricated from the q-by-z Cartesian product。
+`EPS_LENGTH`-equivalent stations prefer named semantic authority over ordinary
+profile authority; same-priority ties use the stable numeric minimum, making
+canonicalization traversal-independent。Pair provenance survives snapping to
+the final canonical coordinates。Non-finite interface input is
+`GEOMETRY_INVALID`, and sliver intervals/cells are discarded before
 classification。The symmetric difference retains separate `SOURCE_ONLY` and
 `DESTINATION_ONLY` cells for later face orientation。If both occupied profiles
 match, both sets are empty and no transition-closure owner exists。

@@ -299,10 +299,15 @@ class GeneralizedLandingFinishTests(unittest.TestCase):
             body_port("ENTRY",((0,0),(1,0)),profile,((.25,.5),)),None)
         reverse=ResidentialBodyComponent(("D",0),"LANDING",1,None,(),
             body_port("ENTRY",((1,0),(0,0)),
-                      tuple((1-q,z) for q,z in profile),((.75,.5),)),None)
+                      tuple((1-q,z) for q,z in profile),((.75,.5),),
+                      canonical_segment=((0,0),(1,0))),None)
         a=resolve_body_interface(source,direct)
         b=resolve_body_interface(source,reverse)
-        self.assertEqual(a,b)
+        for name in ("frame","q_stations","z_stations","grid_stations",
+                     "authority_stations","semantic_stations","overlap_cells",
+                     "source_only_cells","destination_only_cells",
+                     "transition_cells","closure_owner"):
+            self.assertEqual(getattr(a,name),getattr(b,name))
         self.assertIn(.25,a.q_stations)
         self.assertIn(.5,a.z_stations)
         station=next(s for s in a.stations if s.q==.25 and s.z==.5)
@@ -310,7 +315,7 @@ class GeneralizedLandingFinishTests(unittest.TestCase):
         perturbed=ResidentialBodyComponent(("D",0),"LANDING",1,None,(),
             body_port("ENTRY",((0,0),(1+1e-10,0)),
                 ((0,1e-10),(1+1e-10,1e-10),(1+1e-10,1),(0,1))),None)
-        c=resolve_body_interface(source,perturbed)
+        c=resolve_body_interface(source,perturbed,((0,0),(1,0)))
         self.assertEqual(c.q_stations,(0.0,.25,1.0))
         self.assertEqual(c.z_stations,(0.0,.5,1.0))
         self.assertFalse(c.transition_cells)
@@ -319,6 +324,90 @@ class GeneralizedLandingFinishTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,"non-rectilinear"):
             body_port("INVALID",((0,0),(1,0)),
                       ((0,0),(1,0),(1,1),(.5,2),(0,1)))
+
+    def test_canonical_q_is_independent_of_both_local_orders(self):
+        canonical=((4.0,2.0),(4.0,3.0))
+        profile=((0,0),(1,0),(1,1),(.4,1),(.4,.6),(0,.6))
+        def port(key, reverse):
+            segment=tuple(reversed(canonical)) if reverse else canonical
+            local=tuple((1-q,z) for q,z in profile) if reverse else profile
+            breaks=((.7,.8,"NAMED"),) if not reverse else ((.3,.8,"NAMED"),)
+            return body_port(key,segment,local,breaks,canonical_segment=canonical)
+        results=[]
+        for source_reverse in (False,True):
+            for destination_reverse in (False,True):
+                source=ResidentialBodyComponent(("S",0),"WINDER",0,None,(),None,
+                                                port("P",source_reverse))
+                destination=ResidentialBodyComponent(("D",1),"LANDING",1,None,(),
+                    port("P",destination_reverse),None)
+                results.append(resolve_body_interface(source,destination,
+                                                       canonical))
+        baseline=results[0]
+        for result in results[1:]:
+            for name in ("frame","q_stations","z_stations","grid_stations",
+                         "authority_stations","semantic_stations","overlap_cells",
+                         "source_only_cells","destination_only_cells",
+                         "transition_cells","closure_owner"):
+                self.assertEqual(getattr(baseline,name),getattr(result,name))
+            self.assertEqual(result.source_port.profile_qz,profile)
+            self.assertEqual(result.destination_port.profile_qz,profile)
+
+    def test_pair_provenance_does_not_tag_cartesian_cross_points(self):
+        profile=((0,0),(1,0),(1,1),(0,1))
+        breaks=((.25,.50,"A"),(.75,.80,"B"))
+        port=body_port("P",((0,0),(1,0)),profile,breaks)
+        source=ResidentialBodyComponent(("S",0),"WINDER",0,None,(),None,port)
+        destination=ResidentialBodyComponent(("D",1),"LANDING",1,None,(),port,None)
+        result=resolve_body_interface(source,destination)
+        semantic={(station.q,station.z) for station in result.semantic_stations}
+        self.assertEqual(semantic,{(.25,.5),(.75,.8)})
+        grid={(station.q,station.z) for station in result.grid_stations}
+        self.assertTrue({(.25,.8),(.75,.5)} <= grid)
+        self.assertFalse({(.25,.8),(.75,.5)} & semantic)
+
+    def test_semantic_eps_precedence_and_reverse_traversal(self):
+        profile=((0,0),(1,0),(1,1),(.25,1),(.25,.5),(0,.5))
+        shifted=(.25+1e-10,.5+1e-10,"JOINT")
+        a=body_port("A",((0,0),(1,0)),profile,(shifted,))
+        b=body_port("B",((0,0),(1,0)),profile,((.25,.5,"JOINT"),))
+        left=ResidentialBodyComponent(("A",0),"WINDER",0,None,(),None,a)
+        right=ResidentialBodyComponent(("B",1),"LANDING",1,None,(),b,None)
+        forward=resolve_body_interface(left,right)
+        reverse=resolve_body_interface(
+            ResidentialBodyComponent(("B",1),"LANDING",0,None,(),None,b),
+            ResidentialBodyComponent(("A",0),"WINDER",1,None,(),a,None))
+        self.assertEqual(forward.q_stations,reverse.q_stations)
+        self.assertEqual(forward.z_stations,reverse.z_stations)
+        self.assertEqual(tuple(s.xyz for s in forward.semantic_stations),
+                         tuple(s.xyz for s in reverse.semantic_stations))
+        self.assertIn((.25,.5),{(s.q,s.z) for s in forward.semantic_stations})
+        for dq,dz in ((1e-10,0),(0,1e-10),(1e-10,1e-10)):
+            named=(.25+dq,.5+dz,"ONLY_NAMED")
+            named_port=body_port("N",((0,0),(1,0)),profile,(named,))
+            plain_port=body_port("P",((0,0),(1,0)),profile)
+            result=resolve_body_interface(
+                ResidentialBodyComponent(("N",0),"WINDER",0,None,(),None,
+                                         named_port),
+                ResidentialBodyComponent(("P",1),"LANDING",1,None,(),
+                                         plain_port,None))
+            station=next(s for s in result.semantic_stations
+                         if any("ONLY_NAMED" in tag for tag in s.tags))
+            self.assertEqual((station.q,station.z),(.25+dq,.5+dz))
+            self.assertEqual(station.xyz,(.25+dq,0.0,.5+dz))
+
+    def test_body_port_rejects_non_finite_authority(self):
+        profile=((0,0),(1,0),(1,1),(0,1))
+        cases=(
+            (((float("nan"),0),(1,0)),profile,()),
+            (((0,0),(1,float("inf"))),profile,()),
+            (((0,0),(1,0)),profile,((float("nan"),.5),)),
+            (((0,0),(1,0)),profile,((.5,float("nan")),)),
+            (((0,0),(1,0)),profile,((.5,float("inf")),)),
+        )
+        for segment,shape,breaks in cases:
+            with self.subTest(segment=segment,breaks=breaks):
+                with self.assertRaisesRegex(ValueError,"GEOMETRY_INVALID"):
+                    body_port("INVALID",segment,shape,breaks)
 
 
 if __name__=="__main__": unittest.main()

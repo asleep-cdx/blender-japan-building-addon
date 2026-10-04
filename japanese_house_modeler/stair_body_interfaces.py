@@ -9,6 +9,7 @@ from .stair_turn import EPS_AREA, EPS_LENGTH
 @dataclass(frozen=True)
 class ResidentialBodyPort:
     key: str
+    local_segment: tuple
     segment: tuple
     q_direction: tuple
     profile_qz: tuple
@@ -52,7 +53,9 @@ class BodyInterface:
     destination_port: ResidentialBodyPort
     q_stations: tuple
     z_stations: tuple
-    stations: tuple
+    grid_stations: tuple
+    authority_stations: tuple
+    semantic_stations: tuple
     overlap_cells: tuple
     source_only_cells: tuple
     destination_only_cells: tuple
@@ -62,7 +65,12 @@ class BodyInterface:
     @property
     def breakpoints(self):
         """Compatibility alias for consumers migrating to full stations."""
-        return self.stations
+        return self.semantic_stations
+
+    @property
+    def stations(self):
+        """Compatibility name for the complete rectangular-algebra grid."""
+        return self.grid_stations
 
 
 def _canonical_polygon(points):
@@ -77,26 +85,72 @@ def _rectilinear(profile):
                for a, b in zip(profile, profile[1:] + profile[:1]))
 
 
-def body_port(key, segment, profile_qz, breakpoints=()):
+def _finite_pair(value, label):
+    try:
+        pair = tuple(value)
+        if len(pair) != 2:
+            raise ValueError
+        pair = (float(pair[0]), float(pair[1]))
+    except (TypeError, ValueError, OverflowError):
+        raise ValueError("GEOMETRY_INVALID: " + label) from None
+    if not all(math.isfinite(item) for item in pair):
+        raise ValueError("GEOMETRY_INVALID: " + label)
+    return pair
+
+
+def body_port(key, segment, profile_qz, breakpoints=(), canonical_segment=None):
     """Create a validated rectilinear port and exact world XYZ authority."""
-    a, b = map(tuple, segment)
+    try:
+        local_a, local_b = (_finite_pair(point, "body port segment")
+                            for point in tuple(segment))
+    except (TypeError, ValueError):
+        raise ValueError("GEOMETRY_INVALID: body port segment") from None
+    canonical = segment if canonical_segment is None else canonical_segment
+    try:
+        a, b = (_finite_pair(point, "body port canonical segment")
+                for point in tuple(canonical))
+    except (TypeError, ValueError):
+        raise ValueError("GEOMETRY_INVALID: body port canonical segment") from None
     length = math.dist(a, b)
     if length <= EPS_LENGTH:
         raise ValueError("GEOMETRY_INVALID: body port")
     direction = ((b[0] - a[0]) / length, (b[1] - a[1]) / length)
-    profile = _canonical_polygon(tuple((float(q), float(z))
-                                       for q, z in profile_qz))
+    direct = (math.dist(local_a, a) <= EPS_LENGTH
+              and math.dist(local_b, b) <= EPS_LENGTH)
+    reverse = (math.dist(local_a, b) <= EPS_LENGTH
+               and math.dist(local_b, a) <= EPS_LENGTH)
+    if not direct and not reverse:
+        raise ValueError("GEOMETRY_INVALID: incompatible body port segment")
+    transform = (lambda q: q) if direct else (lambda q: length - q)
+    try:
+        raw_profile = tuple(_finite_pair(point, "body port profile")
+                            for point in profile_qz)
+    except TypeError:
+        raise ValueError("GEOMETRY_INVALID: body port profile") from None
+    profile = _canonical_polygon(tuple((transform(q), z)
+                                       for q, z in raw_profile))
     if not _rectilinear(profile):
         raise ValueError("GEOMETRY_INVALID: non-rectilinear body port")
     if any(q < -EPS_LENGTH or q > length + EPS_LENGTH for q, _z in profile):
         raise ValueError("GEOMETRY_INVALID: body port width")
-    semantic = tuple((float(q), float(z)) for q, z in breakpoints)
-    if any(q < -EPS_LENGTH or q > length + EPS_LENGTH for q, _z in semantic):
+    semantic = []
+    try:
+        for index, point in enumerate(breakpoints):
+            values = tuple(point)
+            q, z = _finite_pair(values[:2], "body port breakpoint")
+            tag = str(values[2]) if len(values) == 3 else "%s:%d" % (key, index)
+            if len(values) not in (2, 3):
+                raise ValueError("GEOMETRY_INVALID: body port breakpoint")
+            semantic.append((transform(q), z, tag))
+    except TypeError:
+        raise ValueError("GEOMETRY_INVALID: body port breakpoint") from None
+    semantic = tuple(semantic)
+    if any(q < -EPS_LENGTH or q > length + EPS_LENGTH for q, _z, _tag in semantic):
         raise ValueError("GEOMETRY_INVALID: body port breakpoint")
     xyz = tuple((a[0] + direction[0] * q, a[1] + direction[1] * q, z)
                 for q, z in profile)
-    return ResidentialBodyPort(str(key), (a, b), direction, profile, xyz,
-                               semantic)
+    return ResidentialBodyPort(str(key), (local_a, local_b), (a, b), direction,
+                               profile, xyz, semantic)
 
 
 def _inside(point, polygon):
@@ -110,13 +164,19 @@ def _inside(point, polygon):
     return inside
 
 
-def _canonical_values(tagged):
-    """Deduplicate within EPS; input order gives semantic precedence."""
-    result = []
-    for value, _tag in tagged:
-        if not any(abs(value - retained) <= EPS_LENGTH for retained in result):
-            result.append(float(value))
-    return tuple(sorted(result))
+def _canonical_values(values):
+    """Semantic-first, traversal-independent EPS clustering."""
+    ordered = sorted((float(value), int(priority)) for value, priority in values)
+    clusters = []
+    for item in ordered:
+        if not clusters or item[0] - clusters[-1][-1][0] > EPS_LENGTH:
+            clusters.append([item])
+        else:
+            clusters[-1].append(item)
+    # Lower priority number is stronger; numeric minimum is the stable tie-break.
+    return tuple(min(value for value, priority in cluster
+                     if priority == min(item[1] for item in cluster))
+                 for cluster in clusters)
 
 
 def _snap(value, stations):
@@ -127,63 +187,86 @@ def _snap(value, stations):
 def _snap_port(port, qs, zs, segment, direction):
     profile = _canonical_polygon(tuple((_snap(q, qs), _snap(z, zs))
                                        for q, z in port.profile_qz))
-    breaks = tuple((_snap(q, qs), _snap(z, zs))
-                   for q, z in port.breakpoints)
+    breaks = tuple((_snap(q, qs), _snap(z, zs), tag)
+                   for q, z, tag in port.breakpoints)
     xyz = tuple((segment[0][0] + direction[0] * q,
                  segment[0][1] + direction[1] * q, z)
                 for q, z in profile)
-    return ResidentialBodyPort(port.key, segment, direction, profile, xyz,
-                               breaks)
+    return ResidentialBodyPort(port.key, port.local_segment, segment, direction,
+                               profile, xyz, breaks)
 
 
 def _normalize_port(port, canonical_segment):
     start, end = canonical_segment
-    direct = (math.dist(port.segment[0], start) <= EPS_LENGTH
-              and math.dist(port.segment[1], end) <= EPS_LENGTH)
-    reverse = (math.dist(port.segment[0], end) <= EPS_LENGTH
-               and math.dist(port.segment[1], start) <= EPS_LENGTH)
-    if not direct and not reverse:
+    if not (math.dist(port.segment[0], start) <= EPS_LENGTH
+            and math.dist(port.segment[1], end) <= EPS_LENGTH):
         raise ValueError("GEOMETRY_INVALID: incompatible body interface")
     width = math.dist(start, end)
-    transform = (lambda q: q) if direct else (lambda q: width - q)
-    profile = _canonical_polygon(tuple((transform(q), z)
-                                       for q, z in port.profile_qz))
-    breaks = tuple((transform(q), z) for q, z in port.breakpoints)
+    profile = port.profile_qz
+    breaks = port.breakpoints
     direction = ((end[0] - start[0]) / width, (end[1] - start[1]) / width)
     xyz = tuple((start[0] + direction[0] * q,
                  start[1] + direction[1] * q, z) for q, z in profile)
-    return ResidentialBodyPort(port.key, canonical_segment, direction,
-                               profile, xyz, breaks)
+    return ResidentialBodyPort(port.key, port.local_segment, canonical_segment,
+                               direction, profile, xyz, breaks)
 
 
-def resolve_body_interface(source, destination):
+def resolve_body_interface(source, destination, canonical_segment=None):
     """Resolve exact rectilinear overlap and oriented symmetric difference."""
     sp, dp = source.exit_port, destination.entry_port
     if sp is None or dp is None:
         raise ValueError("GEOMETRY_INVALID: missing body port")
-    # Source's semantic inner->outer authority has precedence for sub-EPS
-    # endpoint differences; destination may describe the segment in reverse.
-    segment = sp.segment
+    if canonical_segment is None:
+        segment = sp.segment
+    else:
+        try:
+            segment = tuple(_finite_pair(point, "canonical interface segment")
+                            for point in tuple(canonical_segment))
+            if len(segment) != 2:
+                raise ValueError
+        except (TypeError, ValueError):
+            raise ValueError("GEOMETRY_INVALID: canonical interface segment") from None
+    if canonical_segment is None and sp.segment != dp.segment:
+        raise ValueError("GEOMETRY_INVALID: explicit canonical interface required")
     sp = _normalize_port(sp, segment)
     dp = _normalize_port(dp, segment)
-    tagged_q = ([(q, "SOURCE_PROFILE") for q, _z in sp.profile_qz]
-                + [(q, "SOURCE_SEMANTIC") for q, _z in sp.breakpoints]
-                + [(q, "DESTINATION_PROFILE") for q, _z in dp.profile_qz]
-                + [(q, "DESTINATION_SEMANTIC") for q, _z in dp.breakpoints])
-    tagged_z = ([(z, "SOURCE_PROFILE") for _q, z in sp.profile_qz]
-                + [(z, "SOURCE_SEMANTIC") for _q, z in sp.breakpoints]
-                + [(z, "DESTINATION_PROFILE") for _q, z in dp.profile_qz]
-                + [(z, "DESTINATION_SEMANTIC") for _q, z in dp.breakpoints])
+    semantic_by_tag = {}
+    for port in (sp, dp):
+        for q, z, tag in port.breakpoints:
+            prior = semantic_by_tag.setdefault(tag, (q, z))
+            if (abs(prior[0] - q) > EPS_LENGTH
+                    or abs(prior[1] - z) > EPS_LENGTH):
+                raise ValueError("GEOMETRY_INVALID: semantic station disagreement")
+    tagged_q = ([(q, 1) for q, _z in sp.profile_qz]
+                + [(q, 0) for q, _z, _tag in sp.breakpoints]
+                + [(q, 1) for q, _z in dp.profile_qz]
+                + [(q, 0) for q, _z, _tag in dp.breakpoints])
+    tagged_z = ([(z, 1) for _q, z in sp.profile_qz]
+                + [(z, 0) for _q, z, _tag in sp.breakpoints]
+                + [(z, 1) for _q, z in dp.profile_qz]
+                + [(z, 0) for _q, z, _tag in dp.breakpoints])
     qs, zs = _canonical_values(tagged_q), _canonical_values(tagged_z)
     direction = sp.q_direction
     sp = _snap_port(sp, qs, zs, segment, direction)
     dp = _snap_port(dp, qs, zs, segment, direction)
-    stations = tuple(InterfaceStation(
-        q, z, (segment[0][0] + direction[0] * q,
-               segment[0][1] + direction[1] * q, z),
-        tuple(tag for value, tag in tagged_q if abs(value - q) <= EPS_LENGTH)
-        + tuple(tag for value, tag in tagged_z if abs(value - z) <= EPS_LENGTH))
-        for q in qs for z in zs)
+    world = lambda q, z: (segment[0][0] + direction[0] * q,
+                          segment[0][1] + direction[1] * q, z)
+    grid_stations = tuple(InterfaceStation(q, z, world(q, z))
+                          for q in qs for z in zs)
+    actual = []
+    for port, side in ((sp, "SOURCE"), (dp, "DESTINATION")):
+        actual.extend((_snap(q, qs), _snap(z, zs), side + "_PROFILE")
+                      for q, z in port.profile_qz)
+        actual.extend((_snap(q, qs), _snap(z, zs), side + "_SEMANTIC:" + tag)
+                      for q, z, tag in port.breakpoints)
+    grouped = {}
+    for q, z, tag in actual:
+        grouped.setdefault((q, z), set()).add(tag)
+    authority_stations = tuple(InterfaceStation(q, z, world(q, z),
+                                                tuple(sorted(tags)))
+                               for (q, z), tags in sorted(grouped.items()))
+    semantic_stations = tuple(station for station in authority_stations
+                              if any("_SEMANTIC:" in tag for tag in station.tags))
     overlap, source_only, destination_only = [], [], []
     for q0, q1 in zip(qs, qs[1:]):
         if q1 - q0 <= EPS_LENGTH:
@@ -203,6 +286,7 @@ def resolve_body_interface(source, destination):
     transition = tuple(source_only + destination_only)
     frame = BodyInterfaceFrame(segment, direction, source.identity,
                                destination.identity)
-    return BodyInterface(frame, sp, dp, qs, zs, stations, tuple(overlap),
+    return BodyInterface(frame, sp, dp, qs, zs, grid_stations,
+                         authority_stations, semantic_stations, tuple(overlap),
                          tuple(source_only), tuple(destination_only), transition,
                          destination.identity if transition else None)
