@@ -1,11 +1,12 @@
 # BUILD 07-E SPECIFICATION
 ## 日本住宅モデラー — Winder / 廻り段 + Arbitrary-angle Turn / Landing
 
-> **Status: FINAL / IMPLEMENTATION AUTHORITY**  
+> **Status: FINAL / IMPLEMENTATION AUTHORITY + STAGE 2.5 OVERRIDE**  
 > Date: 2026-09-30  
+> Stage 2.5 override added: 2026-10-05  
 > Build 07-D overall Acceptance を baseline とし、07-D の accepted Multi-point Path / L / U / Landing / lifecycle contract を壊さず、Turn Foundation を Winder / 廻り段および arbitrary-angle Turn / Landing へ拡張する。
 >
-> **Implementation authority:** Codex は本ファイルだけで production geometry / migration / validation / lifecycle を実装できなければならない。外部画像・chat添付画像・過去のreview文書から不足する形状を推測してはならない。
+> **Implementation authority:** Codex は本ファイルだけで production geometry / migration / validation / lifecycle を実装できなければならない。外部画像・chat添付画像・過去のreview文書から不足する形状を推測してはならない。**ただし、末尾 Section 39 は 2026-10-05 の later project decision であり、Stage 2.5 / restarted Stage 3 に関して旧Section 15 / 20–24 / 30 / 32–38 と矛盾する場合は Section 39 を優先する。**
 
 ---
 
@@ -792,7 +793,7 @@ The mathematical pivot `I` remains nominal subdivision authority only。Per-trea
 ```text
 R0 = normalize(E_in-I)
 Rn = normalize(E_out-I)
-b  = normalize(R0+Rn)             # points into envelope
+b  = normalize(R0+Rn)
 h_j = dot(M_j-I,b)
 eps_l = named length epsilon
 c_finish = max(n,r,10*eps_l)
@@ -1205,7 +1206,7 @@ Station pair：
 
 ```text
 Inner = P(f) at z(f)
-Outer = V(f) at z(f)   # Q or O etc.
+Outer = V(f) at z(f)
 ```
 
 ## 21.3 Main turning strips
@@ -1675,7 +1676,7 @@ These are regression targets, never legal minima/maxima。
 ```text
 P0=(0,0)
 T =(0,2200mm)
-P2=(-2200mm,2200mm)   # exact 90° left
+P2=(-2200mm,2200mm)
 Mode/Pattern       = WINDER / EQUAL_3
 base_z             = 0mm
 floor_to_floor     = 2800mm
@@ -1691,371 +1692,323 @@ side board reveal  = 40mm
 boards             = BOTH ON
 ```
 
-Run every width：
-
-```text
-900mm
-800mm
-750mm
-700mm
-650mm
-```
-
-For **every width**, both must reach final physical geometry：
-
-```text
-A: STEPPED_CLOSED + STEPPED board
-B: SLOPED_CLOSED  + SLOPED  board
-```
-
-Width alone may never be reason for failure。If fixture fails, investigate implementation vs reviewed contract; do not weaken/remove fixture to obtain green tests。
+Run every width：900 / 800 / 750 / 700 / 650mm。Both STEPPED_CLOSED + STEPPED board and SLOPED_CLOSED + SLOPED board must reach final physical geometry under the original reviewed contract。
 
 ## 30.2 EQUAL_3 outer-corner fixture
 
-Width750 / exact90 / EQUAL_3 central cell：
-
-```text
-Q_1 -> O -> Q_2
-```
-
-must be preserved。At 90° `f_O=1/2` inside `[1/3,2/3]`。
-
-```text
-z_O=(z_1+z_2)/2
-```
-
-No plan triangle loss adjacent O。
+Width750 / exact90 / EQUAL_3 central cell preserves `Q_1 -> O -> Q_2`。At 90° `f_O=1/2` inside `[1/3,2/3]` and `z_O=(z_1+z_2)/2`。
 
 ## 30.3 Compact U full-finish fixture
 
 ```text
-base_z            = 0mm
-width             = 750mm
+base_z=0mm
+width=750mm
 P0=(0,0)
 P1=(0,2200mm)
 P2=(750mm,2200mm)
 P3=(750mm,0)
-Turn A            = WINDER / EQUAL_3
-Turn B            = WINDER / EQUAL_3
-floor_to_floor    = 2800mm
-overall risers    = 17
-body depth        = 150mm
-underside shell   = 9.5mm
-tread thickness   = 30mm
-riser thickness   = 20mm
-nosing             = 5mm
-front edge         = SQUARE
-side boards        = BOTH ON
-side board thick   = 18mm
-side board reveal  = 40mm
+Turn A=WINDER/EQUAL_3
+Turn B=WINDER/EQUAL_3
+floor_to_floor=2800mm
+overall risers=17
+body depth=150mm
+underside shell=9.5mm
+tread thickness=30mm
+riser thickness=20mm
+nosing=5mm
+front edge=SQUARE
+side boards=BOTH ON
+side board thick=18mm
+side board reveal=40mm
 ```
-
-Run both：
-
-```text
-A: STEPPED_CLOSED + STEPPED board
-B: SLOPED_CLOSED  + SLOPED  board
-```
-
-Required：
-
-- COMPACT_U
-- zero ordinary middle tread events
-- no duplicate shared Riser
-- one shared center-board family, not two colliding full boards
-- actual TREAD/RISER/UNDERBODY trim by `V_shared`
-- no open cavity / positive-volume board collision
-- in B, shared soffit M = exact 3/6 event-group height
 
 ## 30.4 Arbitrary-angle Landing fixture
 
 ```text
 width=750mm
 P0=(0,0)
-T =(0,2200mm)
+T=(0,2200mm)
 P2=T + 2200mm*(-sin(63°), cos(63°))
-Mode=LANDING / schema5 generalized
+Mode=LANDING/schema5 generalized
 base_z=0mm
 floor_to_floor=2800mm
 overall risers=16
 ```
 
-Both adjacent original segment lengths exactly2200mm。Must succeed without angle-preset reject。
-
 ## 30.5 Representative physical finish
 
-Mandatory Stage-2 physical fixtures：
-
-- A: width650, exact-90 L, EQUAL_3, nosing5mm, SQUARE;
-- B: width650, 63-degree L, EQUAL_3, nosing5mm, SQUARE;
-- C: width900, exact-90 U, Turn1=BF_1, Turn2=BF_2, nosing5mm, SQUARE;
-- D: representative REVERSE case。
-
-For every positive-nosing front edge, perpendicular offset from nominal Riser face equals requested `n` at both endpoints within epsilon; `inner ~= 0 / outer ~= n` is invalid。For every shared step boundary, lower-tread rear support equals destination-Riser back boundary exactly, with no open wedge cavity。BEVEL/ROUND use the same semantic front-edge authority。Width650 is a regression sample, not a lower bound。
+Historical Stage-2 physical fixtures include width650 exact-90/63-degree EQUAL_3, BF_1+BF_2 U and REVERSE, with Candidate-r3 constant nosing/shared rear-support expectations。
 
 ---
 
 # 31. Stage 1 — canonical Turn + first 90° L Winder
 
-Implement / accept：
-
-- identity 0.7.4
-- schema-5 foundation
-- `path_point_id` Turn identity
-- `winder_pattern` authority
-- generalized Turn frame pure helpers
-- 90° L Winder EQUAL_2/3/4 nominal cells
-- exact RiseEvent ownership / AUTO allocation
-- SQUARE Winder Tread/Riser physical geometry
-- transaction / rollback / basic persistence
-- schema-1/2/3/4 regression
-
-Stage 1 does not need BF / U / arbitrary-angle / final underbody / Side Board finished。
-
-Runtime focus：EQUAL_2/3/4 appearance, total rise, Reverse basic, save/reopen, invalid rollback, width900/750/650 where applicable。
+Implement / accept：identity 0.7.4、schema-5 foundation、path-point Turn identity、winder pattern authority、generalized frame、90° EQUAL_2/3/4 nominal cells、RiseEvent/AUTO、SQUARE Winder Tread/Riser、transaction/rollback/basic persistence、schema-1/2/3/4 regression。
 
 ---
 
 # 32. Stage 2 — BF + U / Compact U + arbitrary-angle
 
-Internal order：
+Internal order：2A BF、2B U/Compact U、2C arbitrary-angle Landing、2D arbitrary-angle EQUAL Winder、2E positive nosing/front-edge finish integration。
 
-```text
-2A BF patterns
-2B U / Compact U
-2C arbitrary-angle Landing
-2D arbitrary-angle EQUAL Winder
-2E positive nosing / front-edge finish integration where not already active
-```
-
-Implement / accept：
-
-- BF exact fractions
-- per-Turn mode/pattern
-- U per-Turn combinations
-- Compact-U classification/shared section
-- arbitrary-angle Landing
-- arbitrary-angle EQUAL Winder
-- free-angle point relocation; Shift15 remains convenience
-- full schema-5 AUTO / MANUAL
-- schema-4 migration guards
-- deterministic regeneration
-- constant-distance physical Winder nosing
-- finite inner physical miter instead of pivot collapse
-- exact shared Tread rear-support / destination-Riser boundary reuse
-- no open Winder tread/Riser cavity
-- 90-degree and arbitrary-angle physical Winder finish
-- U / Compact-U use the same physical boundary authority
-
-These physical requirements are Stage 2 and must not be deferred to Stage 3。
-
-Do not debug all families simultaneously。
+Historical accepted scope includes BF fractions、per-Turn mode/pattern、U combinations、Compact-U、arbitrary-angle Landing/Winder、free-angle relocation、schema-5 allocation/migration、deterministic regeneration、Candidate-r3 physical Winder finish corrections。
 
 ---
 
 # 33. Stage 3 — CLOSED underbody + Side Board
 
-Internal order：
+Historical reviewed order：3A STEPPED_CLOSED、3B SLOPED_CLOSED、3C ordinary Side Board、3D Compact-U shared-center Side Board、3E Material/Reverse/Repair/topology sweep。
 
-```text
-3A STEPPED_CLOSED, Side Boards OFF
-3B SLOPED_CLOSED, Side Boards OFF
-3C ordinary Side Board continuation
-3D Compact-U shared-center Side Board
-3E Material / Reverse / Repair / topology sweep
-```
-
-Required：
-
-- Winder STEPPED_CLOSED exact cell Z contract
-- continuous SLOPED_CLOSED finite pivot relief
-- no Landing plateau through Winder
-- Winder/Flight exact joins
-- ordinary STEPPED/SLOPED Side Board upper/lower authority
-- Compact-U shared-center family / butt joints / 3D trims
-- body remains CLOSED with Side Boards OFF
-- Material lifecycle
-- no cavity/spike/giant filler/duplicate positive-volume body
-- width900/800/750/700/650 full-finish fixtures
-
-Stage-3 implementation may not redesign already accepted TREAD/RISER plan authority except explicit shared-board derived trim。
+**The first implementation attempt of Stage 3 is now ABANDONED / CLOSED / NOT MERGED. The restarted Stage 3 after Stage 2.5 follows Section 39.**
 
 ---
 
 # 34. Stage 4 — lifecycle / full regression / practical acceptance
 
-Cover：
-
-- Candidate identity
-- schema-1/2/3/4 regression
-- schema-5 L/U/arbitrary persistence
-- EQUAL/BF persistence
-- AUTO/MANUAL persistence
-- mixed LANDING/WINDER invariant
-- schema-4 migration guard
-- Undo/Redo
-- invalid rollback
-- Repair
-- duplicate Stair ID repair
-- Material lifecycle
-- Reverse
-- Save/full exit/reopen
-- Finalize
-- active-only Delete
-- Wall / Finish isolation
-- practical Wall/Floor-like placement
-- narrow old-house cases
-- topology finite / zero-area / boundary / nonmanifold expectations
-- deterministic repeated Regenerate
-- full automated regression
-- compileall
-- git diff --check
-
-07-E overall ACCEPTED only after Stage 4 runtime acceptance。
+Cover Candidate identity、legacy/schema regressions、schema-5 persistence、patterns/allocation、migration guard、Undo/Redo、rollback、Repair、Materials、Reverse、Save/full exit/reopen、Finalize/Delete、Wall/Finish isolation、practical placement、narrow-house cases、deterministic regeneration、automated regression、compileall、diff check。07-E overall ACCEPTED only after Stage 4 runtime acceptance。
 
 ---
 
 # 35. Automated / runtime test policy
 
-Pure/testable logicをBlender modal codeから分離する。
-
-Pure tests include at least：
-
-- signed theta
-- normals / corridor intersections
-- Turn envelope / exact90 reduction
-- cutback equivalence
-- EQUAL / BF fractions
-- outer-chain O preservation / dedup
-- left/right mirror
-- Reverse pattern identity
-- nominal coverage / overlap / gaps
-- RiseEvent ownership / `S+L+W+1=N`
-- deterministic AUTO allocation
-- schema migration
-- Compact-U classification / shared height
-- arbitrary Landing/Winder
-- finite pivot relief / ray-chord intersections
-- STEPPED patch Z
-- Side Board profile component rules / point-contact separation / butt-joint ownership
-- narrow-width property/UI guard
-- deterministic geometry
-- constant-offset Winder nose endpoints at 90-degree and 63-degree Turns
-- finite inner miter not forced to nominal `I`
-- exact tread rear-support / Riser-back coordinate reuse
-- BF_1+BF_2 U and Compact-U semantic-boundary reuse
-- REVERSE physical ownership
-- SQUARE/BEVEL/ROUND semantic exposed-edge identity
-- width650 physical geometry and deterministic trim points
-
-Visual runtime additionally inspects inner nosing and outer junctions from an oblique angle where any background-visible cavity is evident。
-
-Dedicated：
-
-```text
-tests/test_build_07_e_stage1.py
-...
-tests/test_build_07_e_stage4.py
-```
-
-Prior 07-A/B/C/D suites remain regression targets。
-
-Runtime：Console canonical evidence + visual where geometry appearance matters。
-
-Visual mandatory for Winder shape, BF, Compact U, arbitrary Landing, SLOPED underside, pivot local closure, Side Board joins。
-
-Stage 3 specifically inspect `HIGH_SIDE_PIVOT_CLOSURE` with Side Boards OFF from below / pivot side / normal residential view。
+Pure/testable logicをBlender modal codeから分離する。Prior 07-A/B/C/D suites remain regression targets。RuntimeはConsole canonical evidence + geometry visual inspectionを組み合わせる。
 
 ---
 
 # 36. Acceptance principles
 
-07-E overall Acceptance requires all：
-
-1. schema-1/2/3/4 accepted behavior not silently migrated/regressed。
-2. EQUAL_2/3/4 from one general partition rule。
-3. BF_1 `[2/3]`, BF_2 `[1/3]` text-only deterministic。
-4. U as two persistent per-Turn assignments。
-5. Compact U handles zero ordinary middle run without false short-flight rejection。
-6. arbitrary-angle Landing from generalized envelope。
-7. representative arbitrary-angle EQUAL Winder。
-8. Shift15 not production angle restriction。
-9. RiseEvent exact, no double count, `S+L+W+1=N`。
-10. schema-4 MANUAL not silently converted to Winder。
-11. physical Tread/Riser/nosing ownership deterministic; positive Winder nosing does not collapse at `I`, adjacent physical components have no open exterior cavity, and semantic shared boundaries are reused exactly。
-12. EQUAL_3 central outer corner O not omitted。
-13. STEPPED_CLOSED Winder uses exact schema-5 patch Z and remains CLOSED。
-14. SLOPED_CLOSED uses complete outer chain + finite pivot relief + local high-side closure, no horizontal Landing plateau。
-15. no T-junction on semantic shared edges。
-16. Compact-U shared SLOPED height follows ascent-order event grouping。
-17. Side Board lower/upper authorities preserve 07-C independence。
-18. Compact-U center board uses shared profile, point-only contacts stay separate, deterministic butt joints and actual 3D trim including RISER。
-19. width900/800/750/700/650 fixed full-finish fixtures pass as specified; 650 is not a lower bound。
-20. legal-like minima are not hidden in validator/RNA/UI/preset。
-21. invalid geometry gives clear class + atomic rollback。
-22. Save/Reopen / Undo/Redo / Repair / Finalize / Delete / Materials work。
-23. Wall / Finish isolation preserved。
-24. Practical residential placement has no major failure。
-25. implementation/review possible from repository text without reference images。
+07-E overall Acceptance requires schema compatibility、general pattern rule、BF determinism、two-Turn U、Compact-U、arbitrary-angle Landing/Winder、Shift15 non-restriction、RiseEvent correctness、migration safety、physical visible geometry、CLOSED underbody、Side Boards、narrow-width support、atomic rollback、lifecycle、Materials、isolation、practical placement、repository-text implementation authority。
 
 ---
 
 # 37. Explicit non-scope
 
-07-E does not require：
-
-- spiral/helical stair
-- curved Flight centerline
-- freehand curved Winder edge
-- per-divider custom editor
-- building-code compliance judgment / legal pass-fail
-- variable width along one Flight
-- non-uniform riser heights within one Stair
-- Riser OFF / Underside NONE / open/support variants (07-F)
-- sawtooth / center support (07-F)
-- handrail/newel/baluster
-- separate Winder Material role
-- automatic Wall/Floor/Room attachment
-- automatic Stair opening / Floor Boolean
-- production UV guarantee
-- default stair width 900→750 change
-- general Stair panel compacting/collapsible UI redesign
-- Winder production guarantee on 3+ Turn custom Path
+07-E does not require spiral/helical stair、curved Flight centerline、freehand curved Winder edge、per-divider editor、code-compliance judgment、variable Flight width、non-uniform riser heights、07-F open/support variants、handrail/newel/baluster、automatic Wall/Floor/Room attachment、automatic Stair opening Boolean、production UV guarantee、default width change、general panel redesign、3+ Turn Winder guarantee。
 
 ---
 
 # 38. Final implementation order
 
+Historical order progressed through accepted 07-D → schema-5 foundation → Stage 1 → Stage 2 Candidate r3. The current continuation is replaced by Section 39：Stage 2.5 correction → fresh Stage 3 → Stage 4。
+
+---
+
+# 39. Stage 2.5 / restarted Stage 3 normative override
+
+This section is the **later project decision adopted on 2026-10-05 after direct runtime evaluation**. It supersedes conflicting older requirements in Sections 15, 20–24, 30, 32–38 for the Stage-2.5 / restarted-Stage-3 path while preserving the historical record of why Candidate r3 was accepted at Stage 2。
+
+## 39.1 Current status
+
 ```text
-accepted 07-D compatibility
-    ↓
-schema-5 Turn identity / pattern authority
-    ↓
-generalized Turn frame
-    ↓
-RiseEvent / AUTO allocation
-    ↓
-90° L EQUAL_2/3/4 top geometry
-    ↓
-BF + U / Compact U
-    ↓
-arbitrary-angle Landing / Winder
-    ↓
-physical nosing / finish integration
-    ↓
-STEPPED_CLOSED
-    ↓
-SLOPED_CLOSED finite pivot relief
-    ↓
-ordinary Side Board
-    ↓
-Compact-U shared Side Board
-    ↓
-full lifecycle / practical acceptance
+Build 07-E Stage 1          ACCEPTED
+Build 07-E Stage 2 r3       ACCEPTED
+PR #33 first Stage 3        ABANDONED / CLOSED / NOT MERGED
+Build 07-E Stage 2.5        CURRENT
+Fresh Stage 3 restart       NEXT after Stage 2.5 acceptance + merge
 ```
 
-Top-plan / RiseEvent authorityをruntimeで固める前に、複雑なunderbody / Side Board debuggingへ進まない。
+`main` remains at the accepted Stage-2 baseline until Stage 2.5 is runtime-accepted and merged。
 
-If implementation reveals a fixed success fixture is impossible under the reviewed contract, do not silently weaken the fixture。Determine whether implementation is wrong or Specification correction/addendum is required。
+## 39.2 Why Stage 2.5 exists
 
-07-E Acceptance完了後はRoadmapどおり07-F / 07-GをHOLDし、08-A / 08-Bへ進む。
+Candidate-r3 solved real isolated Winder finish defects, but the r2/r3 Turn-wide physical-plan and `K_finish` authorities increased downstream seam complexity. During the first Stage-3 implementation, precision-oriented internal-solid work became dominant and visible accepted geometry regressed in runtime, including Winder top behavior, SLOPED body penetration into visible walking regions, and previously accepted 07-D Landing/Residential body appearance。
+
+The project goal is a practical Blender modeling aid rather than a CAD/BIM watertight-solid kernel。
+
+Normative priority：
+
+> **Visible exterior correctness + reliable Blender workflow > hidden internal solid cleanliness.**
+
+## 39.3 Preserved Stage-2 runtime artifact authority
+
+The retained runtime ZIPs were directly audited：
+
+```text
+Candidate r1
+commit b0d92fc15f7ec103e3cf18b6110dce2b5841fd3e
+tree   e90e4bfa0e0583552bc761a200b8e51a52590470
+SHA256 8c6c7100e0a51e550525fedca0e214e95b5ca8b73874ce4c7b213d9149f62054
+
+Candidate r2
+commit 26ddf5b79bb933ea6b8bf43a3a4c585c11ddf597
+tree   9c4804864dab6e07cfd54be8f38c85fae671cd1a
+SHA256 2d6e34b4589ea993995903fdbe30dfd8c68559daae2438ca955ced0563fd5cac
+
+Candidate r3
+commit 9424da623953a32a97576ce45bec074b269d4058
+tree   7d30e76ae20ad58b72cece1e298f54ee45f90a65
+SHA256 15d48e9230b5a7e7f0b59954ccbe56acc7fb99bce3d26b39481f969f75c7b1d4
+```
+
+Recursive package comparison found：
+
+```text
+r1 -> r2 : japanese_house_modeler/stair_turn.py only
+r2 -> r3 : japanese_house_modeler/stair_turn.py only
+r1 -> r3 : japanese_house_modeler/stair_turn.py only
+```
+
+Therefore Stage 2.5 must be a narrow production-path correction, not a repository rollback。
+
+## 39.4 Exact geometry evolution found by ZIP audit
+
+Candidate r1 visible Winder production used the simpler per-cell path：
+
+```text
+physical_winder_tread_polygon(...)
+resolve_winder_riser_plan(...)
+```
+
+Candidate r2 added Turn-wide semantic physical-plan authority：
+
+```text
+PhysicalWinderBoundary
+PhysicalWinderTreadPlan
+resolve_physical_winder_plans(...)
+_semantic_boundary(...)
+_line_chain_intersection(...)
+_trim_semantic_line(...)
+```
+
+Candidate r3 then added the common inner finish chord system：
+
+```text
+PhysicalWinderInnerTrim
+K_finish
+inner_front
+inner_rear
+inner_edge
+```
+
+This history is now the restoration authority; do not infer r1 behavior from screenshots or memory。
+
+## 39.5 Stage-2.5 implementation target
+
+Stage 2.5 must：
+
+1. use current accepted Stage-2 r3 codebase as the structural base;
+2. preserve schema-5 Turn / BF / U / Compact-U / arbitrary-angle / migration / allocation / UI / serialization / persistence foundation;
+3. restore the **Candidate-r1-equivalent visible Winder TREAD/RISER production call behavior** from commit `b0d92fc...`;
+4. bypass r2/r3 Turn-wide `resolve_physical_winder_plans()` / `K_finish` production authority where required to reproduce r1 visible top geometry;
+5. not replace the whole current `stair_turn.py` with the r1 file;
+6. not roll the whole repository back;
+7. not change accepted 07-D Landing / Straight / underside / Residential geometry;
+8. not implement new Stage-3 UNDERBODY/Side Board work during Stage 2.5。
+
+Later r2/r3 helper definitions may remain present if unused; production authority matters more than deleting code。
+
+## 39.6 Candidate-r1 known gap is intentionally allowed
+
+The Candidate-r1 visible terminal TREAD/RISER / Turn-transition gap is a known defect and is explicitly tolerated for Stage 2.5：
+
+```text
+known r1 terminal gap = ALLOWED / NOT A STAGE-2.5 BLOCKER
+```
+
+Do not rebuild r2/r3 physical-plan complexity merely to close it during Stage 2.5。It may be revisited after a successful fresh Stage-3 r1 exists。
+
+## 39.7 Geometry identity target
+
+Where practical, add pure regression comparing Stage-2.5 Winder output with Candidate-r1 source authority for selected fixtures：
+
+- TREAD vertex coordinates;
+- RISER vertex coordinates;
+- polygon vertex order;
+- Z elevations;
+- ordinal/event ordering;
+- FORWARD / REVERSE;
+- exact-90 EQUAL_3 reference fixture。
+
+Preferred result：numeric equivalence within existing named tolerance, not merely visual similarity。
+
+## 39.8 Mandatory Stage-2.5 runtime focus
+
+Before merge：
+
+1. exact-90 EQUAL_3 Winder compared with retained Candidate r1;
+2. confirm simple Turn/inner boundary behavior is restored;
+3. 63° arbitrary-angle Winder smoke check;
+4. FORWARD;
+5. REVERSE;
+6. Build 07-D exact-90 Landing visual regression including underside/body;
+7. Save -> full Blender exit -> reopen smoke;
+8. prior automated 07-D / 07-E regressions;
+9. dedicated Stage-2.5 Acceptance Record。
+
+Only after this may Stage 2.5 merge to `main` and fresh Stage 3 begin。
+
+## 39.9 Restarted Stage-3 visual-first acceptance profile
+
+Required：
+
+- visible exterior geometry is coherent;
+- no obvious exterior hole/daylight gap introduced by Stage 3;
+- no major spike / giant filler face;
+- no externally visible z-fighting;
+- no missing major part;
+- no nonfinite/collapsed geometry;
+- no generation exception;
+- deterministic regeneration/lifecycle remains stable;
+- Stage-2.5 accepted Winder top is unchanged;
+- accepted 07-D Landing / Straight body geometry is unchanged unless a separately approved correction is made。
+
+Allowed internally：
+
+- UNDERBODY may penetrate TREAD/RISER in hidden regions;
+- Straight/Winder/Landing bodies may overlap internally;
+- Side Board may intersect hidden geometry;
+- hidden duplicate/internal faces may exist;
+- separate closed components may overlap;
+- exact whole-stair Boolean union is not required。
+
+Not required for fresh Stage-3 r1：
+
+- exact positive-volume intersection elimination;
+- exact SLOPED convex decomposition;
+- global PHYSICAL_CONTACT classification;
+- exact internal union;
+- volume conservation proof;
+- internal duplicate-face cleanup;
+- exact BodyInterface union proof。
+
+## 39.10 Restarted Stage-3 order
+
+```text
+Stage 2.5 accepted + merged main
+    ↓
+fresh Stage-3 branch
+    ↓
+STEPPED_CLOSED visible body / Side Boards OFF
+    ↓
+SLOPED_CLOSED visible body / Side Boards OFF
+    ↓
+ordinary Side Board continuation
+    ↓
+Compact-U Side Board
+    ↓
+Material / Reverse / lifecycle regression
+    ↓
+Stage 4
+```
+
+One focused Blender runtime test at a time is preferred during active geometry iteration. High-risk visible geometry is tested before broad low-risk repetition。
+
+## 39.11 07-D regression authority
+
+07-D exact-90 Landing and its accepted body/underside/Residential geometry must not be rebuilt just because Stage 3 is working on schema-5 Winder geometry。
+
+If fresh Stage 3 changes a 07-D accepted shape, treat that as regression unless a separate approved correction explicitly changes the 07-D authority。
+
+## 39.12 Documentation precedence
+
+For Stage 2.5 / restarted Stage 3：
+
+```text
+1. Section 39 of BUILD_07_E_SPECIFICATION.md
+2. BUILD_07_E_STAGE_2_5_PLAN.md
+3. Current ROADMAP.md status/order
+4. Earlier sections of BUILD_07_E_SPECIFICATION.md
+5. Historical review documents / PR #33 comments
+```
+
+Existing Acceptance Records remain historical truth. Do not rewrite history to claim Candidate r1 was the previously accepted Stage-2 final. Stage 2.5 is a later deliberate correction baseline。
