@@ -1159,23 +1159,38 @@ def build_winder_fragments(layout):
                 riser.polygon, top - layout.actual_riser,
                 top - layout.tread_thickness, "RISER", ordinal))
         else:
-            plans = resolve_physical_winder_plans(
-                layout.turns[turn_index], layout.turn_cells[turn_index],
-                layout.ascent_direction, layout.nosing,
-                layout.riser_thickness)
-            for plan in plans:
+            cells = layout.turn_cells[turn_index]
+            if layout.ascent_direction == "REVERSE":
+                cells = tuple(reversed(cells))
+            precision_plans=(resolve_physical_winder_plans(
+                layout.turns[turn_index],layout.turn_cells[turn_index],
+                layout.ascent_direction,layout.nosing,layout.riser_thickness)
+                if layout.front_edge_mode!="SQUARE" else ())
+            for cell_position,cell in enumerate(cells):
                 counter += 1
                 top = layout.base_z + counter * layout.actual_riser
+                precision=(precision_plans[cell_position]
+                           if precision_plans else None)
+                tread_polygon=(precision.polygon if precision else
+                    physical_winder_tread_polygon(
+                        cell, layout.ascent_direction,
+                        layout.turns[turn_index].inner_pivot, layout.nosing,
+                        layout.riser_thickness))
+                riser=(precision if precision else resolve_winder_riser_plan(
+                    cell, layout.ascent_direction,
+                    layout.turns[turn_index].inner_pivot,
+                    layout.riser_thickness))
                 ordinal += 1
                 fragments.append(_profiled_prism(
-                    plan.polygon, top - layout.tread_thickness, top,
-                    plan.exposed_front_edge, layout.front_edge_mode,
-                    layout.front_edge_size,
+                    tread_polygon, top-layout.tread_thickness, top,
+                    (precision.exposed_front_edge if precision else riser.front),
+                    layout.front_edge_mode,layout.front_edge_size,
                     "TREAD", ordinal))
                 ordinal += 1
                 fragments.append(_polygon_prism(
-                    plan.riser_polygon, top - layout.actual_riser,
-                    top - layout.tread_thickness, "RISER", ordinal))
+                    (precision.riser_polygon if precision else riser.polygon),
+                    top-layout.actual_riser,top-layout.tread_thickness,
+                    "RISER", ordinal))
     fragments = tuple(fragments)
     validate_mesh_fragments(fragments)
     return fragments
@@ -1266,6 +1281,57 @@ def build_winder_finish_fragments(layout, fields):
             grouped[first] = (middle, None); grouped[second] = (None, middle)
         grouped_middle = middle
     result = []
+    # Fast-r1 assembly keeps accepted 07-C Straight components as independent
+    # closed visual bodies.  Hidden component overlap is intentional here.
+    from .stair_terminal_stack import (accepted_straight_underbody_candidate,
+                                       straight_component_events)
+    from .stair_residential_geometry import build_side_board_fragment
+    for component in straight_component_events(layout):
+        local,body=accepted_straight_underbody_candidate(layout,component,fields)
+        result.append(MeshFragment("UNDERBODY",15000+component.ascent_component_index,
+                                   body.vertices,body.faces))
+        if fields.left_side_board_enabled:
+            board=build_side_board_fragment(local,"LEFT",fields)
+            result.append(MeshFragment("SIDE_BOARD",15100+component.ascent_component_index,
+                                       board.vertices,board.faces))
+        if fields.right_side_board_enabled:
+            board=build_side_board_fragment(local,"RIGHT",fields)
+            result.append(MeshFragment("SIDE_BOARD",15200+component.ascent_component_index,
+                                       board.vertices,board.faces))
+
+    # Landing bodies use the generalized authority directly for r1; exact
+    # Boolean reconciliation with neighboring components is deferred.
+    landing_components=[]
+    for index,count in enumerate(layout.straight_allocation):
+        landing_components.append(("STRAIGHT",index,count))
+        if index<len(layout.turn_specs):
+            landing_components.append((layout.turn_specs[index].turn_mode,index,
+                                       (layout.winder_counts[index]
+                                        if layout.turn_specs[index].turn_mode==TURN_WINDER
+                                        else 1)))
+    if layout.ascent_direction=="REVERSE":landing_components.reverse()
+    rise=0; landing_tops={}
+    for kind,index,count in landing_components:
+        if kind=="STRAIGHT":rise+=count
+        elif kind==TURN_WINDER:rise+=count
+        else:
+            rise+=1;landing_tops[index]=layout.base_z+rise*layout.actual_riser
+    if landing_tops:
+        from .stair_landing_finish import (build_generalized_landing_body,
+                                            build_generalized_landing_side_board,
+                                            resolve_generalized_landing_finish)
+        for index,z_top in landing_tops.items():
+            authority=resolve_generalized_landing_finish(
+                layout.turns[index],layout.width,z_top,layout.base_z,
+                layout.tread_thickness,layout.riser_thickness,depth,
+                float(fields.underside_thickness_mm)/_MM_PER_METRE,
+                board_thickness, reveal,
+                fields.underside_mode,layout.ascent_direction)
+            result.extend(build_generalized_landing_body(
+                authority,fields.underside_mode))
+            result.extend(build_generalized_landing_side_board(
+                authority,fields.left_side_board_enabled
+                or fields.right_side_board_enabled,reveal,17100+index))
     turn_finish = {}
     for turn_index, (spec, cells) in enumerate(zip(layout.turn_specs,
                                                    layout.turn_cells)):
@@ -1275,11 +1341,8 @@ def build_winder_finish_fragments(layout, fields):
         turn_tops = (ascent_tops if layout.ascent_direction == "FORWARD"
                      else tuple(reversed(ascent_tops)))
         if fields.underside_mode == STEPPED_CLOSED:
-            physical_plans=resolve_physical_winder_plans(
-                layout.turns[turn_index],cells,layout.ascent_direction,
-                layout.nosing,layout.riser_thickness)
-            body_cells,plans=resolve_physical_stepped_body_cells(
-                cells,physical_plans,turn_tops,depth,layout.base_z,
+            plans=resolve_stepped_underbody(
+                cells,turn_tops,depth,layout.base_z,
                 turn_index=turn_index,
                 tread_thickness=layout.tread_thickness)
             result.extend(build_stepped_underbody_fragments(
@@ -1294,7 +1357,7 @@ def build_winder_finish_fragments(layout, fields):
                 index = next(i for i, cell in enumerate(cells)
                              if cell.front_fraction - 1e-9 <= fraction
                              <= cell.rear_fraction + 1e-9)
-                lower.append(body_cells[index].visible_z)
+                lower.append(plans[index].visible_z)
         else:
             z_entry, z_exit = grouped.get(turn_index, (None, None))
             fragments, _relief, stations, _closure = (

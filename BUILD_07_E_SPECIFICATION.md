@@ -1189,6 +1189,21 @@ Advisory does not block generation。
 
 # 20. Winder STEPPED_CLOSED — exact schema-5 contract
 
+## Stage-3 r1 visual/runtime acceptance profile
+
+The first Stage-3 runtime candidate is accepted on visible finished geometry
+and Blender usability.  Independent closed components may penetrate or overlap
+internally across TREAD, RISER, UNDERBODY, Landing, Winder, Straight, and Side
+Board roles.  Exact Boolean union, internal positive-volume exclusion, hidden
+duplicate-face cleanup, and CAD-style watertight whole-Stair topology are
+deferred refinements and are not r1 failures.
+
+Finite valid fragments and a usable visible exterior remain mandatory.  Major
+missing parts, visible daylight holes, extreme spikes, collapsed visible
+faces, visibly inverted shells, and exposed coincident surfaces that z-fight
+remain failures.  Later internal-topology cleanup must preserve the r1 visible
+design.  This profile does not alter accepted Stage-1 or Stage-2 authority.
+
 This formula is **schema-5 Winder only**。It does not replace accepted 07-C Straight `stepped_closure_visible_profile()` or schema-4 Landing/Flight geometry。
 
 For Winder cell `C_j`：

@@ -399,6 +399,33 @@ class SharedAndCompactTests(unittest.TestCase):
     def test_28_butt_plane(self): self.assertEqual(butt_joint_plane((1,2,3),(0,2))[1],(0,1))
 
 class BoardAndIntegrationTests(unittest.TestCase):
+    def test_28a_r1_straight_and_landing_bodies(self):
+        fields=ResidentialFields()
+        _layout,parts,_mesh=prepare_winder_geometry(
+            L,*BASE,point_ids=IDS,assembly_mode="STANDARD_RESIDENTIAL",
+            residential_fields=fields)
+        self.assertGreaterEqual(sum(p.part_type=="UNDERBODY" for p in parts),3)
+        landing=(TurnSpec("t","LANDING","NONE"),)
+        _layout,parts,_mesh=prepare_winder_geometry(
+            L,*BASE,point_ids=IDS,turn_specs=landing,
+            assembly_mode="STANDARD_RESIDENTIAL",residential_fields=fields)
+        self.assertGreaterEqual(sum(p.part_type=="UNDERBODY" for p in parts),3)
+        self.assertTrue(all(all(math.isfinite(value) for value in vertex)
+                            for part in parts for vertex in part.vertices))
+        validate_mesh_fragments(parts)
+
+    def test_28b_r1_side_board_enablement(self):
+        for left,right,minimum in ((True,False,1),(False,True,1),
+                                   (True,True,2),(False,False,0)):
+            fields=ResidentialFields(left_side_board_enabled=left,
+                                     right_side_board_enabled=right)
+            _layout,parts,_mesh=prepare_winder_geometry(
+                L,*BASE,point_ids=IDS,assembly_mode="STANDARD_RESIDENTIAL",
+                residential_fields=fields)
+            count=sum(part.part_type=="SIDE_BOARD" for part in parts)
+            self.assertGreaterEqual(count,minimum)
+            if not left and not right:self.assertEqual(count,0)
+
     def test_29_four_modes(self):
         for lower in ("STEPPED","SLOPED"):
             for upper in ("STEPPED","SLOPED"):
