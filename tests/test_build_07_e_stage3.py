@@ -18,8 +18,9 @@ from japanese_house_modeler.stair_turn import (
     winder_tread_tops, build_winder_finish_fragments,
 )
 from japanese_house_modeler.stair_terminal_stack import (
+    accepted_straight_underbody_candidate,
     RISER_MEDIATED_INTERFACE, classify_straight_winder_terminal,
-    straight_terminal_stack,
+    straight_component_events, straight_terminal_stack,
 )
 from japanese_house_modeler.stair_residential import ResidentialFields
 from japanese_house_modeler.stair_geometry import _signed_volume, validate_mesh_fragments
@@ -66,11 +67,27 @@ class SteppedTests(unittest.TestCase):
         resolved,parts,_mesh=prepare_winder_geometry(
             L,*BASE,point_ids=IDS,assembly_mode="STANDARD_RESIDENTIAL",
             residential_fields=fields)
-        straight_count=resolved.straight_allocation[0]
+        mappings=straight_component_events(resolved)
+        incoming,outgoing=mappings
+        self.assertNotEqual(incoming.canonical_segment_index,
+                            outgoing.canonical_segment_index)
         tread=next(part for part in parts
-                   if part.part_type=="TREAD" and part.ordinal==2*straight_count-1)
+                   if part.part_type=="TREAD"
+                   and part.ordinal==incoming.final_tread_ordinal)
         riser=next(part for part in parts
-                   if part.part_type=="RISER" and part.ordinal==2*straight_count)
+                   if part.part_type=="RISER"
+                   and part.ordinal==incoming.final_riser_ordinal)
+        outgoing_tread=next(part for part in parts if part.part_type=="TREAD"
+                            and part.ordinal==outgoing.first_tread_ordinal)
+        outgoing_riser=next(part for part in parts if part.part_type=="RISER"
+                            and part.ordinal==outgoing.first_riser_ordinal)
+        _incoming_local,incoming_body=accepted_straight_underbody_candidate(
+            resolved,incoming,fields)
+        _outgoing_local,outgoing_body=accepted_straight_underbody_candidate(
+            resolved,outgoing,fields)
+        self.assertIsNot(outgoing_tread,tread)
+        self.assertIsNot(outgoing_riser,riser)
+        self.assertNotEqual(outgoing_body.vertices,incoming_body.vertices)
         underbody=next(part for part in parts
                        if part.part_type=="UNDERBODY" and part.ordinal==10000)
         snapshot=(tread,riser,underbody)
@@ -79,7 +96,7 @@ class SteppedTests(unittest.TestCase):
         left=(-incoming[1],incoming[0])
         stack=straight_terminal_stack(
             "EXIT",semantic,incoming,left,resolved.riser_thickness,
-            riser,tread,None)
+            riser,tread,incoming_body)
         authority=classify_straight_winder_terminal(
             stack,(resolved.turn.inner_pivot,resolved.turn.entry_outer),
             ("STRAIGHT",0),("WINDER",0))
@@ -88,7 +105,7 @@ class SteppedTests(unittest.TestCase):
         entry_stack=straight_terminal_stack(
             "ENTRY",resolved.turn.inner_pivot,resolved.turn.outgoing,
             (-resolved.turn.outgoing[1],resolved.turn.outgoing[0]),
-            resolved.riser_thickness,riser,tread,None)
+            resolved.riser_thickness,outgoing_riser,outgoing_tread,outgoing_body)
         entry_authority=classify_straight_winder_terminal(
             entry_stack,(resolved.turn.inner_pivot,resolved.turn.exit_outer),
             ("WINDER",0),("STRAIGHT",1))
@@ -153,6 +170,61 @@ class SlopedTests(unittest.TestCase):
     def test_17_arbitrary_angle(self):
         a=math.radians(63); pts=((0,0),(0,2.2),(-2.2*math.sin(a),2.2+2.2*math.cos(a)))
         x=layout(pts,IDS); r,s=resolve_sloped_stations(x.turn,x.cells,.1,.4,x.riser_thickness); self.assertGreater(len(s),4)
+    def test_17a_complete_terminal_part_selection_matrix(self):
+        for degrees in (90,63):
+            angle=math.radians(degrees)
+            points=((0,0),(0,2.2),(-2.2*math.sin(angle),2.2+2.2*math.cos(angle)))
+            for width in (750,650):
+                for direction in ("FORWARD","REVERSE"):
+                    for mode in ("STEPPED_CLOSED","SLOPED_CLOSED"):
+                        fields=ResidentialFields(underside_mode=mode,
+                            left_side_board_enabled=False,right_side_board_enabled=False)
+                        resolved,parts,_=prepare_winder_geometry(
+                            points,direction,0,2800,16,width,30,20,
+                            point_ids=IDS,assembly_mode="STANDARD_RESIDENTIAL",
+                            residential_fields=fields)
+                        mappings=straight_component_events(resolved)
+                        self.assertEqual(len(mappings),2)
+                        selected=[]
+                        for position,component in enumerate(mappings):
+                            entry=position==1
+                            tread_ordinal=(component.first_tread_ordinal if entry
+                                           else component.final_tread_ordinal)
+                            riser_ordinal=(component.first_riser_ordinal if entry
+                                           else component.final_riser_ordinal)
+                            tread=next(p for p in parts if p.part_type=="TREAD"
+                                       and p.ordinal==tread_ordinal)
+                            riser=next(p for p in parts if p.part_type=="RISER"
+                                       and p.ordinal==riser_ordinal)
+                            _local,body=accepted_straight_underbody_candidate(
+                                resolved,component,fields)
+                            selected.append(straight_terminal_stack(
+                                "ENTRY" if entry else "EXIT",
+                                resolved.turn.inner_pivot,component.forward,
+                                (-component.forward[1],component.forward[0]),
+                                resolved.riser_thickness,riser,tread,body))
+                        self.assertIsNot(selected[0].boundary_tread,
+                                         selected[1].boundary_tread)
+                        self.assertIsNot(selected[0].boundary_riser,
+                                         selected[1].boundary_riser)
+                        self.assertNotEqual(selected[0].native_underbody.vertices,
+                                            selected[1].native_underbody.vertices)
+                        self.assertEqual(mappings,straight_component_events(resolved))
+    def test_17b_terminal_stack_rejects_invalid_authority(self):
+        fragment=lambda role: type("Part",(),{"part_type":role})()
+        valid=("ENTRY",(0,0),(1,0),(0,1),.02,
+               fragment("RISER"),fragment("TREAD"),fragment("UNDERBODY"))
+        bad=(
+            valid[:2]+((2,0),)+valid[3:],
+            valid[:3]+((1,1),)+valid[4:],
+            valid[:5]+(None,)+valid[6:],
+            valid[:6]+(fragment("RISER"),)+valid[7:],
+            valid[:7]+(fragment("TREAD"),),
+        )
+        for values in bad:
+            with self.assertRaisesRegex(ValueError,"GEOMETRY_INVALID"):
+                straight_terminal_stack(values[0],values[1],values[2],values[3],
+                                        values[4],values[5],values[6],values[7])
 
 class SharedAndCompactTests(unittest.TestCase):
     def test_18_split_full_3d(self): self.assertEqual(len(shared_edge_splits((0,0,0),(1,0,1),((.5,0,.5),(.5,0,.6)))),3)
