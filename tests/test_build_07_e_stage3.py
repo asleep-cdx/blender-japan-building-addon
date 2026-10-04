@@ -36,6 +36,7 @@ from japanese_house_modeler.stair_winder_finish import (
     exact_rectangle_union_components, rectangle_component_boundaries,
     _variable_prism, trim_prism_fragment_against_shared_board,
     build_stepped_underbody_fragments,
+    resolve_physical_stepped_body_cells,
     compact_contributor_authority, propagate_semantic_edge_splits,
 )
 
@@ -189,6 +190,74 @@ class SteppedTests(unittest.TestCase):
         self.assertEqual(overlap.intersection_volume,volume)
         self.assertLess(overlap.part_bottom,overlap.body_bottom)
         self.assertFalse(overlap.complete_soffit_survives_subtraction)
+
+    def test_08b_physical_riser_exclusion_known_fixture(self):
+        physical=resolve_physical_winder_plans(
+            self.x.turn,self.x.cells,self.x.ascent_direction,
+            self.x.nosing,self.x.riser_thickness)
+        cells,plans=resolve_physical_stepped_body_cells(
+            self.x.cells,physical,self.tops,.15,self.x.base_z,
+            tread_thickness=self.x.tread_thickness)
+        height=self.x.actual_riser-self.x.tread_thickness
+        def area(polygon):
+            return abs(sum(a[0]*b[1]-a[1]*b[0]
+                           for a,b in zip(polygon,polygon[1:]+polygon[:1]))/2)
+        raw=constant_prism_intersection_volume(
+            self.x.cells[0].polygon,(cells[0].visible_z,cells[0].top_z),
+            physical[0].riser_polygon,
+            (self.tops[0]-self.x.actual_riser,
+             self.tops[0]-self.x.tread_thickness))
+        self.assertAlmostEqual(raw,0.001758430780618328,places=12)
+        final=sum(constant_prism_intersection_volume(
+            plan.polygon,(plan.visible_z,plan.top_z),physical[0].riser_polygon,
+            (self.tops[0]-self.x.actual_riser,
+             self.tops[0]-self.x.tread_thickness)) for plan in plans)
+        self.assertAlmostEqual(final,0.0,places=12)
+        raw_volume=area(self.x.cells[0].polygon)*(
+            cells[0].top_z-cells[0].visible_z)
+        final_volume=sum(area(p.polygon)*(p.top_z-p.visible_z)
+                         for p in plans if p.cell_index==1)
+        self.assertAlmostEqual(raw_volume,final_volume+raw,places=12)
+        self.assertTrue(all(p.visible_z==1.075 for p in plans
+                            if p.cell_index==1))
+        validate_mesh_fragments(build_stepped_underbody_fragments(plans))
+
+    def test_08c_stepped_physical_exclusion_matrix(self):
+        fields=ResidentialFields(underside_mode="STEPPED_CLOSED",
+                                 left_side_board_enabled=False,
+                                 right_side_board_enabled=False)
+        for degrees in (90,63):
+            angle=math.radians(degrees)
+            points=((0,0),(0,2.2),
+                    (-2.2*math.sin(angle),2.2+2.2*math.cos(angle)))
+            for width in (750,650):
+                for direction in ("FORWARD","REVERSE"):
+                    resolved=resolve_winder_layout(
+                        points,direction,0,2800,16,width,30,20,point_ids=IDS)
+                    tops=winder_tread_tops(resolved)[0]
+                    turn_tops=(tops if direction=="FORWARD"
+                               else tuple(reversed(tops)))
+                    physical=resolve_physical_winder_plans(
+                        resolved.turn,resolved.cells,direction,resolved.nosing,
+                        resolved.riser_thickness)
+                    body,plans=resolve_physical_stepped_body_cells(
+                        resolved.cells,physical,turn_tops,.15,resolved.base_z,
+                        tread_thickness=resolved.tread_thickness)
+                    self.assertEqual((body,plans),resolve_physical_stepped_body_cells(
+                        resolved.cells,physical,turn_tops,.15,resolved.base_z,
+                        tread_thickness=resolved.tread_thickness))
+                    for plan in plans:
+                        for top,part in zip(turn_tops,physical):
+                            self.assertAlmostEqual(constant_prism_intersection_volume(
+                                plan.polygon,(plan.visible_z,plan.top_z),
+                                part.riser_polygon,
+                                (top-resolved.actual_riser,
+                                 top-resolved.tread_thickness)),0.0,places=11)
+                            self.assertAlmostEqual(constant_prism_intersection_volume(
+                                plan.polygon,(plan.visible_z,plan.top_z),
+                                part.polygon,
+                                (top-resolved.tread_thickness,top)),0.0,places=11)
+                    validate_mesh_fragments(build_stepped_underbody_fragments(plans))
 
 class SlopedTests(unittest.TestCase):
     def setUp(self):

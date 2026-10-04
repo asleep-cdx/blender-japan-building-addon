@@ -36,6 +36,20 @@ class WinderUnderbodyPlan:
 
 
 @dataclass(frozen=True)
+class PhysicalWinderBodyCell:
+    """STEPPED body domain after the destination Riser owns its strip."""
+    turn_index: int
+    cell_index: int
+    nominal_polygon: tuple
+    polygons: tuple
+    riser_exclusion_polygon: tuple
+    physical_front_boundary: tuple
+    rear_support_edge: tuple
+    visible_z: float
+    top_z: float
+
+
+@dataclass(frozen=True)
 class WinderPivotRelief:
     rho: float
     entry: tuple
@@ -124,6 +138,72 @@ def resolve_stepped_underbody(cells, tread_tops, body_depth, base_z, *,
             and abs(level - float(entry_z)) > eps_clear,
             index == len(cells) - 1 and not exit_owned))
     return tuple(plans)
+
+
+def resolve_physical_stepped_body_cells(cells, physical_plans, tread_tops,
+                                        body_depth, base_z, *, turn_index=0,
+                                        tread_thickness=0.03):
+    """Consume Stage-2 Riser-back authority for STEPPED body footprints.
+
+    The nominal cell is clipped by the exact ``riser_back_edge`` half-plane.
+    This is the exact nominal-minus-Riser intersection for the supported front
+    strip and avoids importing the TREAD nosing footprint into the body.
+    """
+    if not (len(cells) == len(physical_plans) == len(tread_tops)):
+        raise ValueError("GEOMETRY_INVALID: physical Winder body count")
+    authorities=[]; plans=[]
+    for index,(cell,physical,top) in enumerate(
+            zip(cells,physical_plans,tread_tops)):
+        back=tuple(physical.riser_back_edge)
+        if len(back)!=2:
+            raise ValueError("GEOMETRY_INVALID: physical Winder body boundary")
+        source=tuple(cell.polygon); cutter=tuple(physical.riser_polygon)
+        if sum(a[0]*b[1]-b[0]*a[1]
+               for a,b in zip(cutter,cutter[1:]+cutter[:1]))<0:
+            cutter=tuple(reversed(cutter))
+
+        def halfplane(poly,a,b,inside):
+            answer=[]
+            for p,q in zip(poly,poly[1:]+poly[:1]):
+                dp=(b[0]-a[0])*(p[1]-a[1])-(b[1]-a[1])*(p[0]-a[0])
+                dq=(b[0]-a[0])*(q[1]-a[1])-(b[1]-a[1])*(q[0]-a[0])
+                pin=(dp>=-EPS_LENGTH) if inside else (dp<=EPS_LENGTH)
+                qin=(dq>=-EPS_LENGTH) if inside else (dq<=EPS_LENGTH)
+                if pin: answer.append(p)
+                if pin!=qin:
+                    t=dp/(dp-dq)
+                    answer.append((p[0]+t*(q[0]-p[0]),
+                                   p[1]+t*(q[1]-p[1])))
+            return _deduplicate(tuple(answer))
+
+        # Convex subtraction: at each cutter edge, emit the outside portion
+        # and carry only the inside portion to the next edge.  Pieces are
+        # disjoint and together equal nominal-minus-riser exactly.
+        remaining=(source,); pieces=[]
+        for a,b in zip(cutter,cutter[1:]+cutter[:1]):
+            next_remaining=[]
+            for polygon in remaining:
+                outside=halfplane(polygon,a,b,False)
+                inside=halfplane(polygon,a,b,True)
+                if len(outside)>=3: pieces.append(outside)
+                if len(inside)>=3: next_remaining.append(inside)
+            remaining=tuple(next_remaining)
+        pieces=tuple(piece for piece in pieces if abs(sum(
+            a[0]*b[1]-a[1]*b[0] for a,b in zip(piece,piece[1:]+piece[:1]))/2)
+                     > EPS_LENGTH*EPS_LENGTH)
+        if not pieces:
+            raise ValueError("GEOMETRY_INVALID: physical Winder body polygon")
+        visible=stepped_patch_z(top,body_depth,base_z)
+        contact=float(top)-float(tread_thickness)
+        authority=PhysicalWinderBodyCell(
+            turn_index,index+1,tuple(cell.polygon),pieces,
+            tuple(physical.riser_polygon),back,
+            tuple(physical.rear_support_edge),visible,contact)
+        authorities.append(authority)
+        plans.extend(WinderUnderbodyPlan(
+            turn_index,index+1,piece,visible,contact,False,False)
+                     for piece in pieces)
+    return tuple(authorities),tuple(plans)
 
 
 def divider_closure_indices(plans, eps=1.0e-9):

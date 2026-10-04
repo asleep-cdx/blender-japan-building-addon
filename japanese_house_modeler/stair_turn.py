@@ -1226,6 +1226,7 @@ def build_winder_finish_fragments(layout, fields):
         side_enabled,
         build_sloped_underbody_fragments,
         build_stepped_underbody_fragments,
+        resolve_physical_stepped_body_cells,
         resolve_sloped_stations, resolve_stepped_underbody, stepped_patch_z,
     )
     if fields is None:
@@ -1274,9 +1275,13 @@ def build_winder_finish_fragments(layout, fields):
         turn_tops = (ascent_tops if layout.ascent_direction == "FORWARD"
                      else tuple(reversed(ascent_tops)))
         if fields.underside_mode == STEPPED_CLOSED:
-            plans = resolve_stepped_underbody(
-                cells, turn_tops, depth, layout.base_z,
-                turn_index=turn_index, tread_thickness=layout.tread_thickness)
+            physical_plans=resolve_physical_winder_plans(
+                layout.turns[turn_index],cells,layout.ascent_direction,
+                layout.nosing,layout.riser_thickness)
+            body_cells,plans=resolve_physical_stepped_body_cells(
+                cells,physical_plans,turn_tops,depth,layout.base_z,
+                turn_index=turn_index,
+                tread_thickness=layout.tread_thickness)
             result.extend(build_stepped_underbody_fragments(
                 plans, 10000 + turn_index * 100))
             _relief, stations = resolve_sloped_stations(
@@ -1289,7 +1294,7 @@ def build_winder_finish_fragments(layout, fields):
                 index = next(i for i, cell in enumerate(cells)
                              if cell.front_fraction - 1e-9 <= fraction
                              <= cell.rear_fraction + 1e-9)
-                lower.append(plans[index].visible_z)
+                lower.append(body_cells[index].visible_z)
         else:
             z_entry, z_exit = grouped.get(turn_index, (None, None))
             fragments, _relief, stations, _closure = (

@@ -1201,7 +1201,22 @@ B   = base_z
 Z_soffit_j = max(B, T_j-d)
 ```
 
-Each complete nominal cell polygon owns one horizontal visible patch, including any required outer corner `O`。
+Each nominal cell remains the subdivision and RiseEvent authority.  Its
+STEPPED body owns the horizontal visible-soffit domain at `Z_soffit_j` except
+where an accepted Stage-2 physical TREAD or RISER occupies the same 3D region.
+Stage-2 physical parts own that volume; Stage-3 UNDERBODY is their exact
+physical-ownership replacement, not a competing solid.
+
+Where applicable, `riser_polygon` and `riser_back_edge` are the exact physical
+front-boundary authority for the destination body cell.  Unaffected soffit,
+the outer-chain station `O`, physical inner and rear-support boundaries, and
+destination-only divider ownership remain unchanged.  A soffit portion inside
+the accepted Riser volume is not required to remain an UNDERBODY face because
+the Riser itself closes that region.  No positive-volume top-part overlap,
+unowned opening, duplicate divider, T-junction, or zero-area closure is
+permitted.  TREAD, RISER, `K_finish`, `S_entry`, `S_exit`, nosing, and all
+Stage-2 physical plans remain unchanged.  Exclusion and validation complete in
+candidate preparation before Scene mutation.
 
 Contact clearance：
 
