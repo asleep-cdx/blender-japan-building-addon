@@ -57,6 +57,17 @@ class RiserMediatedInterfaceAuthority:
 
 
 @dataclass(frozen=True)
+class TopPartOverlapAudit:
+    role: str
+    intersection_volume: float
+    body_bottom: float
+    body_top: float
+    part_bottom: float
+    part_top: float
+    complete_soffit_survives_subtraction: bool
+
+
+@dataclass(frozen=True)
 class StraightComponentEvents:
     canonical_segment_index: int
     ascent_component_index: int
@@ -247,3 +258,20 @@ def constant_prism_intersection_volume(plan_a,z_a,plan_b,z_b):
                  for a,b in zip(polygon,polygon[1:]+polygon[:1]))/2)
     height=max(0.0,min(z_a[1],z_b[1])-max(z_a[0],z_b[0]))
     return area*height
+
+
+def audit_constant_top_part_overlap(body_plan, body_z, part_plan, part_z,
+                                    role):
+    """Audit exact overlap and whether subtraction can retain the full soffit."""
+    volume=constant_prism_intersection_volume(body_plan,body_z,part_plan,part_z)
+    plan=convex_polygon_intersection(tuple(body_plan),tuple(part_plan))
+    plan_area=(abs(sum(a[0]*b[1]-a[1]*b[0]
+                       for a,b in zip(plan,plan[1:]+plan[:1]))/2)
+               if len(plan)>=3 else 0.0)
+    # If the physical owner reaches or crosses the visible-soffit plane over
+    # positive plan area, exact subtraction necessarily removes that patch.
+    survives=not (plan_area>EPS_LENGTH*EPS_LENGTH
+                  and part_z[0] < body_z[0]+EPS_LENGTH
+                  and part_z[1] > body_z[0]+EPS_LENGTH)
+    return TopPartOverlapAudit(str(role),volume,float(body_z[0]),float(body_z[1]),
+                               float(part_z[0]),float(part_z[1]),survives)

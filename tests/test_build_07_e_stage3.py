@@ -19,7 +19,8 @@ from japanese_house_modeler.stair_turn import (
 )
 from japanese_house_modeler.stair_terminal_stack import (
     accepted_straight_underbody_candidate,
-    constant_prism_intersection_volume, riser_mediated_interface_parts,
+    audit_constant_top_part_overlap, constant_prism_intersection_volume,
+    riser_mediated_interface_parts,
     RISER_MEDIATED_INTERFACE, classify_straight_winder_terminal,
     straight_component_events, straight_terminal_stack,
 )
@@ -181,6 +182,13 @@ class SteppedTests(unittest.TestCase):
              max(v[2] for v in boundary.vertices)))
         self.assertGreater(volume,1e-12)
         self.assertAlmostEqual(volume,0.001758430780618328,places=12)
+        overlap=audit_constant_top_part_overlap(
+            plan.polygon,(plan.visible_z,plan.top_z),boundary_plan,
+            (min(v[2] for v in boundary.vertices),
+             max(v[2] for v in boundary.vertices)),"RISER")
+        self.assertEqual(overlap.intersection_volume,volume)
+        self.assertLess(overlap.part_bottom,overlap.body_bottom)
+        self.assertFalse(overlap.complete_soffit_survives_subtraction)
 
 class SlopedTests(unittest.TestCase):
     def setUp(self):
