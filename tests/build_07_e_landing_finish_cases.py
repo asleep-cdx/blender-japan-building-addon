@@ -4,6 +4,7 @@ import pathlib
 import sys
 import types
 import unittest
+from dataclasses import replace
 
 ROOT=pathlib.Path(__file__).parents[1]
 package=sys.modules.get("japanese_house_modeler")
@@ -23,6 +24,11 @@ from japanese_house_modeler.stair_body_interfaces import (
     resolve_body_interface,
 )
 from japanese_house_modeler.stair_geometry import MeshFragment
+from japanese_house_modeler.stair_geometry import resolve_stair_layout, validate_simple_polygon
+from japanese_house_modeler.stair_residential import ResidentialFields
+from japanese_house_modeler.stair_residential_geometry import (
+    sloped_underbody_profile, stepped_underbody_profile,
+)
 from japanese_house_modeler.stair_turn import EPS_LENGTH
 from japanese_house_modeler.stair_turn import (
     TurnSpec, polygon_area, resolve_winder_layout, TURN_LANDING, WINDER_NONE,
@@ -478,6 +484,10 @@ class GeneralizedLandingFinishTests(unittest.TestCase):
                                              (box(0,1,2,2),),high,None)
         self.assertTrue(port_surface_ownership(source,"EXIT").face_indices)
         self.assertTrue(port_surface_ownership(destination,"ENTRY").face_indices)
+        source=replace(source,exit_surface_ownership=
+                       port_surface_ownership(source,"EXIT"))
+        destination=replace(destination,entry_surface_ownership=
+                            port_surface_ownership(destination,"ENTRY"))
         joined=join_body_component_surfaces((source,destination),(seam,))
         self.assertTrue(validate_mesh_fragments((joined.fragment,)))
         interface=joined.interfaces[0]
@@ -489,6 +499,22 @@ class GeneralizedLandingFinishTests(unittest.TestCase):
         coplanar=[face for face in joined.fragment.faces
                   if all(abs(joined.fragment.vertices[i][0])<1e-12 for i in face)]
         self.assertEqual(len(coplanar),1)
+
+    def test_authorized_entry_prepend_contract_is_non_simple_at_native_tip(self):
+        """Document the production blocker without weakening validation."""
+        layout=resolve_stair_layout(((0,0),(3,0)),"FORWARD",0,2800,16,
+                                    750,30,20)
+        for resolver in (stepped_underbody_profile,sloped_underbody_profile):
+            native=resolver(layout,ResidentialFields())
+            self.assertEqual(native.inner[0],native.outer[0])
+            self.assertEqual(native.inner[0],
+                             (layout.riser_thickness,layout.base_z))
+            inner=((0.0,layout.base_z),)+native.inner
+            outer=((0.0,layout.base_z-.05),)+native.outer
+            with self.subTest(resolver=resolver.__name__):
+                with self.assertRaises(ValueError):
+                    validate_simple_polygon(inner+tuple(reversed(outer)))
+
 
 
 if __name__=="__main__": unittest.main()

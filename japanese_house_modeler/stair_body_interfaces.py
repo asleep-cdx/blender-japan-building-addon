@@ -28,6 +28,8 @@ class ResidentialBodyComponent:
     entry_port: object
     exit_port: object
     side_boards: tuple = ()
+    entry_surface_ownership: object = None
+    exit_surface_ownership: object = None
 
 
 @dataclass(frozen=True)
@@ -368,8 +370,10 @@ def join_body_component_surfaces(components, canonical_segments):
     removals = {}
     ownership = []
     for index, interface in enumerate(interfaces):
-        source_owner = port_surface_ownership(components[index], "EXIT")
-        destination_owner = port_surface_ownership(components[index+1], "ENTRY")
+        source_owner = components[index].exit_surface_ownership
+        destination_owner = components[index+1].entry_surface_ownership
+        if source_owner is None or destination_owner is None:
+            raise ValueError("GEOMETRY_INVALID: explicit body port ownership")
         for component_index, owner in ((index, source_owner),
                                        (index+1, destination_owner)):
             key = (component_index, owner.fragment_index)
