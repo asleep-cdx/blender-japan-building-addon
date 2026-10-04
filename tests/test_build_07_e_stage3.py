@@ -19,6 +19,7 @@ from japanese_house_modeler.stair_turn import (
 )
 from japanese_house_modeler.stair_terminal_stack import (
     accepted_straight_underbody_candidate,
+    constant_prism_intersection_volume, riser_mediated_interface_parts,
     RISER_MEDIATED_INTERFACE, classify_straight_winder_terminal,
     straight_component_events, straight_terminal_stack,
 )
@@ -154,6 +155,32 @@ class SteppedTests(unittest.TestCase):
                           -max(z_riser[0],plan.visible_z))
         self.assertEqual(riser_overlap,0.0)
         self.assertEqual((tread,riser,underbody),snapshot)
+        interfaces=riser_mediated_interface_parts(resolved,parts,fields)
+        straight_to_winder,winder_to_straight=interfaces
+        self.assertEqual(straight_to_winder.destination_boundary_riser.ordinal,
+                         mappings[0].final_riser_ordinal+2)
+        self.assertEqual(straight_to_winder.destination_entry_tread.ordinal,
+                         mappings[0].final_riser_ordinal+1)
+        self.assertEqual(winder_to_straight.destination_boundary_riser.ordinal,
+                         mappings[1].first_riser_ordinal)
+        self.assertEqual(winder_to_straight.destination_entry_tread.ordinal,
+                         mappings[1].first_tread_ordinal)
+        self.assertIsNot(straight_to_winder.destination_boundary_riser,riser)
+        # Exact source-authority convex-prism intersection exposes the first
+        # production contradiction and triggers the mandated audit STOP.
+        boundary=straight_to_winder.destination_boundary_riser
+        boundary_plan=[]
+        for vertex in boundary.vertices:
+            if vertex[:2] not in boundary_plan:boundary_plan.append(vertex[:2])
+        center=(sum(p[0] for p in boundary_plan)/len(boundary_plan),
+                sum(p[1] for p in boundary_plan)/len(boundary_plan))
+        boundary_plan.sort(key=lambda p:math.atan2(p[1]-center[1],p[0]-center[0]))
+        volume=constant_prism_intersection_volume(
+            plan.polygon,(plan.visible_z,plan.top_z),boundary_plan,
+            (min(v[2] for v in boundary.vertices),
+             max(v[2] for v in boundary.vertices)))
+        self.assertGreater(volume,1e-12)
+        self.assertAlmostEqual(volume,0.001758430780618328,places=12)
 
 class SlopedTests(unittest.TestCase):
     def setUp(self):
