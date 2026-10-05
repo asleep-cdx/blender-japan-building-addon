@@ -76,7 +76,7 @@ class CandidateR1IdentityTests(unittest.TestCase):
             "tree": R1_TREE,
         })
 
-    def test_exact90_equal3_forward_and_reverse_are_candidate_r1_identical(self):
+    def test_exact90_equal3_preserves_r1_except_approved_rear_support(self):
         for direction in ("FORWARD", "REVERSE"):
             with self.subTest(direction=direction):
                 layout, fragments, _mesh = _prepare(
@@ -91,7 +91,41 @@ class CandidateR1IdentityTests(unittest.TestCase):
                         for part in _winder_fragments(layout, fragments)
                     ],
                 }
-                self.assertEqual(actual, self.oracle["cases"][direction])
+                expected = self.oracle["cases"][direction]
+                self.assertEqual(actual["ascent_direction"],
+                                 expected["ascent_direction"])
+                self.assertEqual(actual["rise_event_owners"],
+                                 expected["rise_event_owners"])
+                self.assertEqual(len(actual["winder_fragments"]),
+                                 len(expected["winder_fragments"]))
+                for current, historical in zip(
+                        actual["winder_fragments"],
+                        expected["winder_fragments"]):
+                    self.assertEqual(current["ordinal"], historical["ordinal"])
+                    self.assertEqual(current["part_type"],
+                                     historical["part_type"])
+                    self.assertEqual(current["faces"], historical["faces"])
+                    if current["part_type"] == "RISER":
+                        self.assertEqual(current["vertices"],
+                                         historical["vertices"])
+                        continue
+                    differences = []
+                    for index, (new, old) in enumerate(zip(
+                            current["vertices"], historical["vertices"])):
+                        self.assertEqual(new[2], old[2])
+                        if new[:2] != old[:2]:
+                            differences.append((index, new, old))
+                    # Fresh Stage 3 explicitly corrects only the duplicated
+                    # bottom/top rear-outer endpoint.  Candidate r1 retracted
+                    # it by +r; current production extends it by -r, hence the
+                    # exact old-to-new displacement is 2r = 24 mm.
+                    self.assertEqual(len(differences), 2)
+                    self.assertEqual(differences[1][0] - differences[0][0],
+                                     len(current["vertices"]) // 2)
+                    for _index, new, old in differences:
+                        self.assertAlmostEqual(
+                            math.hypot(new[0] - old[0], new[1] - old[1]),
+                            0.024)
 
     def test_production_uses_candidate_r1_per_cell_calls(self):
         with mock.patch.object(
