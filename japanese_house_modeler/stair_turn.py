@@ -1211,9 +1211,14 @@ def build_stepped_closed_underbody_fragments(layout, top_fragments, fields):
         footprint = tuple(
             tread.vertices[index][:2] for index in reversed(tread.faces[0]))
         tread_bottom = min(vertex[2] for vertex in tread.vertices)
-        bottom = max(layout.base_z, tread_bottom - depth)
+        tread_top = max(vertex[2] for vertex in tread.vertices)
+        # Match the accepted Residential stepped-closure authority: the lower
+        # terminal is flattened at base_z, then each visible soffit is located
+        # from its walking-step/rise TOP level rather than the tread underside.
+        bottom = (layout.base_z if ordinal == 1 else tread_top - depth)
         if tread_bottom - bottom <= EPS_LENGTH:
-            raise ValueError("Winder UNDERBODY depthが退化しています。")
+            raise ValueError(
+                "Winder UNDERBODYはclosure depthが踏板厚より大きい必要があります。")
         bodies.append(_polygon_prism(
             footprint, bottom, tread_bottom, "UNDERBODY", ordinal))
     bodies = tuple(bodies)

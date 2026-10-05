@@ -86,6 +86,24 @@ class FreshStage3ASteppedBodyTests(unittest.TestCase):
         self.assertEqual(first[1], second[1])
         self.assertEqual(first[2], second[2])
 
+    def test_visible_soffit_uses_rise_top_closure_depth_authority(self):
+        for direction in ("FORWARD", "REVERSE"):
+            with self.subTest(direction=direction):
+                first = self.prepare(direction=direction)
+                second = self.prepare(direction=direction)
+                bodies = self.assert_valid_body(first[1])
+                lower_levels = tuple(
+                    min(vertex[2] for vertex in body.vertices)
+                    for body in bodies)
+                self.assertAlmostEqual(lower_levels[0], 0.0)
+                # Accepted stepped_closure_visible_profile authority:
+                # second rise TOP 0.350m - closure depth 0.150m = 0.200m.
+                self.assertAlmostEqual(lower_levels[1], 0.200)
+                self.assertNotAlmostEqual(lower_levels[1], 0.170)
+                self.assertEqual(first[1], second[1])
+                self.assertEqual(first[2], second[2])
+                self.assert_top_unchanged(direction=direction)
+
     def test_63_degree_equal3_smoke_and_frozen_top(self):
         angle = math.radians(63.0)
         points = ((0.0, 0.0), (0.0, 2.2),
@@ -118,6 +136,14 @@ class FreshStage3ASteppedBodyTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Stage 3C"):
             prepare_turn_residential_geometry(
                 fields=ResidentialFields(), **_kwargs())
+
+    def test_closure_depth_not_exceeding_tread_thickness_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "closure depth"):
+            prepare_turn_residential_geometry(
+                fields=ResidentialFields(
+                    side_board_band_width_mm=30.0,
+                    left_side_board_enabled=False,
+                    right_side_board_enabled=False), **_kwargs())
 
 
 if __name__ == "__main__":
