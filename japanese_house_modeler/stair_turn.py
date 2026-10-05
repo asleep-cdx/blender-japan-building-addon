@@ -492,15 +492,29 @@ def resolve_winder_riser_plan(cell, ascent_direction, inner_pivot,
 
 def physical_winder_tread_polygon(cell, ascent_direction, inner_pivot,
                                   nosing=0.0, rear_extension=0.0):
-    """Compatibility wrapper around the semantic physical-boundary resolver."""
-    frame = type("_Frame", (), {
-        "inner_pivot": tuple(inner_pivot),
-        "entry_outer": cell.polygon[1],
-        "outer_corner": cell.polygon[1],
-        "exit_outer": cell.polygon[-1],
-    })()
-    return resolve_physical_winder_plans(
-        frame, (cell,), ascent_direction, nosing, rear_extension)[0].polygon
+    """Return a locally trimmed tread plan with extensions on radial edges only."""
+    polygon = list(cell.polygon)
+    boundaries = physical_cell_boundaries(cell, ascent_direction, inner_pivot)
+    result = tuple(polygon)
+    for boundary, amount, downhill in ((boundaries.front, float(nosing), True),
+                                        (boundaries.rear, float(rear_extension), False)):
+        if amount <= EPS_LENGTH:
+            continue
+        origin, outer = boundary
+        direction, _ = _unit(_sub(outer, origin), "Winder tread boundary")
+        centroid = (sum(p[0] for p in result) / len(result),
+                    sum(p[1] for p in result) / len(result))
+        interior_sign = 1.0 if _cross(direction, _sub(centroid, origin)) >= 0 else -1.0
+        sign = -interior_sign if downhill else interior_sign
+        offset = _scale((-direction[1], direction[0]), sign * amount)
+        # The mathematical pivot is fixed, so the strip collapses locally
+        # instead of extrapolating through it into the neighbouring sector.
+        target = 1 if tuple(outer) == tuple(result[1]) else len(result) - 1
+        result = tuple(_add(p, offset) if index == target else p
+                       for index, p in enumerate(result))
+    if polygon_area(result) <= EPS_AREA:
+        raise ValueError("physical Winder treadをtrimできません。")
+    return result
 
 
 def _centroid(polygon):
@@ -1138,22 +1152,30 @@ def build_winder_fragments(layout):
                 riser.polygon, top - layout.actual_riser,
                 top - layout.tread_thickness, "RISER", ordinal))
         else:
-            plans = resolve_physical_winder_plans(
-                layout.turns[turn_index], layout.turn_cells[turn_index],
-                layout.ascent_direction, layout.nosing,
-                layout.riser_thickness)
-            for plan in plans:
+            cells = layout.turn_cells[turn_index]
+            if layout.ascent_direction == "REVERSE":
+                cells = tuple(reversed(cells))
+            for cell in cells:
                 counter += 1
                 top = layout.base_z + counter * layout.actual_riser
                 ordinal += 1
+                tread_polygon = physical_winder_tread_polygon(
+                    cell, layout.ascent_direction,
+                    layout.turns[turn_index].inner_pivot, layout.nosing,
+                    layout.riser_thickness)
+                exposed = ((tread_polygon[0], tread_polygon[1])
+                           if layout.ascent_direction == "FORWARD"
+                           else (tread_polygon[-1], tread_polygon[0]))
                 fragments.append(_profiled_prism(
-                    plan.polygon, top - layout.tread_thickness, top,
-                    plan.exposed_front_edge, layout.front_edge_mode,
-                    layout.front_edge_size,
+                    tread_polygon, top - layout.tread_thickness, top,
+                    exposed, layout.front_edge_mode, layout.front_edge_size,
                     "TREAD", ordinal))
+                riser = resolve_winder_riser_plan(
+                    cell, layout.ascent_direction, layout.turns[turn_index].inner_pivot,
+                    layout.riser_thickness)
                 ordinal += 1
                 fragments.append(_polygon_prism(
-                    plan.riser_polygon, top - layout.actual_riser,
+                    riser.polygon, top - layout.actual_riser,
                     top - layout.tread_thickness, "RISER", ordinal))
     fragments = tuple(fragments)
     validate_mesh_fragments(fragments)
