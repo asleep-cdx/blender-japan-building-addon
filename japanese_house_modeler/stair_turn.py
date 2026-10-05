@@ -1182,18 +1182,14 @@ def build_winder_fragments(layout):
     return fragments
 
 
-def build_stepped_closed_underbody_fragments(layout, top_fragments, fields):
-    """Build the visual-first schema-5 body as overlapping tread prisms.
-
-    Each accepted TREAD footprint owns one shallow, closed body immediately
-    below it.  The independently valid prisms deliberately overlap at step and
-    component interfaces: that hidden overlap closes exterior daylight without
-    changing the Stage-2.5 top generator or requiring a Boolean-style union.
-    """
+def build_stepped_closed_underbody_fragments(layout, _top_fragments, fields):
+    """Build setback schema-5 bodies without covering the accepted top."""
     from .stair_residential import (
         validate_stepped_closure_depth,
         validate_stepped_underbody_thickness,
     )
+    from .stair_residential_geometry import build_underbody_fragment
+    from .stair_geometry import StairAxes, StairLayout
 
     validate_stepped_underbody_thickness(
         fields, layout.actual_riser, layout.tread_thickness,
@@ -1202,25 +1198,85 @@ def build_stepped_closed_underbody_fragments(layout, top_fragments, fields):
         fields, layout.actual_riser, min(
             run / count for run, count in zip(
                 layout.straight_runs, layout.straight_allocation) if count))
-    bodies = []
-    for ordinal, tread in enumerate(
-            (part for part in top_fragments if part.part_type == "TREAD"), 1):
-        # All accepted tread constructors put the complete lower plan in their
-        # first face.  Reversing that outward-facing bottom restores CCW plan
-        # order for the ordinary prism constructor.
-        footprint = tuple(
-            tread.vertices[index][:2] for index in reversed(tread.faces[0]))
-        tread_bottom = min(vertex[2] for vertex in tread.vertices)
-        tread_top = max(vertex[2] for vertex in tread.vertices)
-        # Match the accepted Residential stepped-closure authority: the lower
-        # terminal is flattened at base_z, then each visible soffit is located
-        # from its walking-step/rise TOP level rather than the tread underside.
-        bottom = (layout.base_z if ordinal == 1 else tread_top - depth)
-        if tread_bottom - bottom <= EPS_LENGTH:
-            raise ValueError(
-                "Winder UNDERBODYはclosure depthが踏板厚より大きい必要があります。")
-        bodies.append(_polygon_prism(
-            footprint, bottom, tread_bottom, "UNDERBODY", ordinal))
+    if depth - layout.tread_thickness <= EPS_LENGTH:
+        raise ValueError(
+            "UNDERBODY closure depthは踏板厚より大きい必要があります。")
+    path = layout.canonical_path
+    segments = []
+    for index, (a, b) in enumerate(zip(path, path[1:])):
+        direction, _ = _unit(_sub(b.xy, a.xy))
+        start_cut = layout.turns[index - 1].cutback if index > 0 else 0.0
+        start = _add(a.xy, _scale(direction, start_cut))
+        segments.append((start, direction, layout.straight_runs[index],
+                         layout.straight_allocation[index]))
+    components = []
+    for index, segment in enumerate(segments):
+        components.append(("STRAIGHT", index, segment))
+        if index < len(layout.turn_specs):
+            components.append((layout.turn_specs[index].turn_mode, index, None))
+    if layout.ascent_direction == "REVERSE":
+        reversed_components = []
+        for kind, index, payload in reversed(components):
+            if kind == "STRAIGHT":
+                start, direction, run, count = payload
+                payload = (_add(start, _scale(direction, run)),
+                           _scale(direction, -1.0), run, count)
+            reversed_components.append((kind, index, payload))
+        components = reversed_components
+
+    bodies, counter = [], 0
+    for kind, turn_index, payload in components:
+        if kind == "STRAIGHT":
+            start, direction, run, count = payload
+            if not count:
+                continue
+            going = run / count
+            local = StairLayout(
+                (), start, _add(start, _scale(direction, run)),
+                StairAxes((*direction, 0.0),
+                          (-direction[1], direction[0], 0.0)),
+                layout.base_z + counter * layout.actual_riser,
+                (count + 1) * layout.actual_riser,
+                layout.base_z + (counter + count + 1) * layout.actual_riser,
+                run, count + 1, count, layout.actual_riser, going,
+                layout.width, layout.tread_thickness, layout.riser_thickness)
+            bodies.append(replace(
+                build_underbody_fragment(local, fields),
+                ordinal=len(bodies) + 1))
+            counter += count
+            continue
+
+        cells = (layout.turn_cells[turn_index] if kind == TURN_WINDER else
+                 (NominalWinderCell(
+                     1, 0.0, 1.0, layout.turns[turn_index].envelope),))
+        if layout.ascent_direction == "REVERSE":
+            cells = tuple(reversed(cells))
+        for cell in cells:
+            counter += 1
+            boundaries = physical_cell_boundaries(
+                cell, layout.ascent_direction,
+                layout.turns[turn_index].inner_pivot)
+            origin, outer = boundaries.front
+            direction, _ = _unit(_sub(outer, origin), "Winder body boundary")
+            centroid = _centroid(cell.polygon)
+            side = (1.0 if _cross(direction, _sub(centroid, origin)) >= 0.0
+                    else -1.0)
+            distance = lambda point: side * _cross(
+                direction, _sub(point, origin))
+            # The Riser owns the exposed front strip.  Body support begins at
+            # its hidden rear plane and never inherits the Tread nosing.
+            footprint = _clip_polygon_scalar(
+                tuple(cell.polygon), distance, True, layout.riser_thickness)
+            if len(footprint) < 3 or polygon_area(footprint) <= EPS_AREA:
+                raise ValueError("Winder UNDERBODY setback planを解決できません。")
+            tread_top = layout.base_z + counter * layout.actual_riser
+            tread_bottom = tread_top - layout.tread_thickness
+            bottom = (layout.base_z if counter == 1 else tread_top - depth)
+            if tread_bottom - bottom <= EPS_LENGTH:
+                raise ValueError(
+                    "Winder UNDERBODYはclosure depthが踏板厚より大きい必要があります。")
+            bodies.append(_polygon_prism(
+                footprint, bottom, tread_bottom, "UNDERBODY", len(bodies) + 1))
     bodies = tuple(bodies)
     validate_mesh_fragments(bodies)
     return bodies

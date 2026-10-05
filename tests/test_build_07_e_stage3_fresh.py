@@ -98,11 +98,55 @@ class FreshStage3ASteppedBodyTests(unittest.TestCase):
                 self.assertAlmostEqual(lower_levels[0], 0.0)
                 # Accepted stepped_closure_visible_profile authority:
                 # second rise TOP 0.350m - closure depth 0.150m = 0.200m.
-                self.assertAlmostEqual(lower_levels[1], 0.200)
-                self.assertNotAlmostEqual(lower_levels[1], 0.170)
+                straight_levels = {
+                    round(vertex[2], 9) for vertex in bodies[0].vertices}
+                self.assertIn(0.200, straight_levels)
+                self.assertNotIn(0.170, straight_levels)
                 self.assertEqual(first[1], second[1])
                 self.assertEqual(first[2], second[2])
                 self.assert_top_unchanged(direction=direction)
+
+    def test_straight_body_is_set_back_from_tread_nosing_and_riser(self):
+        for direction in ("FORWARD", "REVERSE"):
+            with self.subTest(direction=direction):
+                layout, fragments, _mesh = self.prepare(direction=direction)
+                tread = next(part for part in fragments
+                             if part.part_type == "TREAD")
+                body = next(part for part in fragments
+                            if part.part_type == "UNDERBODY")
+                path = layout.canonical_path
+                start, following = ((path[0].xy, path[1].xy)
+                                    if direction == "FORWARD" else
+                                    (path[-1].xy, path[-2].xy))
+                vector = (following[0] - start[0], following[1] - start[1])
+                length = math.hypot(*vector)
+                forward = (vector[0] / length, vector[1] / length)
+                station = lambda vertex: ((vertex[0] - start[0]) * forward[0]
+                                          + (vertex[1] - start[1]) * forward[1])
+                tread_front = min(station(vertex) for vertex in tread.vertices)
+                body_front = min(station(vertex) for vertex in body.vertices)
+                self.assertAlmostEqual(tread_front, -0.005)
+                self.assertAlmostEqual(body_front, 0.012)
+                self.assertGreater(body_front, tread_front)
+                # The former copied footprint began at -5mm and left only
+                # h-depth = 25mm as an exposed tab.  The accepted contact-side
+                # body instead starts behind the 12mm Riser rear plane.
+                self.assertGreater(body_front, 0.0)
+
+    def test_winder_bodies_do_not_copy_physical_tread_footprints(self):
+        layout, fragments, _mesh = self.prepare()
+        treads = tuple(part for part in fragments if part.part_type == "TREAD")
+        winder_treads = tuple(
+            tread for tread, event in zip(treads, layout.rise_events)
+            if event.owner == "WINDER_TREAD")
+        winder_bodies = tuple(
+            part for part in fragments if part.part_type == "UNDERBODY")[1:4]
+        self.assertEqual(len(winder_treads), len(winder_bodies), 3)
+        for tread, body in zip(winder_treads, winder_bodies):
+            tread_plan = {vertex[:2] for vertex in tread.vertices}
+            body_plan = {vertex[:2] for vertex in body.vertices}
+            self.assertNotEqual(body_plan, tread_plan)
+            self.assertFalse(body_plan.issuperset(tread_plan))
 
     def test_63_degree_equal3_smoke_and_frozen_top(self):
         angle = math.radians(63.0)
