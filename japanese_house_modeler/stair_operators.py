@@ -217,7 +217,17 @@ def _prepare_candidate(values):
                       if values.get("riser_distribution_mode") == RISER_DISTRIBUTION_MANUAL
                       else values.get("auto_riser_allocation"))
         pattern_key = "win" + "der_" + "pattern"
-        layout, _fragments, mesh_data = turn5.prepare_turn_geometry(
+        prepare = (turn5.prepare_turn_residential_geometry
+                   if values.get("assembly_mode") == STANDARD_RESIDENTIAL
+                   else turn5.prepare_turn_geometry)
+        residential_keywords = ({"fields": values["residential"]}
+                                if prepare is turn5.prepare_turn_residential_geometry
+                                else {
+                                    "tread_front_overhang_mm": values["residential"].tread_front_overhang_mm,
+                                    "tread_front_edge_mode": values["residential"].tread_front_edge_mode,
+                                    "tread_front_edge_size_mm": values["residential"].tread_front_edge_size_mm,
+                                })
+        layout, _fragments, mesh_data = prepare(
             values["path_points"], values["ascent_direction"],
             values["base_z_mm"], values["floor_to_floor_mm"],
             values["riser_count"], values["stair_width_mm"],
@@ -226,10 +236,7 @@ def _prepare_candidate(values):
             **{pattern_key: values.get(pattern_key, turn5.PATTERN_EQUAL_3)},
             turn_mode=values.get("turn_mode", turn5.MODE),
             turn_specs=values.get("turn_specs"),
-            tread_front_overhang_mm=values["residential"].tread_front_overhang_mm,
-            tread_front_edge_mode=values["residential"].tread_front_edge_mode,
-            tread_front_edge_size_mm=values["residential"].tread_front_edge_size_mm,
-            allocation=allocation or None)
+            allocation=allocation or None, **residential_keywords)
         key = ("manual_riser_allocation"
                if values.get("riser_distribution_mode") == RISER_DISTRIBUTION_MANUAL
                else "auto_riser_allocation")

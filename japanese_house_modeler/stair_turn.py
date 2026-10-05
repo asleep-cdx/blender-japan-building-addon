@@ -1182,6 +1182,81 @@ def build_winder_fragments(layout):
     return fragments
 
 
+def build_stepped_closed_underbody_fragments(layout, top_fragments, fields):
+    """Build the visual-first schema-5 body as overlapping tread prisms.
+
+    Each accepted TREAD footprint owns one shallow, closed body immediately
+    below it.  The independently valid prisms deliberately overlap at step and
+    component interfaces: that hidden overlap closes exterior daylight without
+    changing the Stage-2.5 top generator or requiring a Boolean-style union.
+    """
+    from .stair_residential import (
+        validate_stepped_closure_depth,
+        validate_stepped_underbody_thickness,
+    )
+
+    validate_stepped_underbody_thickness(
+        fields, layout.actual_riser, layout.tread_thickness,
+        layout.riser_thickness)
+    depth = validate_stepped_closure_depth(
+        fields, layout.actual_riser, min(
+            run / count for run, count in zip(
+                layout.straight_runs, layout.straight_allocation) if count))
+    bodies = []
+    for ordinal, tread in enumerate(
+            (part for part in top_fragments if part.part_type == "TREAD"), 1):
+        # All accepted tread constructors put the complete lower plan in their
+        # first face.  Reversing that outward-facing bottom restores CCW plan
+        # order for the ordinary prism constructor.
+        footprint = tuple(
+            tread.vertices[index][:2] for index in reversed(tread.faces[0]))
+        tread_bottom = min(vertex[2] for vertex in tread.vertices)
+        bottom = max(layout.base_z, tread_bottom - depth)
+        if tread_bottom - bottom <= EPS_LENGTH:
+            raise ValueError("Winder UNDERBODY depthが退化しています。")
+        bodies.append(_polygon_prism(
+            footprint, bottom, tread_bottom, "UNDERBODY", ordinal))
+    bodies = tuple(bodies)
+    validate_mesh_fragments(bodies)
+    return bodies
+
+
+def prepare_turn_residential_geometry(
+        points, ascent_direction, base_z_mm, floor_to_floor_mm, riser_count,
+        stair_width_mm, tread_thickness_mm, riser_thickness_mm, *,
+        fields, point_ids=None, winder_pattern=WINDER_EQUAL_3,
+        turn_mode=TURN_WINDER, turn_specs=None, allocation=None):
+    """Prepare Fresh Stage-3A STEPPED_CLOSED, Side-Boards-OFF geometry."""
+    from .stair_residential import (
+        STEPPED_CLOSED, ResidentialFields, residential_fields,
+        validate_mode_data,
+    )
+
+    values = (fields if isinstance(fields, ResidentialFields)
+              else residential_fields(fields))
+    validate_mode_data("STANDARD_RESIDENTIAL", WINDER_SCHEMA_VERSION, values)
+    if values.underside_mode != STEPPED_CLOSED:
+        raise ScopeUnsupportedError(
+            "schema-5 SLOPED_CLOSEDはFresh Stage 3Bで対応予定です。")
+    if values.left_side_board_enabled or values.right_side_board_enabled:
+        raise ScopeUnsupportedError(
+            "schema-5 Winder Side BoardはFresh Stage 3C以降で対応予定です。")
+    layout = resolve_winder_layout(
+        points, ascent_direction, base_z_mm, floor_to_floor_mm, riser_count,
+        stair_width_mm, tread_thickness_mm, riser_thickness_mm,
+        point_ids=point_ids, winder_pattern=winder_pattern,
+        turn_mode=turn_mode, turn_specs=turn_specs, allocation=allocation,
+        tread_front_overhang_mm=values.tread_front_overhang_mm,
+        tread_front_edge_mode=values.tread_front_edge_mode,
+        tread_front_edge_size_mm=values.tread_front_edge_size_mm)
+    top = build_winder_fragments(layout)
+    underbody = build_stepped_closed_underbody_fragments(layout, top, values)
+    fragments = top + underbody
+    mesh = assemble_stair_mesh(fragments)
+    return layout, fragments, StairMeshData(
+        mesh.vertices, mesh.faces, mesh.face_roles)
+
+
 def prepare_winder_geometry(points, ascent_direction, base_z_mm,
                             floor_to_floor_mm, riser_count, stair_width_mm,
                             tread_thickness_mm, riser_thickness_mm, *,
