@@ -1182,6 +1182,142 @@ def build_winder_fragments(layout):
     return fragments
 
 
+def build_stepped_closed_underbody_fragments(layout, _top_fragments, fields):
+    """Build setback schema-5 bodies without covering the accepted top."""
+    from .stair_residential import (
+        validate_stepped_closure_depth,
+        validate_stepped_underbody_thickness,
+    )
+    from .stair_residential_geometry import build_underbody_fragment
+    from .stair_geometry import StairAxes, StairLayout
+
+    validate_stepped_underbody_thickness(
+        fields, layout.actual_riser, layout.tread_thickness,
+        layout.riser_thickness)
+    depth = validate_stepped_closure_depth(
+        fields, layout.actual_riser, min(
+            run / count for run, count in zip(
+                layout.straight_runs, layout.straight_allocation) if count))
+    if depth - layout.tread_thickness <= EPS_LENGTH:
+        raise ValueError(
+            "UNDERBODY closure depthは踏板厚より大きい必要があります。")
+    path = layout.canonical_path
+    segments = []
+    for index, (a, b) in enumerate(zip(path, path[1:])):
+        direction, _ = _unit(_sub(b.xy, a.xy))
+        start_cut = layout.turns[index - 1].cutback if index > 0 else 0.0
+        start = _add(a.xy, _scale(direction, start_cut))
+        segments.append((start, direction, layout.straight_runs[index],
+                         layout.straight_allocation[index]))
+    components = []
+    for index, segment in enumerate(segments):
+        components.append(("STRAIGHT", index, segment))
+        if index < len(layout.turn_specs):
+            components.append((layout.turn_specs[index].turn_mode, index, None))
+    if layout.ascent_direction == "REVERSE":
+        reversed_components = []
+        for kind, index, payload in reversed(components):
+            if kind == "STRAIGHT":
+                start, direction, run, count = payload
+                payload = (_add(start, _scale(direction, run)),
+                           _scale(direction, -1.0), run, count)
+            reversed_components.append((kind, index, payload))
+        components = reversed_components
+
+    bodies, counter = [], 0
+    for kind, turn_index, payload in components:
+        if kind == "STRAIGHT":
+            start, direction, run, count = payload
+            if not count:
+                continue
+            going = run / count
+            local = StairLayout(
+                (), start, _add(start, _scale(direction, run)),
+                StairAxes((*direction, 0.0),
+                          (-direction[1], direction[0], 0.0)),
+                layout.base_z + counter * layout.actual_riser,
+                (count + 1) * layout.actual_riser,
+                layout.base_z + (counter + count + 1) * layout.actual_riser,
+                run, count + 1, count, layout.actual_riser, going,
+                layout.width, layout.tread_thickness, layout.riser_thickness)
+            bodies.append(replace(
+                build_underbody_fragment(local, fields),
+                ordinal=len(bodies) + 1))
+            counter += count
+            continue
+
+        cells = (layout.turn_cells[turn_index] if kind == TURN_WINDER else
+                 (NominalWinderCell(
+                     1, 0.0, 1.0, layout.turns[turn_index].envelope),))
+        if layout.ascent_direction == "REVERSE":
+            cells = tuple(reversed(cells))
+        for cell in cells:
+            counter += 1
+            boundaries = physical_cell_boundaries(
+                cell, layout.ascent_direction,
+                layout.turns[turn_index].inner_pivot)
+            origin, outer = boundaries.front
+            direction, _ = _unit(_sub(outer, origin), "Winder body boundary")
+            centroid = _centroid(cell.polygon)
+            side = (1.0 if _cross(direction, _sub(centroid, origin)) >= 0.0
+                    else -1.0)
+            distance = lambda point: side * _cross(
+                direction, _sub(point, origin))
+            # The Riser owns the exposed front strip.  Body support begins at
+            # its hidden rear plane and never inherits the Tread nosing.
+            footprint = _clip_polygon_scalar(
+                tuple(cell.polygon), distance, True, layout.riser_thickness)
+            if len(footprint) < 3 or polygon_area(footprint) <= EPS_AREA:
+                raise ValueError("Winder UNDERBODY setback planを解決できません。")
+            tread_top = layout.base_z + counter * layout.actual_riser
+            tread_bottom = tread_top - layout.tread_thickness
+            bottom = (layout.base_z if counter == 1 else tread_top - depth)
+            if tread_bottom - bottom <= EPS_LENGTH:
+                raise ValueError(
+                    "Winder UNDERBODYはclosure depthが踏板厚より大きい必要があります。")
+            bodies.append(_polygon_prism(
+                footprint, bottom, tread_bottom, "UNDERBODY", len(bodies) + 1))
+    bodies = tuple(bodies)
+    validate_mesh_fragments(bodies)
+    return bodies
+
+
+def prepare_turn_residential_geometry(
+        points, ascent_direction, base_z_mm, floor_to_floor_mm, riser_count,
+        stair_width_mm, tread_thickness_mm, riser_thickness_mm, *,
+        fields, point_ids=None, winder_pattern=WINDER_EQUAL_3,
+        turn_mode=TURN_WINDER, turn_specs=None, allocation=None):
+    """Prepare Fresh Stage-3A STEPPED_CLOSED, Side-Boards-OFF geometry."""
+    from .stair_residential import (
+        STEPPED_CLOSED, ResidentialFields, residential_fields,
+        validate_mode_data,
+    )
+
+    values = (fields if isinstance(fields, ResidentialFields)
+              else residential_fields(fields))
+    validate_mode_data("STANDARD_RESIDENTIAL", WINDER_SCHEMA_VERSION, values)
+    if values.underside_mode != STEPPED_CLOSED:
+        raise ScopeUnsupportedError(
+            "schema-5 SLOPED_CLOSEDはFresh Stage 3Bで対応予定です。")
+    if values.left_side_board_enabled or values.right_side_board_enabled:
+        raise ScopeUnsupportedError(
+            "schema-5 Winder Side BoardはFresh Stage 3C以降で対応予定です。")
+    layout = resolve_winder_layout(
+        points, ascent_direction, base_z_mm, floor_to_floor_mm, riser_count,
+        stair_width_mm, tread_thickness_mm, riser_thickness_mm,
+        point_ids=point_ids, winder_pattern=winder_pattern,
+        turn_mode=turn_mode, turn_specs=turn_specs, allocation=allocation,
+        tread_front_overhang_mm=values.tread_front_overhang_mm,
+        tread_front_edge_mode=values.tread_front_edge_mode,
+        tread_front_edge_size_mm=values.tread_front_edge_size_mm)
+    top = build_winder_fragments(layout)
+    underbody = build_stepped_closed_underbody_fragments(layout, top, values)
+    fragments = top + underbody
+    mesh = assemble_stair_mesh(fragments)
+    return layout, fragments, StairMeshData(
+        mesh.vertices, mesh.faces, mesh.face_roles)
+
+
 def prepare_winder_geometry(points, ascent_direction, base_z_mm,
                             floor_to_floor_mm, riser_count, stair_width_mm,
                             tread_thickness_mm, riser_thickness_mm, *,
