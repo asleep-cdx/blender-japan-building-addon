@@ -206,6 +206,17 @@ class WinderLayout:
         return self.upper_arrival_z * _MM_PER_METRE
 
 
+@dataclass(frozen=True)
+class SlopedTurnStation:
+    """One shared radial station of a visual-first Winder soffit."""
+
+    fraction: float
+    inner: tuple
+    outer: tuple
+    lower_z: float
+    event_fraction: float
+
+
 def _finite_xy(value, label):
     if value is None or len(value) < 2:
         raise ValueError(f"{label}を取得できません。")
@@ -1282,23 +1293,264 @@ def build_stepped_closed_underbody_fragments(layout, _top_fragments, fields):
     return bodies
 
 
+def _turn_corner_fraction(frame):
+    """Return the signed angular station of the envelope outer corner."""
+    entry, _ = _unit(_sub(frame.entry_outer, frame.inner_pivot), "entry ray")
+    corner, _ = _unit(_sub(frame.outer_corner, frame.inner_pivot), "corner ray")
+    angle = math.atan2(_cross(entry, corner), _dot(entry, corner))
+    if frame.theta < 0.0 and angle > 0.0:
+        angle -= 2.0 * math.pi
+    if frame.theta > 0.0 and angle < 0.0:
+        angle += 2.0 * math.pi
+    return angle / frame.theta
+
+
+def canonical_turn_endpoint_z(ascent_direction, ascent_entry_z, ascent_exit_z):
+    """Map ascent-local interface elevations onto canonical Turn endpoints."""
+    if ascent_direction == "FORWARD":
+        return ascent_entry_z, ascent_exit_z
+    if ascent_direction == "REVERSE":
+        return ascent_exit_z, ascent_entry_z
+    raise ValueError("不明な上り方向です。")
+
+
+def resolve_sloped_turn_stations(
+        layout, turn_index, canonical_entry_z, canonical_exit_z):
+    """Resolve a Turn using canonical frame.entry/frame.exit elevations.
+
+    Divider elevations follow RiseEvent order, not angular distance.  The
+    envelope corner is an extra geometry station only and is interpolated
+    inside its containing event interval.  A short deterministic relief chord
+    keeps the lower surface away from the singular multi-Z pivot.
+
+    The elevation arguments always describe canonical ``fraction=0`` entry
+    and ``fraction=1`` exit.  A REVERSE caller must map its ascent-local
+    endpoints with :func:`canonical_turn_endpoint_z` first.
+    """
+    frame = layout.turns[turn_index]
+    cells = layout.turn_cells[turn_index]
+    if not cells:
+        return ()
+    fractions = [cells[0].front_fraction]
+    fractions.extend(cell.rear_fraction for cell in cells)
+    corner_fraction = _turn_corner_fraction(frame)
+    if (EPS_ANGLE < corner_fraction < 1.0 - EPS_ANGLE
+            and all(abs(corner_fraction - value) > EPS_ANGLE
+                    for value in fractions)):
+        fractions.append(corner_fraction)
+    fractions.sort()
+
+    entry_ray, entry_radius = _unit(
+        _sub(frame.entry_outer, frame.inner_pivot), "entry ray")
+    _exit_ray, exit_radius = _unit(
+        _sub(frame.exit_outer, frame.inner_pivot), "exit ray")
+    rho = max(layout.riser_thickness, 10.0 * EPS_LENGTH)
+    if rho >= min(entry_radius, exit_radius) - EPS_LENGTH:
+        raise ValueError("GEOMETRY_INVALID: Winder pivot relief is too large")
+    j0 = _add(frame.inner_pivot, _scale(entry_ray, rho))
+    exit_ray = _rotate(entry_ray, frame.theta)
+    j1 = _add(frame.inner_pivot, _scale(exit_ray, rho))
+    count = len(cells)
+    stations = []
+    for fraction in fractions:
+        primary = next((index for index, value in enumerate(
+                        (cells[0].front_fraction,)
+                        + tuple(cell.rear_fraction for cell in cells))
+                        if abs(value - fraction) <= EPS_ANGLE), None)
+        if primary is not None:
+            event_fraction = primary / count
+        else:
+            cell_index = next(index for index, cell in enumerate(cells)
+                              if cell.front_fraction < fraction
+                              < cell.rear_fraction)
+            cell = cells[cell_index]
+            local = ((fraction - cell.front_fraction)
+                     / (cell.rear_fraction - cell.front_fraction))
+            event_fraction = (cell_index + local) / count
+        lower_z = (canonical_entry_z
+                   + (canonical_exit_z - canonical_entry_z) * event_fraction)
+        ray = _rotate(entry_ray, fraction * frame.theta)
+        inner_hit = _ray_segment_intersection(frame.inner_pivot, ray, j0, j1)
+        if inner_hit is None:
+            # End rays meet the chord at an endpoint and can be numerically
+            # parallel to its final ulp; reuse that exact endpoint authority.
+            inner = j0 if fraction <= EPS_ANGLE else j1
+        else:
+            inner = inner_hit[1]
+        outer = (frame.outer_corner if abs(fraction - corner_fraction) <= EPS_ANGLE
+                 else divider_outer_point(frame, fraction))
+        stations.append(SlopedTurnStation(
+            fraction, inner, outer, lower_z, event_fraction))
+    return tuple(stations)
+
+
+def _sloped_strip_fragment(a, b, top_a, top_b, ordinal):
+    """Build a closed station-to-station strip with a triangulated soffit."""
+    plan = (a.inner, a.outer, b.outer, b.inner)
+    lower = (a.lower_z, a.lower_z, b.lower_z, b.lower_z)
+    upper = (top_a, top_a, top_b, top_b)
+    if polygon_signed_area(plan) < 0.0:
+        plan = tuple(reversed(plan))
+        lower = tuple(reversed(lower))
+        upper = tuple(reversed(upper))
+    vertices = tuple((point[0], point[1], z)
+                     for point, z in zip(plan, lower)) + tuple(
+                         (point[0], point[1], z)
+                         for point, z in zip(plan, upper))
+    faces = ((0, 2, 1), (0, 3, 2), (4, 5, 6), (4, 6, 7),
+             (0, 1, 5, 4), (1, 2, 6, 5),
+             (2, 3, 7, 6), (3, 0, 4, 7))
+    return MeshFragment("UNDERBODY", ordinal, vertices, faces)
+
+
+def build_sloped_closed_underbody_fragments(layout, _top_fragments, fields):
+    """Build accepted Straight slopes plus continuous turning Winder soffits."""
+    from .stair_residential import (
+        validate_stepped_closure_depth,
+        validate_stepped_underbody_thickness,
+    )
+    from .stair_residential_geometry import (
+        build_underbody_fragment, sloped_underbody_profile,
+    )
+    from .stair_geometry import StairAxes, StairLayout
+
+    validate_stepped_underbody_thickness(
+        fields, layout.actual_riser, layout.tread_thickness,
+        layout.riser_thickness)
+    goings = tuple(run / count for run, count in zip(
+        layout.straight_runs, layout.straight_allocation) if count)
+    depth = validate_stepped_closure_depth(
+        fields, layout.actual_riser, min(goings))
+    if depth - layout.tread_thickness <= EPS_LENGTH:
+        raise ValueError(
+            "UNDERBODY closure depthは踏板厚より大きい必要があります。")
+
+    path = layout.canonical_path
+    segments = []
+    for index, (a, b) in enumerate(zip(path, path[1:])):
+        direction, _ = _unit(_sub(b.xy, a.xy))
+        start_cut = layout.turns[index - 1].cutback if index > 0 else 0.0
+        start = _add(a.xy, _scale(direction, start_cut))
+        segments.append((start, direction, layout.straight_runs[index],
+                         layout.straight_allocation[index]))
+    components = []
+    for index, segment in enumerate(segments):
+        components.append(["STRAIGHT", index, segment])
+        if index < len(layout.turn_specs):
+            components.append([layout.turn_specs[index].turn_mode, index, None])
+    if layout.ascent_direction == "REVERSE":
+        components.reverse()
+        for component in components:
+            if component[0] == "STRAIGHT":
+                start, direction, run, count = component[2]
+                component[2] = (_add(start, _scale(direction, run)),
+                                _scale(direction, -1.0), run, count)
+
+    bodies, counter = [], 0
+    straight_bounds = {}
+    for position, (kind, _index, payload) in enumerate(components):
+        if kind != "STRAIGHT":
+            counter += (len(layout.turn_cells[_index]) if kind == TURN_WINDER
+                        else 1)
+            continue
+        start, direction, run, count = payload
+        if not count:
+            continue
+        going = run / count
+        local = StairLayout(
+            (), start, _add(start, _scale(direction, run)),
+            StairAxes((*direction, 0.0),
+                      (-direction[1], direction[0], 0.0)),
+            layout.base_z + counter * layout.actual_riser,
+            (count + 1) * layout.actual_riser,
+            layout.base_z + (counter + count + 1) * layout.actual_riser,
+            run, count + 1, count, layout.actual_riser, going,
+            layout.width, layout.tread_thickness, layout.riser_thickness)
+        profile = sloped_underbody_profile(local, fields)
+        straight_bounds[position] = (profile.outer[0][1], profile.outer[-1][1])
+        bodies.append(replace(build_underbody_fragment(local, fields),
+                              ordinal=len(bodies) + 1))
+        counter += count
+
+    # Resolve every contiguous Turn group between the exact adjacent Straight
+    # profile endpoints.  This also gives Compact-U one shared middle value.
+    position = 0
+    while position < len(components):
+        if components[position][0] == "STRAIGHT":
+            position += 1
+            continue
+        group = []
+        cursor = position
+        while cursor < len(components):
+            kind, turn_index, _payload = components[cursor]
+            if kind == "STRAIGHT":
+                if components[cursor][2][3]:
+                    break
+                cursor += 1
+                continue
+            group.append((cursor, kind, turn_index))
+            cursor += 1
+        previous = max((key for key in straight_bounds if key < position),
+                       default=None)
+        following = min((key for key in straight_bounds if key >= cursor),
+                        default=None)
+        entry_z = (straight_bounds[previous][1] if previous is not None
+                   else layout.base_z)
+        exit_z = (straight_bounds[following][0] if following is not None
+                  else layout.upper_arrival_z - depth)
+        weights = [len(layout.turn_cells[index]) if kind == TURN_WINDER else 1
+                   for _pos, kind, index in group]
+        total = sum(weights)
+        consumed = 0
+        for (_pos, kind, turn_index), weight in zip(group, weights):
+            turn_entry = entry_z + (exit_z - entry_z) * consumed / total
+            consumed += weight
+            turn_exit = entry_z + (exit_z - entry_z) * consumed / total
+            if kind != TURN_WINDER:
+                continue
+            canonical_entry_z, canonical_exit_z = canonical_turn_endpoint_z(
+                layout.ascent_direction, turn_entry, turn_exit)
+            stations = resolve_sloped_turn_stations(
+                layout, turn_index, canonical_entry_z, canonical_exit_z)
+            for a, b in zip(stations, stations[1:]):
+                # Contact authority follows the same event interpolation but
+                # remains one rise above the exterior soffit at the high end.
+                top_a = a.lower_z + depth
+                top_b = b.lower_z + depth
+                bodies.append(_sloped_strip_fragment(
+                    a, b, top_a, top_b, len(bodies) + 1))
+            # A small, closed pivot core fills only the deterministic relief
+            # triangle.  Its sole pivot elevation prevents a multi-Z spike.
+            first, last = stations[0], stations[-1]
+            pivot_z = min(first.lower_z, last.lower_z)
+            core_plan = (layout.turns[turn_index].inner_pivot,
+                         first.inner, last.inner)
+            bodies.append(_polygon_prism(
+                core_plan, pivot_z, pivot_z + depth, "UNDERBODY",
+                len(bodies) + 1))
+        position = cursor
+
+    bodies = tuple(bodies)
+    validate_mesh_fragments(bodies)
+    return bodies
+
+
 def prepare_turn_residential_geometry(
         points, ascent_direction, base_z_mm, floor_to_floor_mm, riser_count,
         stair_width_mm, tread_thickness_mm, riser_thickness_mm, *,
         fields, point_ids=None, winder_pattern=WINDER_EQUAL_3,
         turn_mode=TURN_WINDER, turn_specs=None, allocation=None):
-    """Prepare Fresh Stage-3A STEPPED_CLOSED, Side-Boards-OFF geometry."""
+    """Prepare Fresh Stage-3A/3B closed, Side-Boards-OFF geometry."""
     from .stair_residential import (
-        STEPPED_CLOSED, ResidentialFields, residential_fields,
+        SLOPED_CLOSED, STEPPED_CLOSED, ResidentialFields, residential_fields,
         validate_mode_data,
     )
 
     values = (fields if isinstance(fields, ResidentialFields)
               else residential_fields(fields))
     validate_mode_data("STANDARD_RESIDENTIAL", WINDER_SCHEMA_VERSION, values)
-    if values.underside_mode != STEPPED_CLOSED:
-        raise ScopeUnsupportedError(
-            "schema-5 SLOPED_CLOSEDはFresh Stage 3Bで対応予定です。")
+    if values.underside_mode not in (STEPPED_CLOSED, SLOPED_CLOSED):
+        raise ScopeUnsupportedError("schema-5 underside modeは未対応です。")
     if values.left_side_board_enabled or values.right_side_board_enabled:
         raise ScopeUnsupportedError(
             "schema-5 Winder Side BoardはFresh Stage 3C以降で対応予定です。")
@@ -1311,7 +1563,9 @@ def prepare_turn_residential_geometry(
         tread_front_edge_mode=values.tread_front_edge_mode,
         tread_front_edge_size_mm=values.tread_front_edge_size_mm)
     top = build_winder_fragments(layout)
-    underbody = build_stepped_closed_underbody_fragments(layout, top, values)
+    underbody = (build_sloped_closed_underbody_fragments(layout, top, values)
+                 if values.underside_mode == SLOPED_CLOSED else
+                 build_stepped_closed_underbody_fragments(layout, top, values))
     fragments = top + underbody
     mesh = assemble_stair_mesh(fragments)
     return layout, fragments, StairMeshData(
