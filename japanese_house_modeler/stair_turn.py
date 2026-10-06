@@ -206,6 +206,17 @@ class WinderLayout:
         return self.upper_arrival_z * _MM_PER_METRE
 
 
+@dataclass(frozen=True)
+class SlopedTurnStation:
+    """One shared radial station of a visual-first Winder soffit."""
+
+    fraction: float
+    inner: tuple
+    outer: tuple
+    lower_z: float
+    event_fraction: float
+
+
 def _finite_xy(value, label):
     if value is None or len(value) < 2:
         raise ValueError(f"{label}を取得できません。")
@@ -490,31 +501,154 @@ def resolve_winder_riser_plan(cell, ascent_direction, inner_pivot,
                            plan, thickness)
 
 
+def winder_riser_hidden_rear_outer(cell, ascent_direction, inner_pivot,
+                                   riser_thickness):
+    """Return the existing Riser plan's exact outer hidden-rear contact."""
+    plan = resolve_winder_riser_plan(
+        cell, ascent_direction, inner_pivot, riser_thickness)
+    origin, outer = plan.front
+    direction, _ = _unit(_sub(outer, origin), "Winder front boundary")
+    centroid = _centroid(cell.polygon)
+    side = (1.0 if _cross(direction, _sub(centroid, origin)) >= 0.0 else -1.0)
+    candidates = tuple(
+        point for point in plan.polygon
+        if abs(side * _cross(direction, _sub(point, origin))
+               - plan.thickness) <= EPS_LENGTH)
+    if not candidates:
+        raise ValueError("Winder Riser hidden rear outerを解決できません。")
+    return max(candidates, key=lambda point: math.hypot(
+        *_sub(point, inner_pivot)))
+
+
+def winder_tread_rear_outer_authority(layout, turn_index, cells, cell_index):
+    """Return the exact rear-outer support shared by Tread and stepped body."""
+    cell = cells[cell_index]
+    frame = layout.turns[turn_index]
+    if cell_index + 1 < len(cells):
+        return winder_riser_hidden_rear_outer(
+            cells[cell_index + 1], layout.ascent_direction,
+            frame.inner_pivot, layout.riser_thickness)
+    rear = physical_cell_boundaries(
+        cell, layout.ascent_direction, frame.inner_pivot).rear
+    return resolve_winder_finish_outer_hit(
+        frame, cell, rear, layout.riser_thickness)
+
+
+def resolve_winder_finish_outer_hit(frame, cell, boundary, amount):
+    """Intersect a radial finish offset with the canonical exterior chain."""
+    origin, nominal_outer = boundary
+    direction, _ = _unit(_sub(nominal_outer, origin), "Winder tread boundary")
+    centroid = _centroid(cell.polygon)
+    interior_sign = (1.0 if _cross(
+        direction, _sub(centroid, origin)) >= 0.0 else -1.0)
+    offset_origin = _add(
+        origin, _scale((-direction[1], direction[0]),
+                       -interior_sign * float(amount)))
+    chain = (frame.entry_outer, frame.outer_corner, frame.exit_outer)
+    nominal_is_front = tuple(nominal_outer) == tuple(cell.polygon[1])
+    candidates = []
+    for index, (start, end) in enumerate(zip(chain, chain[1:])):
+        exterior, _ = _unit(_sub(end, start), "Turn exterior segment")
+        try:
+            hit = _line_intersection(offset_origin, direction, start, exterior)
+        except ValueError:
+            continue
+        segment_length = math.hypot(*_sub(end, start))
+        parameter = _dot(_sub(hit, start), exterior) / segment_length
+        if not (-EPS_LENGTH <= parameter <= 1.0 + EPS_LENGTH
+                or (index == 0 and parameter < 0.0)
+                or (index == len(chain) - 2 and parameter > 1.0)):
+            continue
+        station = index + parameter
+        nominal_station = min(
+            ((segment_index + _dot(_sub(nominal_outer, a), unit)
+              / math.hypot(*_sub(b, a)))
+             for segment_index, (a, b) in enumerate(zip(chain, chain[1:]))
+             for unit in (_unit(_sub(b, a), "Turn exterior segment")[0],)
+             if abs(_cross(unit, _sub(nominal_outer, a))) <= EPS_LENGTH),
+            key=lambda value: abs(value - station), default=None)
+        if nominal_station is None:
+            continue
+        delta = station - nominal_station
+        if ((nominal_is_front and delta < -EPS_INTERSECTION)
+                or (not nominal_is_front and delta > EPS_INTERSECTION)):
+            candidates.append((abs(delta), hit))
+    if not candidates:
+        raise ValueError("Winder finishとcanonical outer envelopeが交差しません。")
+    candidates.sort(key=lambda item: item[0])
+    if (len(candidates) > 1
+            and abs(candidates[0][0] - candidates[1][0]) <= EPS_INTERSECTION
+            and math.hypot(*_sub(candidates[0][1], candidates[1][1])) > EPS_LENGTH):
+        raise ValueError("Winder finishのcanonical outer hitが一意ではありません。")
+    return candidates[0][1]
+
+
+def _canonical_outer_station(frame, point):
+    """Return a station on the canonical exterior, including continuations."""
+    chain = (frame.entry_outer, frame.outer_corner, frame.exit_outer)
+    candidates = []
+    for index, (start, end) in enumerate(zip(chain, chain[1:])):
+        direction, length = _unit(_sub(end, start), "Turn exterior segment")
+        if abs(_cross(direction, _sub(point, start))) > EPS_LENGTH:
+            continue
+        parameter = _dot(_sub(point, start), direction) / length
+        if ((index == 0 and parameter <= 1.0 + EPS_LENGTH)
+                or (index == 1 and parameter >= -EPS_LENGTH)):
+            candidates.append(index + parameter)
+    if not candidates:
+        return None
+    return min(candidates, key=lambda value: abs(value - 1.0))
+
+
+def preserve_canonical_outer_chain(frame, polygon):
+    """Insert the exact outer corner when an exterior edge crosses station 1."""
+    polygon = tuple(polygon)
+    result = []
+    corner = tuple(frame.outer_corner)
+    for point, following in zip(polygon, polygon[1:] + polygon[:1]):
+        result.append(point)
+        first = _canonical_outer_station(frame, point)
+        second = _canonical_outer_station(frame, following)
+        if (first is None or second is None
+                or abs(first - 1.0) <= EPS_LENGTH
+                or abs(second - 1.0) <= EPS_LENGTH):
+            continue
+        if (first - 1.0) * (second - 1.0) < 0.0:
+            result.append(corner)
+    result = _deduplicate(tuple(result))
+    if len(result) < 3 or polygon_area(result) <= EPS_AREA:
+        raise ValueError("Winder canonical outer chain topologyが不正です。")
+    return result
+
+
 def physical_winder_tread_polygon(cell, ascent_direction, inner_pivot,
-                                  nosing=0.0, rear_extension=0.0):
+                                  nosing=0.0, rear_extension=0.0, *,
+                                  frame, rear_outer_authority=None):
     """Return a locally trimmed tread plan with extensions on radial edges only."""
     polygon = list(cell.polygon)
     boundaries = physical_cell_boundaries(cell, ascent_direction, inner_pivot)
     result = tuple(polygon)
-    for boundary, amount, downhill in ((boundaries.front, float(nosing), True),
-                                        (boundaries.rear, float(rear_extension), False)):
+    for boundary, amount in ((boundaries.front, float(nosing)),
+                             (boundaries.rear, float(rear_extension))):
         if amount <= EPS_LENGTH:
             continue
         origin, outer = boundary
-        direction, _ = _unit(_sub(outer, origin), "Winder tread boundary")
-        centroid = (sum(p[0] for p in result) / len(result),
-                    sum(p[1] for p in result) / len(result))
-        interior_sign = 1.0 if _cross(direction, _sub(centroid, origin)) >= 0 else -1.0
-        sign = -interior_sign if downhill else interior_sign
-        offset = _scale((-direction[1], direction[0]), sign * amount)
+        # Both finishes extend away from the current nominal cell: the front
+        # becomes the downhill nosing and the rear reaches through the uphill
+        # successor Riser band.  The opposite radial boundaries naturally
+        # give those extensions opposite world-space directions.
+        outer_hit = resolve_winder_finish_outer_hit(
+            frame, cell, boundary, amount)
+        if boundary == boundaries.rear and rear_outer_authority is not None:
+            outer_hit = tuple(rear_outer_authority)
         # The mathematical pivot is fixed, so the strip collapses locally
         # instead of extrapolating through it into the neighbouring sector.
         target = 1 if tuple(outer) == tuple(result[1]) else len(result) - 1
-        result = tuple(_add(p, offset) if index == target else p
+        result = tuple(outer_hit if index == target else p
                        for index, p in enumerate(result))
     if polygon_area(result) <= EPS_AREA:
         raise ValueError("physical Winder treadをtrimできません。")
-    return result
+    return preserve_canonical_outer_chain(frame, result)
 
 
 def _centroid(polygon):
@@ -1155,14 +1289,18 @@ def build_winder_fragments(layout):
             cells = layout.turn_cells[turn_index]
             if layout.ascent_direction == "REVERSE":
                 cells = tuple(reversed(cells))
-            for cell in cells:
+            for cell_index, cell in enumerate(cells):
                 counter += 1
                 top = layout.base_z + counter * layout.actual_riser
                 ordinal += 1
+                rear_outer_authority = winder_tread_rear_outer_authority(
+                    layout, turn_index, cells, cell_index)
                 tread_polygon = physical_winder_tread_polygon(
                     cell, layout.ascent_direction,
                     layout.turns[turn_index].inner_pivot, layout.nosing,
-                    layout.riser_thickness)
+                    layout.riser_thickness,
+                    frame=layout.turns[turn_index],
+                    rear_outer_authority=rear_outer_authority)
                 exposed = ((tread_polygon[0], tread_polygon[1])
                            if layout.ascent_direction == "FORWARD"
                            else (tread_polygon[-1], tread_polygon[0]))
@@ -1251,32 +1389,340 @@ def build_stepped_closed_underbody_fragments(layout, _top_fragments, fields):
                      1, 0.0, 1.0, layout.turns[turn_index].envelope),))
         if layout.ascent_direction == "REVERSE":
             cells = tuple(reversed(cells))
-        for cell in cells:
+        for cell_index, cell in enumerate(cells):
             counter += 1
-            boundaries = physical_cell_boundaries(
-                cell, layout.ascent_direction,
-                layout.turns[turn_index].inner_pivot)
-            origin, outer = boundaries.front
-            direction, _ = _unit(_sub(outer, origin), "Winder body boundary")
-            centroid = _centroid(cell.polygon)
-            side = (1.0 if _cross(direction, _sub(centroid, origin)) >= 0.0
-                    else -1.0)
-            distance = lambda point: side * _cross(
-                direction, _sub(point, origin))
-            # The Riser owns the exposed front strip.  Body support begins at
-            # its hidden rear plane and never inherits the Tread nosing.
-            footprint = _clip_polygon_scalar(
-                tuple(cell.polygon), distance, True, layout.riser_thickness)
-            if len(footprint) < 3 or polygon_area(footprint) <= EPS_AREA:
-                raise ValueError("Winder UNDERBODY setback planを解決できません。")
             tread_top = layout.base_z + counter * layout.actual_riser
-            tread_bottom = tread_top - layout.tread_thickness
-            bottom = (layout.base_z if counter == 1 else tread_top - depth)
-            if tread_bottom - bottom <= EPS_LENGTH:
-                raise ValueError(
-                    "Winder UNDERBODYはclosure depthが踏板厚より大きい必要があります。")
-            bodies.append(_polygon_prism(
-                footprint, bottom, tread_bottom, "UNDERBODY", len(bodies) + 1))
+            if kind == TURN_WINDER:
+                bodies.append(_build_winder_underbody_prism(
+                    layout, turn_index, cells, cell_index, tread_top,
+                    counter == 1, len(bodies) + 1))
+            else:
+                footprint = winder_underbody_support_footprint(
+                    layout, turn_index, cell)
+                bodies.append(_polygon_prism(
+                    footprint, layout.base_z if counter == 1 else
+                    tread_top - layout.actual_riser,
+                    tread_top - layout.tread_thickness,
+                    "UNDERBODY", len(bodies) + 1))
+    bodies = tuple(bodies)
+    validate_mesh_fragments(bodies)
+    return bodies
+
+
+def _build_winder_underbody_prism(
+        layout, turn_index, cells, cell_index, tread_top, at_base, ordinal):
+    """Build the shared accepted matching-ring body for one Winder tread."""
+    cell = cells[cell_index]
+    rear_outer = winder_tread_rear_outer_authority(
+        layout, turn_index, cells, cell_index)
+    footprint = winder_underbody_support_footprint(
+        layout, turn_index, cell, rear_outer)
+    top = tread_top - layout.tread_thickness
+    bottom = layout.base_z if at_base else tread_top - layout.actual_riser
+    if top - bottom <= EPS_LENGTH:
+        raise ValueError("Winder UNDERBODYは実蹴上が踏板厚より大きい必要があります。")
+    fragment = _polygon_prism(footprint, bottom, top, "UNDERBODY", ordinal)
+    validate_mesh_fragments((fragment,))
+    return fragment
+
+
+def winder_underbody_support_footprint(
+        layout, turn_index, cell, rear_outer_authority=None):
+    """Return the accepted Stage-3A Riser-rear Winder support plan."""
+    boundaries = physical_cell_boundaries(
+        cell, layout.ascent_direction,
+        layout.turns[turn_index].inner_pivot)
+    origin, outer = boundaries.front
+    direction, _ = _unit(_sub(outer, origin), "Winder body boundary")
+    centroid = _centroid(cell.polygon)
+    side = (1.0 if _cross(direction, _sub(centroid, origin)) >= 0.0 else -1.0)
+    distance = lambda point: side * _cross(direction, _sub(point, origin))
+    # The Riser owns the exposed front strip.  Body support begins at its
+    # hidden rear plane and never inherits the physical Tread/nosing outline.
+    footprint = _clip_polygon_scalar(
+        tuple(cell.polygon), distance, True, layout.riser_thickness)
+    if len(footprint) < 3 or polygon_area(footprint) <= EPS_AREA:
+        raise ValueError("Winder UNDERBODY setback planを解決できません。")
+    if rear_outer_authority is not None:
+        rear_origin, rear_outer = physical_cell_boundaries(
+            cell, layout.ascent_direction,
+            layout.turns[turn_index].inner_pivot).rear
+        rear_direction, _ = _unit(
+            _sub(rear_outer, rear_origin), "Winder body rear boundary")
+        candidates = tuple(
+            index for index, point in enumerate(footprint)
+            if abs(_cross(rear_direction,
+                          _sub(point, rear_origin))) <= EPS_LENGTH)
+        if not candidates:
+            raise ValueError("Winder UNDERBODY rear exterior pointを解決できません。")
+        target = max(candidates, key=lambda index: math.hypot(
+            *_sub(footprint[index], rear_origin)))
+        footprint = tuple(
+            tuple(rear_outer_authority) if index == target else point
+            for index, point in enumerate(footprint))
+        if polygon_area(footprint) <= EPS_AREA:
+            raise ValueError("Winder UNDERBODY rear support planが不正です。")
+    return preserve_canonical_outer_chain(layout.turns[turn_index], footprint)
+
+
+def _turn_corner_fraction(frame):
+    """Return the signed angular station of the envelope outer corner."""
+    entry, _ = _unit(_sub(frame.entry_outer, frame.inner_pivot), "entry ray")
+    corner, _ = _unit(_sub(frame.outer_corner, frame.inner_pivot), "corner ray")
+    angle = math.atan2(_cross(entry, corner), _dot(entry, corner))
+    if frame.theta < 0.0 and angle > 0.0:
+        angle -= 2.0 * math.pi
+    if frame.theta > 0.0 and angle < 0.0:
+        angle += 2.0 * math.pi
+    return angle / frame.theta
+
+
+def canonical_turn_endpoint_z(ascent_direction, ascent_entry_z, ascent_exit_z):
+    """Map ascent-local interface elevations onto canonical Turn endpoints."""
+    if ascent_direction == "FORWARD":
+        return ascent_entry_z, ascent_exit_z
+    if ascent_direction == "REVERSE":
+        return ascent_exit_z, ascent_entry_z
+    raise ValueError("不明な上り方向です。")
+
+
+def resolve_sloped_turn_stations(
+        layout, turn_index, canonical_entry_z, canonical_exit_z):
+    """Resolve a Turn using canonical frame.entry/frame.exit elevations.
+
+    Divider elevations follow RiseEvent order, not angular distance.  The
+    envelope corner is an extra geometry station only and is interpolated
+    inside its containing event interval.  A short deterministic relief chord
+    keeps the lower surface away from the singular multi-Z pivot.
+
+    The elevation arguments always describe canonical ``fraction=0`` entry
+    and ``fraction=1`` exit.  A REVERSE caller must map its ascent-local
+    endpoints with :func:`canonical_turn_endpoint_z` first.
+    """
+    frame = layout.turns[turn_index]
+    cells = layout.turn_cells[turn_index]
+    if not cells:
+        return ()
+    fractions = [cells[0].front_fraction]
+    fractions.extend(cell.rear_fraction for cell in cells)
+    corner_fraction = _turn_corner_fraction(frame)
+    if (EPS_ANGLE < corner_fraction < 1.0 - EPS_ANGLE
+            and all(abs(corner_fraction - value) > EPS_ANGLE
+                    for value in fractions)):
+        fractions.append(corner_fraction)
+    fractions.sort()
+
+    entry_ray, entry_radius = _unit(
+        _sub(frame.entry_outer, frame.inner_pivot), "entry ray")
+    _exit_ray, exit_radius = _unit(
+        _sub(frame.exit_outer, frame.inner_pivot), "exit ray")
+    rho = max(layout.riser_thickness, 10.0 * EPS_LENGTH)
+    if rho >= min(entry_radius, exit_radius) - EPS_LENGTH:
+        raise ValueError("GEOMETRY_INVALID: Winder pivot relief is too large")
+    j0 = _add(frame.inner_pivot, _scale(entry_ray, rho))
+    exit_ray = _rotate(entry_ray, frame.theta)
+    j1 = _add(frame.inner_pivot, _scale(exit_ray, rho))
+    count = len(cells)
+    stations = []
+    for fraction in fractions:
+        primary = next((index for index, value in enumerate(
+                        (cells[0].front_fraction,)
+                        + tuple(cell.rear_fraction for cell in cells))
+                        if abs(value - fraction) <= EPS_ANGLE), None)
+        if primary is not None:
+            event_fraction = primary / count
+        else:
+            cell_index = next(index for index, cell in enumerate(cells)
+                              if cell.front_fraction < fraction
+                              < cell.rear_fraction)
+            cell = cells[cell_index]
+            local = ((fraction - cell.front_fraction)
+                     / (cell.rear_fraction - cell.front_fraction))
+            event_fraction = (cell_index + local) / count
+        lower_z = sloped_turn_lower_z_at_fraction(
+            cells, canonical_entry_z, canonical_exit_z, fraction)
+        ray = _rotate(entry_ray, fraction * frame.theta)
+        inner_hit = _ray_segment_intersection(frame.inner_pivot, ray, j0, j1)
+        if inner_hit is None:
+            # End rays meet the chord at an endpoint and can be numerically
+            # parallel to its final ulp; reuse that exact endpoint authority.
+            inner = j0 if fraction <= EPS_ANGLE else j1
+        else:
+            inner = inner_hit[1]
+        outer = (frame.outer_corner if abs(fraction - corner_fraction) <= EPS_ANGLE
+                 else divider_outer_point(frame, fraction))
+        stations.append(SlopedTurnStation(
+            fraction, inner, outer, lower_z, event_fraction))
+    return tuple(stations)
+
+
+def _turn_fraction_at_point(frame, point):
+    """Return the canonical angular fraction of a Turn-plan point."""
+    entry, _ = _unit(_sub(frame.entry_outer, frame.inner_pivot), "entry ray")
+    ray, _ = _unit(_sub(point, frame.inner_pivot), "underbody station ray")
+    angle = math.atan2(_cross(entry, ray), _dot(entry, ray))
+    if frame.theta < 0.0 and angle > 0.0:
+        angle -= 2.0 * math.pi
+    if frame.theta > 0.0 and angle < 0.0:
+        angle += 2.0 * math.pi
+    return min(1.0, max(0.0, angle / frame.theta))
+
+
+def sloped_turn_lower_z_at_fraction(
+        cells, canonical_entry_z, canonical_exit_z, fraction):
+    """Evaluate the same event-linear field used by shared Turn stations."""
+    fraction = min(1.0, max(0.0, float(fraction)))
+    count = len(cells)
+    if not count:
+        raise ValueError("Winder lower fieldにはcellが必要です。")
+    if fraction <= cells[0].front_fraction + EPS_ANGLE:
+        event_fraction = 0.0
+    elif fraction >= cells[-1].rear_fraction - EPS_ANGLE:
+        event_fraction = 1.0
+    else:
+        index = next(index for index, cell in enumerate(cells)
+                     if cell.front_fraction - EPS_ANGLE <= fraction
+                     <= cell.rear_fraction + EPS_ANGLE)
+        cell = cells[index]
+        local = ((fraction - cell.front_fraction)
+                 / (cell.rear_fraction - cell.front_fraction))
+        event_fraction = (index + local) / count
+    return (canonical_entry_z
+            + (canonical_exit_z - canonical_entry_z) * event_fraction)
+
+
+def _clip_polygon_field(polygon, field, threshold=EPS_LENGTH):
+    """Clip a polygon to ``field >= threshold`` with deterministic bisection."""
+    result = []
+    previous = polygon[-1]
+    previous_value = field(previous) - threshold
+    previous_inside = previous_value >= 0.0
+    for current in polygon:
+        current_value = field(current) - threshold
+        current_inside = current_value >= 0.0
+        if current_inside != previous_inside:
+            low, high = (previous, current)
+            low_value = previous_value
+            for _unused in range(64):
+                midpoint = _scale(_add(low, high), 0.5)
+                midpoint_value = field(midpoint) - threshold
+                if (midpoint_value >= 0.0) == (low_value >= 0.0):
+                    low, low_value = midpoint, midpoint_value
+                else:
+                    high = midpoint
+            result.append(_scale(_add(low, high), 0.5))
+        if current_inside:
+            result.append(current)
+        previous = current
+        previous_value = current_value
+        previous_inside = current_inside
+    return _deduplicate(tuple(result))
+
+
+def _sloped_cell_fragment(plan, lower, top_z, ordinal):
+    """Build one tread-owned body with horizontal contact and sloped soffit."""
+    plan = tuple(plan)
+    lower = tuple(lower)
+    if polygon_signed_area(plan) < 0.0:
+        plan = tuple(reversed(plan))
+        lower = tuple(reversed(lower))
+    if max(lower) > top_z - EPS_LENGTH * 0.5:
+        raise ValueError("Winder SLOPED UNDERBODYのcontact clearanceが不足しています。")
+    size = len(plan)
+    vertices = tuple((point[0], point[1], z)
+                     for point, z in zip(plan, lower)) + tuple(
+                         (point[0], point[1], top_z) for point in plan)
+    faces = [(0, index + 1, index) for index in range(1, size - 1)]
+    faces.append(tuple(range(size, size * 2)))
+    for index in range(size):
+        following = (index + 1) % size
+        faces.extend(((index, following, following + size),
+                      (index, following + size, index + size)))
+    return MeshFragment("UNDERBODY", ordinal, vertices, tuple(faces))
+
+
+def build_sloped_closed_underbody_fragments(layout, _top_fragments, fields):
+    """Build accepted Straight slopes plus validated prismatic Winder bodies."""
+    from .stair_residential import (
+        validate_stepped_closure_depth,
+        validate_stepped_underbody_thickness,
+    )
+    from .stair_residential_geometry import build_underbody_fragment
+    from .stair_geometry import StairAxes, StairLayout
+
+    validate_stepped_underbody_thickness(
+        fields, layout.actual_riser, layout.tread_thickness,
+        layout.riser_thickness)
+    goings = tuple(run / count for run, count in zip(
+        layout.straight_runs, layout.straight_allocation) if count)
+    depth = validate_stepped_closure_depth(
+        fields, layout.actual_riser, min(goings))
+    if depth - layout.tread_thickness <= EPS_LENGTH:
+        raise ValueError(
+            "UNDERBODY closure depthは踏板厚より大きい必要があります。")
+
+    path = layout.canonical_path
+    segments = []
+    for index, (a, b) in enumerate(zip(path, path[1:])):
+        direction, _ = _unit(_sub(b.xy, a.xy))
+        start_cut = layout.turns[index - 1].cutback if index > 0 else 0.0
+        start = _add(a.xy, _scale(direction, start_cut))
+        segments.append((start, direction, layout.straight_runs[index],
+                         layout.straight_allocation[index]))
+    components = []
+    for index, segment in enumerate(segments):
+        components.append(["STRAIGHT", index, segment])
+        if index < len(layout.turn_specs):
+            components.append([layout.turn_specs[index].turn_mode, index, None])
+    if layout.ascent_direction == "REVERSE":
+        components.reverse()
+        for component in components:
+            if component[0] == "STRAIGHT":
+                start, direction, run, count = component[2]
+                component[2] = (_add(start, _scale(direction, run)),
+                                _scale(direction, -1.0), run, count)
+
+    bodies, counter = [], 0
+    component_counters = {}
+    for position, (kind, _index, payload) in enumerate(components):
+        component_counters[position] = counter
+        if kind != "STRAIGHT":
+            counter += (len(layout.turn_cells[_index]) if kind == TURN_WINDER
+                        else 1)
+            continue
+        start, direction, run, count = payload
+        if not count:
+            continue
+        going = run / count
+        local = StairLayout(
+            (), start, _add(start, _scale(direction, run)),
+            StairAxes((*direction, 0.0),
+                      (-direction[1], direction[0], 0.0)),
+            layout.base_z + counter * layout.actual_riser,
+            (count + 1) * layout.actual_riser,
+            layout.base_z + (counter + count + 1) * layout.actual_riser,
+            run, count + 1, count, layout.actual_riser, going,
+            layout.width, layout.tread_thickness, layout.riser_thickness)
+        bodies.append(replace(build_underbody_fragment(local, fields),
+                              ordinal=len(bodies) + 1))
+        counter += count
+
+    # SLOPED_CLOSED differs from STEPPED_CLOSED on ordinary Straight Flights.
+    # Winder Turns deliberately share the same validated per-tread prism.
+    for position, (kind, turn_index, _payload) in enumerate(components):
+        if kind != TURN_WINDER:
+            continue
+        cells = layout.turn_cells[turn_index]
+        if layout.ascent_direction == "REVERSE":
+            cells = tuple(reversed(cells))
+        start_counter = component_counters[position]
+        for cell_index, _cell in enumerate(cells):
+            event_index = start_counter + cell_index + 1
+            tread_top = layout.base_z + event_index * layout.actual_riser
+            bodies.append(_build_winder_underbody_prism(
+                layout, turn_index, cells, cell_index, tread_top,
+                event_index == 1, len(bodies) + 1))
+
     bodies = tuple(bodies)
     validate_mesh_fragments(bodies)
     return bodies
@@ -1287,18 +1733,17 @@ def prepare_turn_residential_geometry(
         stair_width_mm, tread_thickness_mm, riser_thickness_mm, *,
         fields, point_ids=None, winder_pattern=WINDER_EQUAL_3,
         turn_mode=TURN_WINDER, turn_specs=None, allocation=None):
-    """Prepare Fresh Stage-3A STEPPED_CLOSED, Side-Boards-OFF geometry."""
+    """Prepare Fresh Stage-3A/3B closed, Side-Boards-OFF geometry."""
     from .stair_residential import (
-        STEPPED_CLOSED, ResidentialFields, residential_fields,
+        SLOPED_CLOSED, STEPPED_CLOSED, ResidentialFields, residential_fields,
         validate_mode_data,
     )
 
     values = (fields if isinstance(fields, ResidentialFields)
               else residential_fields(fields))
     validate_mode_data("STANDARD_RESIDENTIAL", WINDER_SCHEMA_VERSION, values)
-    if values.underside_mode != STEPPED_CLOSED:
-        raise ScopeUnsupportedError(
-            "schema-5 SLOPED_CLOSEDはFresh Stage 3Bで対応予定です。")
+    if values.underside_mode not in (STEPPED_CLOSED, SLOPED_CLOSED):
+        raise ScopeUnsupportedError("schema-5 underside modeは未対応です。")
     if values.left_side_board_enabled or values.right_side_board_enabled:
         raise ScopeUnsupportedError(
             "schema-5 Winder Side BoardはFresh Stage 3C以降で対応予定です。")
@@ -1311,7 +1756,9 @@ def prepare_turn_residential_geometry(
         tread_front_edge_mode=values.tread_front_edge_mode,
         tread_front_edge_size_mm=values.tread_front_edge_size_mm)
     top = build_winder_fragments(layout)
-    underbody = build_stepped_closed_underbody_fragments(layout, top, values)
+    underbody = (build_sloped_closed_underbody_fragments(layout, top, values)
+                 if values.underside_mode == SLOPED_CLOSED else
+                 build_stepped_closed_underbody_fragments(layout, top, values))
     fragments = top + underbody
     mesh = assemble_stair_mesh(fragments)
     return layout, fragments, StairMeshData(
