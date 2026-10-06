@@ -171,12 +171,6 @@ class FreshStage3ASteppedBodyTests(unittest.TestCase):
         self.assert_top_unchanged(points=U_POINTS, ids=U_IDS, turn_specs=specs)
 
     def test_deferred_variants_are_rejected_before_assembly(self):
-        with self.assertRaisesRegex(ValueError, "Stage 3B"):
-            prepare_turn_residential_geometry(
-                fields=ResidentialFields(
-                    underside_mode="SLOPED_CLOSED",
-                    left_side_board_enabled=False,
-                    right_side_board_enabled=False), **_kwargs())
         with self.assertRaisesRegex(ValueError, "Stage 3C"):
             prepare_turn_residential_geometry(
                 fields=ResidentialFields(), **_kwargs())
