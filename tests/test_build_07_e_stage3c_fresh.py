@@ -64,6 +64,12 @@ def rotate_xy(point, angle):
             sine * point[0] + cosine * point[1])
 
 
+def fragment_digest(parts):
+    return hashlib.sha256(repr(tuple(
+        (part.part_type, part.ordinal, part.vertices, part.faces)
+        for part in parts)).encode()).hexdigest()
+
+
 class FreshStage3CSideBoardTests(unittest.TestCase):
     def fields(self, underside="STEPPED_CLOSED", upper="STEPPED",
                left=True, right=True):
@@ -305,6 +311,145 @@ class FreshStage3CSideBoardTests(unittest.TestCase):
                          (39, 632, 726))
         self.assertEqual(digest,
                          "05f012f304fea49fc1ed218789077cde0027a2fe47645e8fbc5f5f94bc72665f")
+
+    def test_positive_nosing_final_upper_arrival(self):
+        layout, parts, _mesh = prepare(self.fields())
+        ordinary_limit = 2 * (len(layout.rise_events) - 1)
+        ordinary = tuple(part for part in parts
+                         if part.part_type in ("TREAD", "RISER")
+                         and part.ordinal <= ordinary_limit)
+        self.assertEqual(len(ordinary), ordinary_limit)
+        self.assertEqual(fragment_digest(ordinary),
+                         "dbdc3dabcd23082db7fbd3f3d64c0518a9ae4a552fbcadd9e58f72225f155899")
+        self.assertAlmostEqual(max(vertex[2] for vertex in
+                                   ordinary[-2].vertices), 2.625)
+        arrival = tuple(part for part in parts
+                        if part.part_type in ("TREAD", "RISER")
+                        and part.ordinal > ordinary_limit)
+        self.assertEqual(tuple(part.part_type for part in arrival),
+                         ("RISER", "TREAD"))
+        riser, cap = arrival
+        self.assertEqual((riser.ordinal, cap.ordinal),
+                         (ordinary_limit + 1, ordinary_limit + 2))
+        self.assertAlmostEqual(min(vertex[2] for vertex in riser.vertices),
+                               layout.upper_arrival_z - layout.actual_riser)
+        self.assertAlmostEqual(max(vertex[2] for vertex in riser.vertices),
+                               layout.upper_arrival_z - layout.tread_thickness)
+        self.assertAlmostEqual(min(vertex[2] for vertex in cap.vertices),
+                               layout.upper_arrival_z - layout.tread_thickness)
+        self.assertAlmostEqual(max(vertex[2] for vertex in cap.vertices),
+                               layout.upper_arrival_z)
+        self.assertEqual(len(layout.rise_events), 16)
+        self.assertEqual(layout.rise_events[-1].owner, "UPPER_ARRIVAL")
+        self.assertTrue(all(vertex[2] <= layout.upper_arrival_z + 1.0e-10
+                            for part in parts if part.part_type != "SIDE_BOARD"
+                            for vertex in part.vertices))
+
+        # The final reference plane is the physical ascent destination.
+        self.assert_arrival_plan(layout, riser, cap)
+
+    def assert_arrival_plan(self, layout, riser, cap=None):
+        points = layout.canonical_path
+        start, end = ((points[-2].xy, points[-1].xy)
+                      if layout.ascent_direction == "FORWARD" else
+                      (points[1].xy, points[0].xy))
+        direction = (end[0] - start[0], end[1] - start[1])
+        length = math.hypot(*direction)
+        direction = (direction[0] / length, direction[1] / length)
+        station = lambda vertex: ((vertex[0] - end[0]) * direction[0]
+                                  + (vertex[1] - end[1]) * direction[1])
+        self.assertAlmostEqual(min(station(v) for v in riser.vertices), 0.0)
+        self.assertAlmostEqual(max(station(v) for v in riser.vertices),
+                               layout.riser_thickness)
+        if cap is not None:
+            self.assertAlmostEqual(min(station(v) for v in cap.vertices),
+                                   -layout.nosing)
+            self.assertAlmostEqual(max(station(v) for v in cap.vertices),
+                                   layout.riser_thickness)
+
+    def test_zero_nosing_arrival_has_only_full_height_riser(self):
+        fields = replace(self.fields(), tread_front_overhang_mm=0.0)
+        layout, parts, _mesh = prepare(fields)
+        ordinary_limit = 2 * (len(layout.rise_events) - 1)
+        arrival = tuple(part for part in parts
+                        if part.part_type in ("TREAD", "RISER")
+                        and part.ordinal > ordinary_limit)
+        self.assertEqual(len(arrival), 1)
+        self.assertEqual(arrival[0].part_type, "RISER")
+        self.assertAlmostEqual(min(v[2] for v in arrival[0].vertices),
+                               layout.upper_arrival_z - layout.actual_riser)
+        self.assertAlmostEqual(max(v[2] for v in arrival[0].vertices),
+                               layout.upper_arrival_z)
+        self.assert_arrival_plan(layout, arrival[0])
+
+    def test_reverse_arrival_uses_ascent_destination(self):
+        layout, parts, _mesh = prepare(self.fields(), direction="REVERSE")
+        ordinary_limit = 2 * (len(layout.rise_events) - 1)
+        riser, cap = (part for part in parts
+                      if part.part_type in ("TREAD", "RISER")
+                      and part.ordinal > ordinary_limit)
+        self.assert_arrival_plan(layout, riser, cap)
+        self.assertAlmostEqual(max(v[2] for v in cap.vertices),
+                               layout.upper_arrival_z)
+
+    def test_upper_arrival_rotates_with_final_ascent_flight(self):
+        angle = math.radians(17.0)
+        for direction in ("FORWARD", "REVERSE"):
+            for nosing in (0.0, 5.0):
+                with self.subTest(direction=direction, nosing=nosing):
+                    fields = replace(self.fields(), tread_front_overhang_mm=nosing)
+                    original = prepare(fields, direction=direction)
+                    rotated = prepare(fields,
+                                      points=tuple(rotate_xy(point, angle)
+                                                   for point in L),
+                                      direction=direction)
+                    cutoff = 2 * (len(original[0].rise_events) - 1)
+                    arrivals = [tuple(part for part in case[1]
+                                      if part.part_type in ("TREAD", "RISER")
+                                      and part.ordinal > cutoff)
+                                for case in (original, rotated)]
+                    self.assertEqual(len(arrivals[0]), len(arrivals[1]))
+                    for expected, actual in zip(*arrivals):
+                        self.assertEqual((expected.part_type, expected.ordinal,
+                                          expected.faces),
+                                         (actual.part_type, actual.ordinal,
+                                          actual.faces))
+                        for a, b in zip(expected.vertices, actual.vertices):
+                            xy = rotate_xy(b[:2], -angle)
+                            self.assertAlmostEqual(xy[0], a[0], delta=2.0e-8)
+                            self.assertAlmostEqual(xy[1], a[1], delta=2.0e-8)
+                            self.assertAlmostEqual(b[2], a[2], delta=1.0e-10)
+
+    def test_arrival_cap_uses_schema5_front_edge_modes(self):
+        for mode in ("BEVEL", "ROUND"):
+            with self.subTest(mode=mode):
+                fields = replace(self.fields(), tread_front_edge_mode=mode,
+                                 tread_front_edge_size_mm=3.0)
+                layout, parts, _mesh = prepare(fields)
+                cap = max((part for part in parts if part.part_type == "TREAD"),
+                          key=lambda part: part.ordinal)
+                self.assertGreater(len(cap.vertices), 8)
+                self.assertTrue(validate_mesh_fragments((cap,)))
+                self.assert_arrival_plan(layout, next(
+                    part for part in parts if part.part_type == "RISER"
+                    and part.ordinal == cap.ordinal - 1), cap)
+
+    def test_stage3c_boards_and_both_underbodies_keep_baseline_signatures(self):
+        expected = {
+            "STEPPED_CLOSED": (
+                "8bee259a060052f36c0c1fd31c9930da726e18c949b88d0c0282fe983530293f",
+                "ecef5d0b65b99b28b0f2c139a99eaf2a9c01fd4110a7d45cb019b6eaab164916"),
+            "SLOPED_CLOSED": (
+                "9ac142645660279282478b6a24dfa9152478feeb6a86d92643c3305b38459a21",
+                "774e7defcc6487c4ae33810caeb4af84d2c1054b238e7234b1f5aa35a425cad9"),
+        }
+        for mode, (body_digest, board_digest) in expected.items():
+            with self.subTest(mode=mode):
+                _layout, parts, _mesh = prepare(self.fields(underside=mode))
+                self.assertEqual(fragment_digest(
+                    part for part in parts if part.part_type == "UNDERBODY"),
+                    body_digest)
+                self.assertEqual(fragment_digest(boards(parts)), board_digest)
 
 
 if __name__ == "__main__":

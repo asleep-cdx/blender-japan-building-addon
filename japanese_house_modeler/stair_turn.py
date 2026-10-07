@@ -1315,6 +1315,27 @@ def build_winder_fragments(layout):
                 fragments.append(_polygon_prism(
                     riser.polygon, top - layout.actual_riser,
                     top - layout.tread_thickness, "RISER", ordinal))
+    # UPPER_ARRIVAL is the final RiseEvent, not another ordinary tread cell.
+    # Use the actual last ascent-local Straight component for its plane.
+    final_start, final_direction, final_run, _count = components[-1][2]
+    final_normal = normal(final_direction)
+    arrival = layout.upper_arrival_z
+    cap_bottom = arrival - layout.tread_thickness
+    ordinal += 1
+    fragments.append(_straight_box(
+        final_start, final_direction, final_normal, layout.width,
+        final_run, final_run + layout.riser_thickness,
+        arrival - layout.actual_riser,
+        cap_bottom if layout.nosing > 0.0 else arrival,
+        "RISER", ordinal))
+    if layout.nosing > 0.0:
+        ordinal += 1
+        fragments.append(_straight_tread(
+            final_start, final_direction, final_normal, layout.width,
+            final_run, final_run + layout.riser_thickness,
+            cap_bottom, arrival, layout.nosing,
+            layout.front_edge_mode, layout.front_edge_size,
+            ordinal))
     fragments = tuple(fragments)
     validate_mesh_fragments(fragments)
     return fragments

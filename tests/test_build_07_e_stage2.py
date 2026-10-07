@@ -93,7 +93,11 @@ class TurnAndUTests(unittest.TestCase):
         self.assertEqual(f.straight_allocation,r.straight_allocation)
     def test_22_no_duplicate_shared_riser(self):
         x,parts,_=prepare_winder_geometry(U,*BASE,point_ids=U_IDS,turn_specs=self.SPECS)
-        self.assertEqual(sum(p.part_type=="RISER" for p in parts),sum(x.straight_allocation)+sum(x.winder_counts))
+        ordinary=sum(x.straight_allocation)+sum(x.winder_counts)
+        risers=[p for p in parts if p.part_type=="RISER"]
+        self.assertEqual(len(x.rise_events),ordinary+1)
+        self.assertEqual(len(risers),ordinary+1)
+        self.assertEqual(sum(p.ordinal>2*ordinary for p in risers),1)
 
 
 class AngleMigrationFinishTests(unittest.TestCase):
