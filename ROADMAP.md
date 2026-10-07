@@ -1,6 +1,6 @@
 # Japanese House Modeler — Development Roadmap
 
-最終更新: 2026-10-05
+最終更新: 2026-10-07
 
 この文書は、Blender 5.2 LTS 向け **Japanese House Modeler / 日本住宅モデラー** の今後の開発順序と、各Buildをまたいで維持する設計方針をまとめたロードマップである。
 
@@ -58,30 +58,41 @@
 - **Build 07-D — ACCEPTED / overall ACCEPTED**
 - **Build 07-E Stage 1 — ACCEPTED**
 - **Build 07-E Stage 2 — ACCEPTED at Candidate r3**
-- **Build 07-E Stage 2.5 — CURRENT / PRE-STAGE-3 GEOMETRY SIMPLIFICATION**
+- **Build 07-E Stage 2.5 — ACCEPTED**
 - **Build 07-E Stage 3 first attempt / PR #33 — ABANDONED / CLOSED / NOT MERGED**
+- **Build 07-E Fresh Stage 3A — ACCEPTED at Candidate r2**
+- **Build 07-E Fresh Stage 3B — ACCEPTED at runtime r9**
+- **Build 07-E Fresh Stage 3C — NEXT**
 - **Build 07-E overall — NOT YET ACCEPTED**
 - **Build 07-F — HOLD after 07-E**
 - **Build 07-G — HOLD / OPTIONAL BACKLOG**
 - Current accepted add-on version: **0.7.4**
 
-Current accepted `main` before Stage 2.5 implementation:
+Current accepted `main` before the Stage-3B merge:
 
 ```text
-commit 202fd3a2fc82ba5979445e89c160cf46dd95fc9f
+commit c60a3205a7c0a8dce2afc30a28feb841ca379bf1
 ```
 
-Accepted Stage-2 runtime production revision:
+Accepted Fresh Stage-3A runtime production revision:
 
 ```text
-commit 9424da623953a32a97576ce45bec074b269d4058
-tree   7d30e76ae20ad58b72cece1e298f54ee45f90a65
-Candidate r3 SHA256 15d48e9230b5a7e7f0b59954ccbe56acc7fb99bce3d26b39481f969f75c7b1d4
+commit 01a9b88c28451ae9ac04f268fce63bfe1a227830
+tree   09527d45f2616a93c817e0922c91645d88245193
+Candidate r2 SHA256 d2d5353afca50b5f87f0c8722b9b36c38359eaded82d934d4dc638b38ca5f2f8
 ```
 
-Stage 2.5 exists because the first Stage-3 attempt showed that the later Stage-2 r2/r3 Winder physical trim authority made underside / Side Board integration unnecessarily complex for the project's Blender-first practical goal. Stage 2.5 will retain the accepted Stage-2 feature foundation but narrowly restore Candidate-r1-equivalent visible Winder TREAD/RISER production behavior before Stage 3 is restarted.
+Fresh Stage 3B has now passed Blender 5.2 LTS runtime acceptance at the exact production revision:
 
-The detailed authority for this correction stage is `BUILD_07_E_STAGE_2_5_PLAN.md`.
+```text
+commit 389f7e9d30a181c3fcd2c578e8af7bbdc16189e7
+tree   3154653ca6b608b1ae7b11e42a40d497b7c50b99
+PR     #47
+```
+
+Stage-3B acceptance covers Winder `SLOPED_CLOSED` with Side Boards OFF, the retained corrected `STEPPED_CLOSED` body, shared rear/exterior authority, and canonical outer-corner preservation. The next implementation step is Fresh Stage 3C ordinary Winder Side Board continuation.
+
+Detailed acceptance authority: `BUILD_07_E_STAGE_3B_ACCEPTANCE_RECORD.md`.
 
 ---
 
@@ -100,8 +111,12 @@ The detailed authority for this correction stage is `BUILD_07_E_STAGE_2_5_PLAN.m
 | **07-D** | Multi-point Path + L/U + Landing | **DONE / ACCEPTED** |
 | **07-E Stage 1** | Winder foundation | **DONE / ACCEPTED** |
 | **07-E Stage 2** | BF/U/Compact-U/arbitrary-angle top geometry | **DONE / ACCEPTED at r3** |
-| **07-E Stage 2.5** | Pre-Stage-3 Winder geometry simplification / r1-equivalent top restoration | **CURRENT** |
-| **07-E Stage 3 restart** | Winder CLOSED underbody + Side Board, visual-first | **NEXT after Stage 2.5 merge** |
+| **07-E Stage 2.5** | Pre-Stage-3 Winder geometry simplification / r1-equivalent top restoration | **DONE / ACCEPTED** |
+| **07-E Fresh Stage 3A** | Winder STEPPED_CLOSED / Side Boards OFF | **DONE / ACCEPTED at Candidate r2** |
+| **07-E Fresh Stage 3B** | Winder SLOPED_CLOSED / Side Boards OFF + outer-chain corrections | **DONE / ACCEPTED at runtime r9** |
+| **07-E Fresh Stage 3C** | ordinary Winder Side Board continuation | **NEXT** |
+| **07-E Fresh Stage 3D** | Compact-U shared-center Side Board | **PENDING** |
+| **07-E Fresh Stage 3E** | Material / Reverse / lifecycle regression | **PENDING** |
 | **07-E Stage 4** | Lifecycle / full regression / practical acceptance | **PENDING** |
 | **07-F** | Open / Support Variants | **HOLD after 07-E** |
 | **07-G** | Optional Stair Detail Expansion | **HOLD / Optional Backlog** |
@@ -289,12 +304,15 @@ Canonical Stair → Resolved Path → riser/tread placement → Tread/Riser/Unde
 
 ## 12.12 Build 07-E
 
-**Status: STAGE 1 ACCEPTED / STAGE 2 ACCEPTED / STAGE 2.5 CURRENT / STAGE 3 RESTART NEXT**
+**Status: STAGE 1 ACCEPTED / STAGE 2 ACCEPTED / STAGE 2.5 ACCEPTED / FRESH STAGE 3A ACCEPTED / FRESH STAGE 3B ACCEPTED / STAGE 3C NEXT**
 
 Authority：
 
 - `BUILD_07_E_SPECIFICATION.md`
 - `BUILD_07_E_STAGE_2_5_PLAN.md`
+- `BUILD_07_E_STAGE_2_5_ACCEPTANCE_RECORD.md`
+- `BUILD_07_E_STAGE_3A_ACCEPTANCE_RECORD.md`
+- `BUILD_07_E_STAGE_3B_ACCEPTANCE_RECORD.md`
 - `BUILD_07_E_ACCEPTANCE_RECORD.md`
 - `BUILD_07_D_ACCEPTANCE_RECORD.md`
 
@@ -302,9 +320,15 @@ Stage 1：schema-5 Turn/RiseEvent foundation + exact-90 EQUAL Winder foundation 
 
 Stage 2：BF / per-Turn U / Compact-U / arbitrary-angle Landing/Winder / migration / physical top finish integration — Candidate r3でACCEPTED。
 
-Stage 2.5：current r3 feature baseを保ちながらCandidate-r1 visible Winder TREAD/RISER production behaviorをnarrowly restoreする小規模 correction stage。r1 terminal gapは既知・許容。Runtime acceptance後mainへmergeする。
+Stage 2.5：Candidate-r1-equivalent visible Winder TREAD/RISER production behaviorをnarrowly restoreした correction stage — **ACCEPTED**。
 
-Stage 3：Stage 2.5 merged mainからfresh branchを作り、CLOSED underbody / Side Boardをvisual-first policyで実装する。Old PR #33はABANDONEDでありbaselineにしない。
+Fresh Stage 3A：Winder `STEPPED_CLOSED` visible body / Side Boards OFF — **ACCEPTED at Candidate r2**。
+
+Fresh Stage 3B：Winder `SLOPED_CLOSED` visible body / Side Boards OFF、shared rear/exterior authority、canonical outer-corner preservation — **ACCEPTED at runtime r9**。
+
+Fresh Stage 3C：ordinary Winder Side Board continuation — **NEXT**。
+
+Old PR #33はABANDONEDであり、Fresh Stage 3のbaselineではない。
 
 ### Stage-2 runtime artifact identities
 
@@ -404,7 +428,10 @@ Integration Coreは07-E/08-A/08-B/8.5 correction後、Door/Windowを待たず主
 - **07-E Stage 1**：schema-5 foundation ACCEPTED。
 - **07-E Stage 2**：Candidate r3 runtime ACCEPTED。
 - **PR #33 Stage 3 first attempt**：runtime regressions / over-complexityによりABANDONED、CLOSED、NOT MERGED。
-- **07-E Stage 2.5 CURRENT**：r1-equivalent Winder top geometryをnarrowly restoreし、07-D regressionを確認。
+- **07-E Stage 2.5**：r1-equivalent Winder top geometryをnarrowly restoreし、runtime ACCEPTED / merged。
+- **Fresh Stage 3A**：Winder STEPPED_CLOSED / Side Boards OFF — runtime ACCEPTED / merged。
+- **Fresh Stage 3B**：Winder SLOPED_CLOSED / Side Boards OFF + canonical outer-chain corrections — runtime ACCEPTED at r9。
+- **Fresh Stage 3C NEXT**：ordinary Winder Side Board continuation。
 - **Stage 2.5完了**：Acceptance Record作成 → main merge → fresh Stage-3 branch作成。
 - **Restarted Stage 3**：visual-first CLOSED underbody + Side Board。
 - **07-E完了**：practical checkpoint後07-F/07-GをHOLDして08へ。

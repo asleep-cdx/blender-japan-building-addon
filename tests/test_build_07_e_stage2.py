@@ -114,7 +114,9 @@ class AngleMigrationFinishTests(unittest.TestCase):
         with self.assertRaises(ValueError): layout(allocation=(1,1))
     def test_32_positive_nosing(self):
         x=resolve_winder_layout(L,*BASE,point_ids=L_IDS,tread_front_overhang_mm=5)
-        physical=physical_winder_tread_polygon(x.cells[0],"FORWARD",x.turn.inner_pivot,.005,x.riser_thickness)
+        physical=physical_winder_tread_polygon(
+            x.cells[0], "FORWARD", x.turn.inner_pivot, .005,
+            x.riser_thickness, frame=x.turn)
         self.assertNotEqual(physical,x.cells[0].polygon)
     def test_33_edge_constraints(self):
         with self.assertRaises(ValueError): resolve_winder_layout(L,*BASE,point_ids=L_IDS,tread_front_overhang_mm=5,tread_front_edge_mode="ROUND",tread_front_edge_size_mm=6)
