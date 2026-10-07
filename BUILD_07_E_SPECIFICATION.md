@@ -1803,11 +1803,13 @@ This section is the **later project decision adopted on 2026-10-05 after direct 
 Build 07-E Stage 1          ACCEPTED
 Build 07-E Stage 2 r3       ACCEPTED
 PR #33 first Stage 3        ABANDONED / CLOSED / NOT MERGED
-Build 07-E Stage 2.5        CURRENT
-Fresh Stage 3 restart       NEXT after Stage 2.5 acceptance + merge
+Build 07-E Stage 2.5        ACCEPTED / MERGED
+Fresh Stage 3A              ACCEPTED / MERGED
+Fresh Stage 3B              ACCEPTED at runtime r9
+Fresh Stage 3C              NEXT
 ```
 
-`main` remains at the accepted Stage-2 baseline until Stage 2.5 is runtime-accepted and merged。
+Before the Stage-3B merge, `main` is the accepted Stage-3A baseline at commit `c60a3205a7c0a8dce2afc30a28feb841ca379bf1`。Stage-3B runtime acceptance authority is PR #47 production commit `389f7e9d30a181c3fcd2c578e8af7bbdc16189e7` / tree `3154653ca6b608b1ae7b11e42a40d497b7c50b99`。
 
 ## 39.2 Why Stage 2.5 exists
 
@@ -1976,17 +1978,18 @@ Not required for fresh Stage-3 r1：
 ```text
 Stage 2.5 accepted + merged main
     ↓
-fresh Stage-3 branch
+Stage 3A STEPPED_CLOSED visible body / Side Boards OFF
+    ACCEPTED + MERGED
     ↓
-STEPPED_CLOSED visible body / Side Boards OFF
+Stage 3B SLOPED_CLOSED visible body / Side Boards OFF
+    ACCEPTED at runtime r9
     ↓
-SLOPED_CLOSED visible body / Side Boards OFF
+Stage 3C ordinary Side Board continuation
+    NEXT
     ↓
-ordinary Side Board continuation
+Stage 3D Compact-U Side Board
     ↓
-Compact-U Side Board
-    ↓
-Material / Reverse / lifecycle regression
+Stage 3E Material / Reverse / lifecycle regression
     ↓
 Stage 4
 ```
@@ -2012,3 +2015,74 @@ For Stage 2.5 / restarted Stage 3：
 ```
 
 Existing Acceptance Records remain historical truth. Do not rewrite history to claim Candidate r1 was the previously accepted Stage-2 final. Stage 2.5 is a later deliberate correction baseline。
+
+## 39.13 Accepted Stage-3B Winder underside contract
+
+Fresh Stage 3B runtime acceptance supersedes any earlier restarted-Stage-3 interpretation that would require a station-driven sloped lower surface inside the Winder cells.
+
+Accepted production contract：
+
+### Straight Flight
+
+- Straight `SLOPED_CLOSED` remains the existing accepted Residential sloped-body production.
+- Stage 3B does not redesign accepted Straight sloped geometry.
+
+### Winder cell body
+
+For both `STEPPED_CLOSED` and Winder `SLOPED_CLOSED` with Side Boards OFF, the Winder body uses the accepted matching-ring prismatic support contract：
+
+- lower and upper rings reuse the same ordered XY support footprint;
+- the support footprint excludes physical TREAD nosing;
+- ascent-local FRONT support begins behind the RISER at exactly `riser_thickness`;
+- upper Z is the accepted tread underside;
+- lower Z is the next-lower rise level, except for the existing base-floor handling;
+- normal Winder body depth is derived from `actual_riser - tread_thickness`;
+- Winder `SLOPED_CLOSED` does **not** use station-driven per-vertex lower-Z interpolation in production.
+
+This is an intentional visual-first simplification. The Winder part of a `SLOPED_CLOSED` stair is therefore not required to form one continuous mathematical slope through the Turn.
+
+### Shared rear/exterior authority
+
+The physical Winder TREAD and Winder UNDERBODY must reuse one rear/exterior support authority：
+
+- internal Winder-to-Winder interface：exact successor RISER hidden-rear outer contact;
+- final Winder interface：canonical exterior / legitimate supporting-line continuation.
+
+Independent approximate recomputation is not the accepted authority.
+
+### Canonical exterior traversal
+
+Physical finish replacement must preserve the canonical Turn exterior chain：
+
+```text
+entry_outer -> outer_corner -> exit_outer
+```
+
+If two adjacent physical exterior points lie on opposite sides of `outer_corner`, production must retain the exact canonical `frame.outer_corner` rather than connecting those points with a direct chord.
+
+This rule is geometry-semantic. Do not replace it with exact-90, world-axis, EQUAL_2, or EQUAL_4 name-based production branches.
+
+### Preserved top authority
+
+Stage-3B body corrections do not move the accepted mathematical inner pivot, canonical outer corner, FRONT nosing authority, or RISER production geometry merely to fit the body.
+
+### Runtime acceptance coverage
+
+The accepted r9 runtime sweep includes：
+
+- exact-90 EQUAL_2 / EQUAL_4;
+- approximately 63-degree EQUAL_2 / EQUAL_4;
+- EQUAL_3 regression;
+- BF_1 FORWARD / BF_2 REVERSE;
+- Compact-U two-Turn cases;
+- both `STEPPED_CLOSED` and `SLOPED_CLOSED`;
+- Regenerate determinism;
+- Save -> full Blender exit -> reopen;
+- schema-4 Build 07-D regression.
+
+The dedicated authority is `BUILD_07_E_STAGE_3B_ACCEPTANCE_RECORD.md`。
+
+### Deferred
+
+Stage 3B still does not implement Winder Side Boards. Ordinary Winder Side Board continuation is Fresh Stage 3C scope. Compact-U shared-center Side Board remains Stage 3D scope.
+
