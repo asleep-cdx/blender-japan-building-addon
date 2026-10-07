@@ -277,3 +277,47 @@ PR #47
 Fresh Stage 3C — ordinary Winder Side Board continuation — is **NEXT**.
 
 Build 07-E overall remains **NOT YET ACCEPTED**.
+
+
+## 9. Post-merge accepted archive verification
+
+The Windows-side accepted archive step was completed after the Stage-3B merge.
+
+Runtime-tested add-on archive:
+
+```text
+source
+C:\AI-Blender\Test_Zips\Japanese_House_Modeler_Build_07_E_Stage3B_Candidate_r9.zip
+
+accepted copy
+C:\AI-Blender\Build_Archives\Build_07_E\Japanese_House_Modeler_Build_07_E_Stage3B_ACCEPTED_r9.zip
+
+size
+165405 bytes
+
+SHA256
+8e8f9b81eb129060c85938a87ca53bd25372991316e4dfce79c1b9e1bb083bda
+```
+
+The source Candidate-r9 ZIP and the accepted copied ZIP have the same SHA256, confirming byte-identical archival of the Blender runtime-tested add-on package.
+
+Repository archive created from the exact runtime-tested production revision `389f7e9d30a181c3fcd2c578e8af7bbdc16189e7`:
+
+```text
+C:\AI-Blender\Build_Archives\Build_07_E\Japanese_House_Modeler_Build_07_E_Stage3B_REPO_ACCEPTED_r9.zip
+
+size
+783457 bytes
+
+SHA256
+21e169b21837f4ee329adaf188e95aeb5afbf50e518bce39efce1cf4f958d2d4
+```
+
+Final Windows repository state after synchronization and archive creation:
+
+```text
+main...origin/main
+working tree clean
+```
+
+This post-merge documentation update does not supersede the exact runtime-tested production revision/tree recorded above.
