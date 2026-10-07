@@ -62,7 +62,7 @@
 - **Build 07-E Stage 3 first attempt / PR #33 — ABANDONED / CLOSED / NOT MERGED**
 - **Build 07-E Fresh Stage 3A — ACCEPTED at Candidate r2**
 - **Build 07-E Fresh Stage 3B — ACCEPTED at runtime r9**
-- **Build 07-E Fresh Stage 3C — NEXT**
+- **Build 07-E Fresh Stage 3C — CURRENT**
 - **Build 07-E overall — NOT YET ACCEPTED**
 - **Build 07-F — HOLD after 07-E**
 - **Build 07-G — HOLD / OPTIONAL BACKLOG**
@@ -90,7 +90,7 @@ tree   3154653ca6b608b1ae7b11e42a40d497b7c50b99
 PR     #47
 ```
 
-Stage-3B acceptance covers Winder `SLOPED_CLOSED` with Side Boards OFF, the retained corrected `STEPPED_CLOSED` body, shared rear/exterior authority, and canonical outer-corner preservation. The next implementation step is Fresh Stage 3C ordinary Winder Side Board continuation.
+Stage-3B acceptance covers Winder `SLOPED_CLOSED` with Side Boards OFF, the retained corrected `STEPPED_CLOSED` body, shared rear/exterior authority, and canonical outer-corner preservation. Fresh Stage 3C ordinary Winder Side Board continuation is now the CURRENT implementation stage. Focused authority: `BUILD_07_E_STAGE_3C_PLAN.md`.
 
 Detailed acceptance authority: `BUILD_07_E_STAGE_3B_ACCEPTANCE_RECORD.md`.
 
@@ -114,7 +114,7 @@ Detailed acceptance authority: `BUILD_07_E_STAGE_3B_ACCEPTANCE_RECORD.md`.
 | **07-E Stage 2.5** | Pre-Stage-3 Winder geometry simplification / r1-equivalent top restoration | **DONE / ACCEPTED** |
 | **07-E Fresh Stage 3A** | Winder STEPPED_CLOSED / Side Boards OFF | **DONE / ACCEPTED at Candidate r2** |
 | **07-E Fresh Stage 3B** | Winder SLOPED_CLOSED / Side Boards OFF + outer-chain corrections | **DONE / ACCEPTED at runtime r9** |
-| **07-E Fresh Stage 3C** | ordinary Winder Side Board continuation | **NEXT** |
+| **07-E Fresh Stage 3C** | ordinary Winder Side Board continuation | **CURRENT** |
 | **07-E Fresh Stage 3D** | Compact-U shared-center Side Board | **PENDING** |
 | **07-E Fresh Stage 3E** | Material / Reverse / lifecycle regression | **PENDING** |
 | **07-E Stage 4** | Lifecycle / full regression / practical acceptance | **PENDING** |
@@ -326,7 +326,7 @@ Fresh Stage 3A：Winder `STEPPED_CLOSED` visible body / Side Boards OFF — **AC
 
 Fresh Stage 3B：Winder `SLOPED_CLOSED` visible body / Side Boards OFF、shared rear/exterior authority、canonical outer-corner preservation — **ACCEPTED at runtime r9**。
 
-Fresh Stage 3C：ordinary Winder Side Board continuation — **NEXT**。
+Fresh Stage 3C：ordinary Winder Side Board continuation — **CURRENT**。
 
 Old PR #33はABANDONEDであり、Fresh Stage 3のbaselineではない。
 
@@ -431,7 +431,7 @@ Integration Coreは07-E/08-A/08-B/8.5 correction後、Door/Windowを待たず主
 - **07-E Stage 2.5**：r1-equivalent Winder top geometryをnarrowly restoreし、runtime ACCEPTED / merged。
 - **Fresh Stage 3A**：Winder STEPPED_CLOSED / Side Boards OFF — runtime ACCEPTED / merged。
 - **Fresh Stage 3B**：Winder SLOPED_CLOSED / Side Boards OFF + canonical outer-chain corrections — runtime ACCEPTED at r9。
-- **Fresh Stage 3C NEXT**：ordinary Winder Side Board continuation。
+- **Fresh Stage 3C CURRENT**：ordinary Winder Side Board continuation。
 - **Stage 2.5完了**：Acceptance Record作成 → main merge → fresh Stage-3 branch作成。
 - **Restarted Stage 3**：visual-first CLOSED underbody + Side Board。
 - **07-E完了**：practical checkpoint後07-F/07-GをHOLDして08へ。
