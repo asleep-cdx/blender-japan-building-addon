@@ -241,12 +241,138 @@ class FreshStage3CSideBoardTests(unittest.TestCase):
                         points, direction, underside, upper)
 
     def test_outer_board_geometry_is_exact_stage3c_baseline(self):
+        # The former digest froze the body-setback upper step (runtime defect ②).
+        # Freeze the corrected output alongside the physical event assertions.
         parts = prepare(self.fields(left=False, right=True))[1]
         digest = hashlib.sha256(repr(tuple(
             (part.part_type, part.ordinal, part.vertices, part.faces)
             for part in boards(parts))).encode()).hexdigest()
         self.assertEqual(digest,
-                         "ab63c55aef767d6fdc8c109a3798327edd7fe22b20334dab8662bc92de6fd101")
+                         "4cf912a6ea0dc76a77f5845845ef14b6cbba608b0e6170d6b1630696ba9b31b9")
+
+    def assert_outer_walking_stations(self, points=L, pattern="EQUAL_3",
+                                      direction="FORWARD", upper="STEPPED"):
+        incoming = (points[1][0] - points[0][0],
+                    points[1][1] - points[0][1])
+        outgoing = (points[2][0] - points[1][0],
+                    points[2][1] - points[1][1])
+        turns_left = incoming[0] * outgoing[1] - incoming[1] * outgoing[0] > 0
+        outer_right = turns_left == (direction == "FORWARD")
+        fields = self.fields(upper=upper, left=not outer_right,
+                             right=outer_right)
+        layout, parts, _mesh = prepare(fields, points=points, pattern=pattern,
+                                       direction=direction)
+        frame = layout.turn
+        cells = (layout.cells if direction == "FORWARD" else
+                 tuple(reversed(layout.cells)))
+        turn_boards = boards(parts)[1:-1]
+        self.assertTrue(validate_mesh_fragments(turn_boards))
+        upper_vertices = [vertex for board in turn_boards
+                          for vertex in board.vertices[4:]]
+        lower_vertices = [vertex for board in turn_boards
+                          for vertex in board.vertices[:4]]
+        event_start = layout.straight_allocation[0 if direction == "FORWARD" else -1]
+        reveal = 0.04
+        for index, cell in enumerate(cells):
+            bounds = physical_cell_boundaries(
+                cell, direction, frame.inner_pivot)
+            front, rear = bounds.front[1], bounds.rear[1]
+            top = layout.base_z + (event_start + index + 1) * layout.actual_riser
+            front_z = top + reveal if upper == "STEPPED" else top - layout.actual_riser + reveal
+            rear_z = top + reveal
+            for point, z in ((front, front_z), (rear, rear_z)):
+                self.assertTrue(any(math.dist(vertex[:2], point) < 2.0e-8
+                                    and abs(vertex[2] - z) < 1.0e-9
+                                    for vertex in upper_vertices),
+                                (pattern, direction, upper, index, point, z))
+            support = winder_underbody_support_footprint(
+                layout, 0, cell,
+                winder_tread_rear_outer_authority(layout, 0, cells, index))
+            lower = tuple(point for point in support
+                          if _canonical_outer_station(frame, point) is not None)
+            lower_z = layout.base_z + (event_start + index) * layout.actual_riser
+            for point in lower:
+                self.assertTrue(any(math.dist(vertex[:2], point) < 2.0e-8
+                                    and abs(vertex[2] - lower_z) < 1.0e-9
+                                    for vertex in lower_vertices))
+            # The hidden-rear support is genuinely displaced from the event.
+            support_rear = max(lower, key=lambda point: _board_outer_distance(
+                frame, point, direction))
+            self.assertGreater(math.dist(support_rear, rear), 1.0e-4)
+            self.assertFalse(any(math.dist(vertex[:2], support_rear) < 2.0e-8
+                                 and abs(vertex[2] - rear_z) < 1.0e-9
+                                 for vertex in upper_vertices))
+            corner_station = _board_outer_distance(
+                frame, frame.outer_corner, direction)
+            first = _board_outer_distance(frame, front, direction)
+            last = _board_outer_distance(frame, rear, direction)
+            if first - 1.0e-9 <= corner_station <= last + 1.0e-9:
+                fraction = (corner_station - first) / (last - first)
+                corner_z = (top + reveal if upper == "STEPPED" else
+                            top - layout.actual_riser + reveal
+                            + fraction * layout.actual_riser)
+                self.assertTrue(any(vertex[:2] == frame.outer_corner
+                                    and abs(vertex[2] - corner_z) < 1.0e-9
+                                    for vertex in upper_vertices))
+
+    def test_outer_upper_uses_real_events_and_body_lower_remains_supported(self):
+        for upper in ("STEPPED", "SLOPED"):
+            with self.subTest(upper=upper):
+                self.assert_outer_walking_stations(upper=upper)
+
+    def test_outer_event_stations_patterns_reverse_mirror_and_arbitrary_angle(self):
+        mirrored = ((0.0, 0.0), (0.0, 2.2), (2.2, 2.2))
+        angle = math.radians(63.0)
+        angled = ((0.0, 0.0), (0.0, 2.2),
+                  (-2.2 * math.sin(angle), 2.2 + 2.2 * math.cos(angle)))
+        for points, patterns in ((L, ("EQUAL_2", "EQUAL_4", "BF_1", "BF_2")),
+                                 (mirrored, ("EQUAL_3",)),
+                                 (angled, ("EQUAL_3",))):
+            for pattern in patterns:
+                for direction in ("FORWARD", "REVERSE"):
+                    with self.subTest(points=points, pattern=pattern,
+                                      direction=direction):
+                        self.assert_outer_walking_stations(
+                            points, pattern, direction)
+
+    def test_outer_board_rotation_equivariance_including_event_vertices(self):
+        angle = math.radians(17.0)
+        for direction in ("FORWARD", "REVERSE"):
+            for upper in ("STEPPED", "SLOPED"):
+                with self.subTest(direction=direction, upper=upper):
+                    outer_right = direction == "FORWARD"
+                    fields = self.fields(upper=upper, left=not outer_right,
+                                         right=outer_right)
+                    reference = boards(prepare(fields, direction=direction)[1])
+                    rotated = boards(prepare(
+                        fields, points=tuple(rotate_xy(point, angle)
+                                             for point in L),
+                        direction=direction)[1])
+                    self.assertEqual(len(reference), len(rotated))
+                    for original, turned in zip(reference, rotated):
+                        self.assertEqual(original.faces, turned.faces)
+                        for a, b in zip(original.vertices, turned.vertices):
+                            restored = rotate_xy(b[:2], -angle)
+                            self.assertAlmostEqual(restored[0], a[0], delta=2.0e-8)
+                            self.assertAlmostEqual(restored[1], a[1], delta=2.0e-8)
+                            self.assertAlmostEqual(b[2], a[2], delta=1.0e-10)
+
+    def test_inner_board_and_top_are_exact_pre_correction_signatures(self):
+        expected_inner = {
+            ("STEPPED_CLOSED", "STEPPED"): "42beacb685082062e1fd901badbc7a014f0c7a66eb75a37594ca818f4b9e3634",
+            ("STEPPED_CLOSED", "SLOPED"): "6925a98e03d4ebf2cc89359d3443170534e0aefce107c6e43544583c46e95d7f",
+            ("SLOPED_CLOSED", "STEPPED"): "0d0f31c8ae5ee818840c80af0337f5cdfef53b93a578c9901b4055346dcd5434",
+            ("SLOPED_CLOSED", "SLOPED"): "e840ca0f339476fcf69963c5733552a1c1c3c11cdc1ab2773dedada354a362ce",
+        }
+        for (underside, upper), digest in expected_inner.items():
+            with self.subTest(underside=underside, upper=upper):
+                _layout, parts, _mesh = prepare(
+                    self.fields(underside, upper, left=True, right=False))
+                self.assertEqual(fragment_digest(boards(parts)), digest)
+                self.assertEqual(fragment_digest(
+                    part for part in parts
+                    if part.part_type in ("TREAD", "RISER")),
+                    "93c8f057a6ef73f1fb507e4a2e71ae57c4310ba5095c325464946a1690f4ac64")
 
     def test_ordinary_two_turn_u(self):
         specs = (TurnSpec("t1", "WINDER", "EQUAL_2"),
@@ -438,10 +564,10 @@ class FreshStage3CSideBoardTests(unittest.TestCase):
         expected = {
             "STEPPED_CLOSED": (
                 "8bee259a060052f36c0c1fd31c9930da726e18c949b88d0c0282fe983530293f",
-                "ecef5d0b65b99b28b0f2c139a99eaf2a9c01fd4110a7d45cb019b6eaab164916"),
+                "f122f5689daa3343d825ea7ade774c62034b4a13b66296ddda7b3fc832ece4c3"),
             "SLOPED_CLOSED": (
                 "9ac142645660279282478b6a24dfa9152478feeb6a86d92643c3305b38459a21",
-                "774e7defcc6487c4ae33810caeb4af84d2c1054b238e7234b1f5aa35a425cad9"),
+                "d765d29220c8426d949a243563afeb12d75d0e2f6e8d67bf9a1b93b36cf321e5"),
         }
         for mode, (body_digest, board_digest) in expected.items():
             with self.subTest(mode=mode):
