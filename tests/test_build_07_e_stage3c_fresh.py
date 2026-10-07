@@ -58,6 +58,12 @@ def has_xy(parts, point):
                for part in parts for vertex in part.vertices)
 
 
+def rotate_xy(point, angle):
+    cosine, sine = math.cos(angle), math.sin(angle)
+    return (cosine * point[0] - sine * point[1],
+            sine * point[0] + cosine * point[1])
+
+
 class FreshStage3CSideBoardTests(unittest.TestCase):
     def fields(self, underside="STEPPED_CLOSED", upper="STEPPED",
                left=True, right=True):
@@ -171,6 +177,70 @@ class FreshStage3CSideBoardTests(unittest.TestCase):
             self.fields(left=True, right=False), points=mirrored)
         self.assertLess(layout.turn.theta, 0.0)
         self.assertTrue(has_xy(boards(parts), layout.turn.outer_corner))
+
+    def assert_inner_rotation_equivariance(self, points, direction, underside,
+                                           upper):
+        incoming = (points[1][0] - points[0][0],
+                    points[1][1] - points[0][1])
+        outgoing = (points[2][0] - points[1][0],
+                    points[2][1] - points[1][1])
+        theta_positive = (incoming[0] * outgoing[1]
+                          - incoming[1] * outgoing[0]) > 0.0
+        inner_left = theta_positive == (direction == "FORWARD")
+        fields = self.fields(underside, upper, left=inner_left,
+                             right=not inner_left)
+        reference = prepare(fields, points=points, direction=direction)
+        angle = math.radians(17.0)
+        rotated_points = tuple(rotate_xy(point, angle) for point in points)
+        rotated = prepare(fields, points=rotated_points, direction=direction)
+        reference_boards = boards(reference[1])
+        rotated_boards = boards(rotated[1])
+        self.assertEqual(len(reference_boards), len(rotated_boards))
+        for original, turned in zip(reference_boards, rotated_boards):
+            self.assertEqual((original.part_type, original.ordinal,
+                              original.faces, len(original.vertices)),
+                             (turned.part_type, turned.ordinal,
+                              turned.faces, len(turned.vertices)))
+            for original_vertex, turned_vertex in zip(
+                    original.vertices, turned.vertices):
+                restored = rotate_xy(turned_vertex[:2], -angle)
+                self.assertAlmostEqual(restored[0], original_vertex[0],
+                                       delta=2.0e-8)
+                self.assertAlmostEqual(restored[1], original_vertex[1],
+                                       delta=2.0e-8)
+                self.assertAlmostEqual(turned_vertex[2], original_vertex[2],
+                                       delta=1.0e-10)
+
+    def test_exact90_inner_board_rotates_in_both_directions_and_chiralities(self):
+        mirrored = ((0.0, 0.0), (0.0, 2.2), (2.2, 2.2))
+        for points in (L, mirrored):
+            for direction in ("FORWARD", "REVERSE"):
+                for underside, upper in (("STEPPED_CLOSED", "STEPPED"),
+                                         ("SLOPED_CLOSED", "SLOPED")):
+                    with self.subTest(points=points, direction=direction,
+                                      underside=underside, upper=upper):
+                        self.assert_inner_rotation_equivariance(
+                            points, direction, underside, upper)
+
+    def test_arbitrary_angle_inner_board_rotates_forward_and_reverse(self):
+        angle = math.radians(63.0)
+        points = ((0.0, 0.0), (0.0, 2.2),
+                  (-2.2 * math.sin(angle), 2.2 + 2.2 * math.cos(angle)))
+        for direction in ("FORWARD", "REVERSE"):
+            for underside, upper in (("STEPPED_CLOSED", "STEPPED"),
+                                     ("SLOPED_CLOSED", "SLOPED")):
+                with self.subTest(direction=direction, underside=underside,
+                                  upper=upper):
+                    self.assert_inner_rotation_equivariance(
+                        points, direction, underside, upper)
+
+    def test_outer_board_geometry_is_exact_stage3c_baseline(self):
+        parts = prepare(self.fields(left=False, right=True))[1]
+        digest = hashlib.sha256(repr(tuple(
+            (part.part_type, part.ordinal, part.vertices, part.faces)
+            for part in boards(parts))).encode()).hexdigest()
+        self.assertEqual(digest,
+                         "ab63c55aef767d6fdc8c109a3798327edd7fe22b20334dab8662bc92de6fd101")
 
     def test_ordinary_two_turn_u(self):
         specs = (TurnSpec("t1", "WINDER", "EQUAL_2"),

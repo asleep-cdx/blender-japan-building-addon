@@ -1500,22 +1500,27 @@ def _board_offsets(points, thickness, outward_sign):
     return tuple(result)
 
 
+def _board_inner_miter_point(frame, fraction, thickness):
+    """Intersect a pivot ray with the two Turn-local inner offset lines."""
+    ray = _rotate(frame.inside_normal_in, frame.theta * fraction)
+    # Each support line is dot(point - pivot, its normal) = thickness.
+    # The larger positive projection gives the nearest ray hit, including
+    # the square-style miter at a right-angle Turn in any world orientation.
+    projection = max(_dot(ray, frame.inside_normal_in),
+                     _dot(ray, frame.inside_normal_out))
+    if projection <= EPS_INTERSECTION:
+        raise ValueError("Winder inner Side Board miterを解決できません。")
+    return _add(frame.inner_pivot, _scale(ray, thickness / projection))
+
+
 def _board_inner_points(frame, front_fraction, rear_fraction, thickness,
                         ascent_direction):
     """Partition the exterior side of the fixed mathematical pivot."""
-    incoming_inner = _scale(frame.inside_normal_in, thickness)
-
-    def boundary(fraction):
-        ray = _rotate(incoming_inner, frame.theta * fraction)
-        # A square miter stays outside both canonical inner flight edges.
-        if abs(ray[0]) > EPS_LENGTH and abs(ray[1]) > EPS_LENGTH:
-            factor = thickness / max(abs(ray[0]), abs(ray[1]))
-            ray = _scale(ray, factor)
-        return _add(frame.inner_pivot, ray)
     fractions = (front_fraction, rear_fraction)
     if ascent_direction == "REVERSE":
         fractions = tuple(reversed(fractions))
-    return tuple(boundary(value) for value in fractions)
+    return tuple(_board_inner_miter_point(frame, value, thickness)
+                 for value in fractions)
 
 
 def build_winder_side_board_fragments(layout, fields):
