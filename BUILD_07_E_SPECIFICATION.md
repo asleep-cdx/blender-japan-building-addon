@@ -2086,3 +2086,79 @@ The dedicated authority is `BUILD_07_E_STAGE_3B_ACCEPTANCE_RECORD.md`。
 
 Stage 3B still does not implement Winder Side Boards. Ordinary Winder Side Board continuation is Fresh Stage 3C scope. Compact-U shared-center Side Board remains Stage 3D scope.
 
+
+
+## 39.14 Fresh Stage-3C ordinary Winder Side Board override
+
+Fresh Stage 3C implements ordinary schema-5 Winder Side Board continuation from the accepted Stage-3B baseline.
+
+Focused implementation authority:
+
+```text
+BUILD_07_E_STAGE_3C_PLAN.md
+```
+
+For Stage 3C, this subsection and the focused plan supersede conflicting older Side Board details in Sections 21–24 where those details assume the abandoned station-driven Winder SLOPED lower surface.
+
+### Accepted lower-boundary authority
+
+The Winder Side Board lower boundary must follow the accepted Stage-3B Winder body exterior.
+
+For Winder cells, both `STEPPED_CLOSED` and Winder `SLOPED_CLOSED` use the accepted matching-ring prismatic support contract from Section 39.13. Therefore Stage 3C must not recreate historical Winder SLOPED pivot-relief / per-vertex lower-Z interpolation merely to generate Side Boards.
+
+Straight Flight Side Board lower boundaries continue to use the accepted existing Straight `underside_mode` behavior.
+
+### Independent upper authority
+
+Preserve the accepted Side Board axis independence:
+
+```text
+underside_mode  -> lower boundary
+side_board_mode -> upper / visible boundary
+```
+
+All four ordinary combinations remain valid targets:
+
+```text
+STEPPED_CLOSED + STEPPED board
+STEPPED_CLOSED + SLOPED board
+SLOPED_CLOSED  + STEPPED board
+SLOPED_CLOSED  + SLOPED board
+```
+
+`STEPPED` upper authority follows destination walking-surface levels plus accepted reveal and real RiseEvent transitions. Geometry-only outer-corner stations add no event.
+
+`SLOPED` upper authority follows walking-surface / reveal stations and deterministic linear interpolation. It is not derived from underbody interpolation.
+
+### Winder side-path authority
+
+Outer Side Board traversal must preserve the accepted canonical exterior chain and exact `frame.outer_corner`.
+
+Inner Side Board traversal must preserve the accepted mathematical inner pivot and existing entry/exit inner boundary positions.
+
+Side Board thickness extends away from the canonical walking width. It must not move the accepted TREAD/RISER/UNDERBODY geometry.
+
+LEFT / RIGHT remain uphill-relative and must be resolved from current ascent traversal, including REVERSE.
+
+### Visual-first joint policy
+
+Ordinary Winder boards may be represented by deterministic closed sub-fragments. Hidden overlap at board joints is allowed when needed to avoid a visible gap.
+
+Required visible result:
+
+- no daylight gap at Straight/Winder or Winder plan-corner joints;
+- no major spike / giant filler face;
+- no externally visible duplicate coplanar z-fighting;
+- no board geometry crossing through the walking width;
+- no change to the accepted Stage-3B top/body geometry.
+
+Exact Boolean union is not required.
+
+### Ordinary topology / Stage-3D boundary
+
+Stage 3C covers normal L and non-Compact-U U Winder Side Board continuation.
+
+Compact-U shared-center Side Board remains Stage 3D. With Side Boards ON, a configuration requiring that shared-center treatment must remain explicitly unsupported in Stage 3C before Scene mutation rather than generating duplicated center boards.
+
+With Side Boards OFF, accepted Compact-U Stage-3B behavior remains unchanged.
+
