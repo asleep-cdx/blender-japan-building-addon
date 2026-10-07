@@ -170,10 +170,10 @@ class FreshStage3ASteppedBodyTests(unittest.TestCase):
         self.assert_valid_body(fragments)
         self.assert_top_unchanged(points=U_POINTS, ids=U_IDS, turn_specs=specs)
 
-    def test_deferred_variants_are_rejected_before_assembly(self):
-        with self.assertRaisesRegex(ValueError, "Stage 3C"):
-            prepare_turn_residential_geometry(
-                fields=ResidentialFields(), **_kwargs())
+    def test_ordinary_side_boards_continue_after_stage3b(self):
+        _layout, fragments, _mesh = prepare_turn_residential_geometry(
+            fields=ResidentialFields(), **_kwargs())
+        self.assertTrue(any(part.part_type == "SIDE_BOARD" for part in fragments))
 
     def test_closure_depth_not_exceeding_tread_thickness_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "closure depth"):

@@ -1426,6 +1426,216 @@ def _build_winder_underbody_prism(
     return fragment
 
 
+def _board_strip(start, end, outside_start, outside_end,
+                 lower_z, upper_start, upper_end, ordinal):
+    """One closed strip with an event-owned lower ring and walking upper edge."""
+    plan = (start, end, outside_end, outside_start)
+    if polygon_signed_area(plan) < 0.0:
+        plan = tuple(reversed(plan))
+        tops = (upper_start, upper_end, upper_end, upper_start)
+        tops = tuple(reversed(tops))
+    else:
+        tops = (upper_start, upper_end, upper_end, upper_start)
+    vertices = tuple((x, y, lower_z) for x, y in plan) + tuple(
+        (point[0], point[1], z) for point, z in zip(plan, tops))
+    # A miter can make the sloped upper quad non-planar; triangulate it
+    # explicitly so Blender does not choose a different diagonal on reload.
+    faces = (_PRISM_FACES[0], (4, 5, 6), (4, 6, 7)) + _PRISM_FACES[2:]
+    return MeshFragment("SIDE_BOARD", ordinal, vertices, faces)
+
+
+def _board_inner_wedge(pivot, start, end, lower_z,
+                       upper_start, upper_end, ordinal):
+    """A triangular cell of the inner miter, wholly outside the tread fan."""
+    plan = (pivot, start, end)
+    tops = (max(upper_start, upper_end), upper_start, upper_end)
+    if polygon_signed_area(plan) < 0.0:
+        plan = tuple(reversed(plan))
+        tops = tuple(reversed(tops))
+    vertices = tuple((x, y, lower_z) for x, y in plan) + tuple(
+        (point[0], point[1], z) for point, z in zip(plan, tops))
+    faces = ((0, 2, 1), (3, 4, 5), (0, 1, 4, 3),
+             (1, 2, 5, 4), (2, 0, 3, 5))
+    return MeshFragment("SIDE_BOARD", ordinal, vertices, faces)
+
+
+def _board_outer_points(frame, footprint, ascent_direction):
+    """Follow the accepted body's exterior, including its canonical corner."""
+    points = [(station, point) for point in footprint
+              if (station := _canonical_outer_station(frame, point)) is not None]
+    points.sort(key=lambda item: item[0], reverse=ascent_direction == "REVERSE")
+    if len(points) < 2:
+        raise ValueError("Winder Side Board exterior pathを解決できません。")
+    return tuple(point for _station, point in points)
+
+
+def _board_outer_distance(frame, point, ascent_direction):
+    """Measure a physical point along the complete canonical exterior."""
+    station = _canonical_outer_station(frame, point)
+    if station is None:
+        raise ValueError("Winder Side Board stationがexterior上にありません。")
+    first = math.hypot(*_sub(frame.outer_corner, frame.entry_outer))
+    second = math.hypot(*_sub(frame.exit_outer, frame.outer_corner))
+    distance = (station * first if station <= 1.0 else
+                first + (station - 1.0) * second)
+    return distance if ascent_direction == "FORWARD" else first + second - distance
+
+
+def _board_offsets(points, thickness, outward_sign):
+    """Miter a short outward strip without changing the walking boundary."""
+    directions = tuple(_unit(_sub(b, a), "Side Board edge")[0]
+                       for a, b in zip(points, points[1:]))
+    normals = tuple((outward_sign * -direction[1],
+                     outward_sign * direction[0]) for direction in directions)
+    result = [_add(points[0], _scale(normals[0], thickness))]
+    for index in range(1, len(points) - 1):
+        a = _add(points[index], _scale(normals[index - 1], thickness))
+        b = _add(points[index], _scale(normals[index], thickness))
+        if abs(_cross(directions[index - 1], directions[index])) < EPS_INTERSECTION:
+            result.append(a)
+        else:
+            result.append(_line_intersection(
+                a, directions[index - 1], b, directions[index]))
+    result.append(_add(points[-1], _scale(normals[-1], thickness)))
+    return tuple(result)
+
+
+def _board_inner_points(frame, front_fraction, rear_fraction, thickness,
+                        ascent_direction):
+    """Partition the exterior side of the fixed mathematical pivot."""
+    incoming_inner = _scale(frame.inside_normal_in, thickness)
+
+    def boundary(fraction):
+        ray = _rotate(incoming_inner, frame.theta * fraction)
+        # A square miter stays outside both canonical inner flight edges.
+        if abs(ray[0]) > EPS_LENGTH and abs(ray[1]) > EPS_LENGTH:
+            factor = thickness / max(abs(ray[0]), abs(ray[1]))
+            ray = _scale(ray, factor)
+        return _add(frame.inner_pivot, ray)
+    fractions = (front_fraction, rear_fraction)
+    if ascent_direction == "REVERSE":
+        fractions = tuple(reversed(fractions))
+    return tuple(boundary(value) for value in fractions)
+
+
+def build_winder_side_board_fragments(layout, fields):
+    """Add ordinary boards after the accepted top and body have been prepared."""
+    from .stair_geometry import StairAxes, StairLayout
+    from .stair_residential import validate_side_board_reveal
+    from .stair_residential_geometry import build_side_board_fragment
+
+    thickness = float(fields.side_board_thickness_mm) / _MM_PER_METRE
+    goings = tuple(run / count for run, count in zip(
+        layout.straight_runs, layout.straight_allocation) if count)
+    reveal = validate_side_board_reveal(fields, layout.actual_riser, min(goings))
+    path = layout.canonical_path
+    components = []
+    for index, (a, b) in enumerate(zip(path, path[1:])):
+        direction, _ = _unit(_sub(b.xy, a.xy))
+        cut = layout.turns[index - 1].cutback if index else 0.0
+        start = _add(a.xy, _scale(direction, cut))
+        components.append(("STRAIGHT", index,
+                           (start, direction, layout.straight_runs[index],
+                            layout.straight_allocation[index])))
+        if index < len(layout.turn_specs):
+            components.append((layout.turn_specs[index].turn_mode, index, None))
+    if layout.ascent_direction == "REVERSE":
+        components.reverse()
+        components = [
+            (kind, index, (_add(payload[0], _scale(payload[1], payload[2])),
+                           _scale(payload[1], -1.0), payload[2], payload[3])
+             if kind == "STRAIGHT" else None)
+            for kind, index, payload in components]
+
+    result, event_count = [], 0
+    enabled = tuple(side for side, on in (
+        ("LEFT", fields.left_side_board_enabled),
+        ("RIGHT", fields.right_side_board_enabled)) if on)
+    for kind, turn_index, payload in components:
+        if kind == "STRAIGHT":
+            start, direction, run, count = payload
+            if not count:
+                continue
+            local = StairLayout(
+                (), start, _add(start, _scale(direction, run)),
+                StairAxes((*direction, 0.0),
+                          (-direction[1], direction[0], 0.0)),
+                layout.base_z + event_count * layout.actual_riser,
+                (count + 1) * layout.actual_riser,
+                layout.base_z + (event_count + count + 1) * layout.actual_riser,
+                run, count + 1, count, layout.actual_riser, run / count,
+                layout.width, layout.tread_thickness, layout.riser_thickness)
+            for side in enabled:
+                result.append(replace(build_side_board_fragment(local, side, fields),
+                                      ordinal=len(result) + 1))
+            event_count += count
+            continue
+        cells = layout.turn_cells[turn_index]
+        if layout.ascent_direction == "REVERSE":
+            cells = tuple(reversed(cells))
+        frame = layout.turns[turn_index]
+        ascent_theta = frame.theta * (1 if layout.ascent_direction == "FORWARD" else -1)
+        outer_side = "RIGHT" if ascent_theta > 0.0 else "LEFT"
+        outward_sign = -1.0 if ascent_theta > 0.0 else 1.0
+        for cell_index, cell in enumerate(cells):
+            event_count += 1
+            top = layout.base_z + event_count * layout.actual_riser
+            rear = winder_tread_rear_outer_authority(
+                layout, turn_index, cells, cell_index)
+            footprint = winder_underbody_support_footprint(
+                layout, turn_index, cell, rear)
+            lower_z = (layout.base_z if event_count == 1 else
+                       top - layout.actual_riser)
+            boundaries = physical_cell_boundaries(
+                cell, layout.ascent_direction, frame.inner_pivot)
+            front_station = _board_outer_distance(
+                frame, boundaries.front[1], layout.ascent_direction)
+            rear_station = _board_outer_distance(
+                frame, boundaries.rear[1], layout.ascent_direction)
+            for side in enabled:
+                if side == outer_side:
+                    points = _board_outer_points(
+                        frame, footprint, layout.ascent_direction)
+                    outside = _board_offsets(points, thickness, outward_sign)
+                else:
+                    points = _board_inner_points(
+                        frame, cell.front_fraction, cell.rear_fraction,
+                        thickness, layout.ascent_direction)
+                lengths = [0.0]
+                for a, b in zip(points, points[1:]):
+                    lengths.append(lengths[-1] + math.hypot(*_sub(b, a)))
+                for i, (a, b) in enumerate(zip(points, points[1:])):
+                    if fields.side_board_mode == "SLOPED":
+                        first = top - layout.actual_riser + reveal
+                        delta = layout.actual_riser
+                        if side == outer_side:
+                            fraction_a = (_board_outer_distance(
+                                frame, a, layout.ascent_direction) - front_station
+                                ) / (rear_station - front_station)
+                            fraction_b = (_board_outer_distance(
+                                frame, b, layout.ascent_direction) - front_station
+                                ) / (rear_station - front_station)
+                        else:
+                            fraction_a = lengths[i] / lengths[-1]
+                            fraction_b = lengths[i + 1] / lengths[-1]
+                        upper_a = first + delta * min(1.0, max(0.0, fraction_a))
+                        upper_b = first + delta * min(1.0, max(0.0, fraction_b))
+                    else:
+                        upper_a = upper_b = top + reveal
+                    if side == outer_side:
+                        board = _board_strip(
+                            a, b, outside[i], outside[i + 1], lower_z,
+                            upper_a, upper_b, len(result) + 1)
+                    else:
+                        board = _board_inner_wedge(
+                            frame.inner_pivot, a, b, lower_z,
+                            upper_a, upper_b, len(result) + 1)
+                    result.append(board)
+    result = tuple(result)
+    validate_mesh_fragments(result)
+    return result
+
+
 def winder_underbody_support_footprint(
         layout, turn_index, cell, rear_outer_authority=None):
     """Return the accepted Stage-3A Riser-rear Winder support plan."""
@@ -1733,7 +1943,7 @@ def prepare_turn_residential_geometry(
         stair_width_mm, tread_thickness_mm, riser_thickness_mm, *,
         fields, point_ids=None, winder_pattern=WINDER_EQUAL_3,
         turn_mode=TURN_WINDER, turn_specs=None, allocation=None):
-    """Prepare Fresh Stage-3A/3B closed, Side-Boards-OFF geometry."""
+    """Prepare schema-5 closed geometry and ordinary Winder Side Boards."""
     from .stair_residential import (
         SLOPED_CLOSED, STEPPED_CLOSED, ResidentialFields, residential_fields,
         validate_mode_data,
@@ -1744,9 +1954,6 @@ def prepare_turn_residential_geometry(
     validate_mode_data("STANDARD_RESIDENTIAL", WINDER_SCHEMA_VERSION, values)
     if values.underside_mode not in (STEPPED_CLOSED, SLOPED_CLOSED):
         raise ScopeUnsupportedError("schema-5 underside modeは未対応です。")
-    if values.left_side_board_enabled or values.right_side_board_enabled:
-        raise ScopeUnsupportedError(
-            "schema-5 Winder Side BoardはFresh Stage 3C以降で対応予定です。")
     layout = resolve_winder_layout(
         points, ascent_direction, base_z_mm, floor_to_floor_mm, riser_count,
         stair_width_mm, tread_thickness_mm, riser_thickness_mm,
@@ -1755,11 +1962,20 @@ def prepare_turn_residential_geometry(
         tread_front_overhang_mm=values.tread_front_overhang_mm,
         tread_front_edge_mode=values.tread_front_edge_mode,
         tread_front_edge_size_mm=values.tread_front_edge_size_mm)
+    boards_on = values.left_side_board_enabled or values.right_side_board_enabled
+    if boards_on and layout.u_classification == "COMPACT_U":
+        raise ScopeUnsupportedError(
+            "SCOPE_UNSUPPORTED: Compact-U Side BoardはStage 3D deferredです。")
+    if boards_on and any(spec.turn_mode != TURN_WINDER
+                         for spec in layout.turn_specs):
+        raise ScopeUnsupportedError(
+            "SCOPE_UNSUPPORTED: schema-5 mixed Landing Side Boardは未対応です。")
     top = build_winder_fragments(layout)
     underbody = (build_sloped_closed_underbody_fragments(layout, top, values)
                  if values.underside_mode == SLOPED_CLOSED else
                  build_stepped_closed_underbody_fragments(layout, top, values))
-    fragments = top + underbody
+    boards = build_winder_side_board_fragments(layout, values) if boards_on else ()
+    fragments = top + underbody + boards
     mesh = assemble_stair_mesh(fragments)
     return layout, fragments, StairMeshData(
         mesh.vertices, mesh.faces, mesh.face_roles)
