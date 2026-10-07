@@ -1465,21 +1465,6 @@ def _board_strip(start, end, outside_start, outside_end,
     return MeshFragment("SIDE_BOARD", ordinal, vertices, faces)
 
 
-def _board_inner_wedge(pivot, start, end, lower_z,
-                       upper_start, upper_end, ordinal):
-    """A triangular cell of the inner miter, wholly outside the tread fan."""
-    plan = (pivot, start, end)
-    tops = (max(upper_start, upper_end), upper_start, upper_end)
-    if polygon_signed_area(plan) < 0.0:
-        plan = tuple(reversed(plan))
-        tops = tuple(reversed(tops))
-    vertices = tuple((x, y, lower_z) for x, y in plan) + tuple(
-        (point[0], point[1], z) for point, z in zip(plan, tops))
-    faces = ((0, 2, 1), (3, 4, 5), (0, 1, 4, 3),
-             (1, 2, 5, 4), (2, 0, 3, 5))
-    return MeshFragment("SIDE_BOARD", ordinal, vertices, faces)
-
-
 def _board_outer_points(frame, footprint, ascent_direction):
     """Follow the accepted body's exterior, including its canonical corner."""
     points = [(station, point) for point in footprint
@@ -1569,27 +1554,61 @@ def _board_outer_step_return_fragments(
         for index, (a, b) in enumerate(zip(points, points[1:])))
 
 
-def _board_inner_miter_point(frame, fraction, thickness):
-    """Intersect a pivot ray with the two Turn-local inner offset lines."""
-    ray = _rotate(frame.inside_normal_in, frame.theta * fraction)
-    # Each support line is dot(point - pivot, its normal) = thickness.
-    # The larger positive projection gives the nearest ray hit, including
-    # the square-style miter at a right-angle Turn in any world orientation.
-    projection = max(_dot(ray, frame.inside_normal_in),
-                     _dot(ray, frame.inside_normal_out))
-    if projection <= EPS_INTERSECTION:
-        raise ValueError("Winder inner Side Board miterを解決できません。")
-    return _add(frame.inner_pivot, _scale(ray, thickness / projection))
+def _clip_winder_inner_board_start(polygon):
+    """Clip an analytical Straight board profile at its Turn start plane."""
+    result = []
+    for start, end in zip(polygon, polygon[1:] + polygon[:1]):
+        start_in = start[0] >= -EPS_LENGTH
+        end_in = end[0] >= -EPS_LENGTH
+        if start_in:
+            result.append(start)
+        if start_in != end_in:
+            parameter = -start[0] / (end[0] - start[0])
+            result.append((0.0, start[1] + parameter * (end[1] - start[1])))
+    return tuple(result)
 
 
-def _board_inner_points(frame, front_fraction, rear_fraction, thickness,
-                        ascent_direction):
-    """Partition the exterior side of the fixed mathematical pivot."""
-    fractions = (front_fraction, rear_fraction)
-    if ascent_direction == "REVERSE":
-        fractions = tuple(reversed(fractions))
-    return tuple(_board_inner_miter_point(frame, value, thickness)
-                 for value in fractions)
+def _winder_inner_straight_board_fragment(
+        local, side, fields, *, clip_start=False, terminal_z=None):
+    """Resolve both Winder-inner Straight terminals before one extrusion."""
+    from .stair_geometry import extrude_xz_profile, validate_simple_polygon
+    from .stair_residential_geometry import (
+        side_board_profile, sloped_side_board_profile)
+
+    profile = (sloped_side_board_profile(local, fields)
+               if fields.side_board_mode == "SLOPED" else
+               side_board_profile(local, fields))
+    polygon = profile.polygon
+    if terminal_z is not None:
+        outer = profile.outer
+        rear = local.run_length + local.riser_thickness
+        cap_index = max(index for index, point in enumerate(outer)
+                        if point[0] < rear - EPS_LENGTH)
+        cap = outer[cap_index]
+        if terminal_z <= cap[1] + EPS_LENGTH:
+            raise ValueError("Winder inner Side Board terminal高さが不足しています。")
+        elevated = (outer[:cap_index + 1]
+                    + ((cap[0], terminal_z), (rear, terminal_z), outer[-1]))
+        polygon = validate_simple_polygon(elevated + tuple(reversed(profile.lower)))
+    if clip_start:
+        polygon = validate_simple_polygon(_clip_winder_inner_board_start(polygon))
+    thickness = float(fields.side_board_thickness_mm) / _MM_PER_METRE
+    half = local.width / 2.0
+    if side == "LEFT":
+        y_min, y_max, ordinal = half, half + thickness, 1
+    elif side == "RIGHT":
+        y_min, y_max, ordinal = -half - thickness, -half, 2
+    else:
+        raise ValueError("Side Board sideはLEFTまたはRIGHTである必要があります。")
+    fragment = extrude_xz_profile(
+        polygon, y_min, y_max, part_type="SIDE_BOARD", ordinal=ordinal)
+    forward, left = local.axes.forward, local.axes.left
+    vertices = tuple((local.lower_xy[0] + forward[0] * x + left[0] * y,
+                      local.lower_xy[1] + forward[1] * x + left[1] * y, z)
+                     for x, y, z in fragment.vertices)
+    result = MeshFragment("SIDE_BOARD", ordinal, vertices, fragment.faces)
+    validate_mesh_fragments((result,))
+    return result
 
 
 def build_winder_side_board_fragments(layout, fields):
@@ -1625,7 +1644,12 @@ def build_winder_side_board_fragments(layout, fields):
     enabled = tuple(side for side, on in (
         ("LEFT", fields.left_side_board_enabled),
         ("RIGHT", fields.right_side_board_enabled)) if on)
-    for kind, turn_index, payload in components:
+    def inner_side(turn_index):
+        frame = layout.turns[turn_index]
+        theta = frame.theta * (1 if layout.ascent_direction == "FORWARD" else -1)
+        return "LEFT" if theta > 0.0 else "RIGHT"
+
+    for position, (kind, turn_index, payload) in enumerate(components):
         if kind == "STRAIGHT":
             start, direction, run, count = payload
             if not count:
@@ -1640,8 +1664,24 @@ def build_winder_side_board_fragments(layout, fields):
                 run, count + 1, count, layout.actual_riser, run / count,
                 layout.width, layout.tread_thickness, layout.riser_thickness)
             for side in enabled:
-                result.append(replace(build_side_board_fragment(local, side, fields),
-                                      ordinal=len(result) + 1))
+                start_inner = (position > 0
+                               and components[position - 1][0] == TURN_WINDER
+                               and side == inner_side(components[position - 1][1]))
+                end_inner = (position + 1 < len(components)
+                             and components[position + 1][0] == TURN_WINDER
+                             and side == inner_side(components[position + 1][1]))
+                terminal_z = None
+                if end_inner:
+                    next_turn = components[position + 1][1]
+                    terminal_z = (layout.base_z + (event_count + count
+                                  + len(layout.turn_cells[next_turn]))
+                                  * layout.actual_riser)
+                board = (_winder_inner_straight_board_fragment(
+                    local, side, fields, clip_start=start_inner,
+                    terminal_z=terminal_z)
+                    if start_inner or end_inner else
+                    build_side_board_fragment(local, side, fields))
+                result.append(replace(board, ordinal=len(result) + 1))
             event_count += count
             continue
         cells = layout.turn_cells[turn_index]
@@ -1666,50 +1706,34 @@ def build_winder_side_board_fragments(layout, fields):
                 frame, boundaries.front[1], layout.ascent_direction)
             rear_station = _board_outer_distance(
                 frame, boundaries.rear[1], layout.ascent_direction)
-            for side in enabled:
-                if side == outer_side:
-                    points = _board_outer_points(
-                        frame, footprint, layout.ascent_direction)
-                    outside = _board_offsets(points, thickness, outward_sign)
-                    if fields.side_board_mode == "STEPPED" and cell_index:
-                        step_returns.append((
-                            frame, boundaries.front[1], points[0], reveal,
-                            thickness, outward_sign, layout.ascent_direction,
-                            top - layout.actual_riser + reveal, top + reveal))
+            if outer_side not in enabled:
+                continue
+            points = _board_outer_points(
+                frame, footprint, layout.ascent_direction)
+            outside = _board_offsets(points, thickness, outward_sign)
+            if fields.side_board_mode == "STEPPED" and cell_index:
+                step_returns.append((
+                    frame, boundaries.front[1], points[0], reveal,
+                    thickness, outward_sign, layout.ascent_direction,
+                    top - layout.actual_riser + reveal, top + reveal))
+            for i, (a, b) in enumerate(zip(points, points[1:])):
+                if fields.side_board_mode == "SLOPED":
+                    first = top - layout.actual_riser + reveal
+                    delta = layout.actual_riser
+                    fraction_a = (_board_outer_distance(
+                        frame, a, layout.ascent_direction) - front_station
+                        ) / (rear_station - front_station)
+                    fraction_b = (_board_outer_distance(
+                        frame, b, layout.ascent_direction) - front_station
+                        ) / (rear_station - front_station)
+                    upper_a = first + delta * min(1.0, max(0.0, fraction_a))
+                    upper_b = first + delta * min(1.0, max(0.0, fraction_b))
                 else:
-                    points = _board_inner_points(
-                        frame, cell.front_fraction, cell.rear_fraction,
-                        thickness, layout.ascent_direction)
-                lengths = [0.0]
-                for a, b in zip(points, points[1:]):
-                    lengths.append(lengths[-1] + math.hypot(*_sub(b, a)))
-                for i, (a, b) in enumerate(zip(points, points[1:])):
-                    if fields.side_board_mode == "SLOPED":
-                        first = top - layout.actual_riser + reveal
-                        delta = layout.actual_riser
-                        if side == outer_side:
-                            fraction_a = (_board_outer_distance(
-                                frame, a, layout.ascent_direction) - front_station
-                                ) / (rear_station - front_station)
-                            fraction_b = (_board_outer_distance(
-                                frame, b, layout.ascent_direction) - front_station
-                                ) / (rear_station - front_station)
-                        else:
-                            fraction_a = lengths[i] / lengths[-1]
-                            fraction_b = lengths[i + 1] / lengths[-1]
-                        upper_a = first + delta * min(1.0, max(0.0, fraction_a))
-                        upper_b = first + delta * min(1.0, max(0.0, fraction_b))
-                    else:
-                        upper_a = upper_b = top + reveal
-                    if side == outer_side:
-                        board = _board_strip(
-                            a, b, outside[i], outside[i + 1], lower_z,
-                            upper_a, upper_b, len(result) + 1)
-                    else:
-                        board = _board_inner_wedge(
-                            frame.inner_pivot, a, b, lower_z,
-                            upper_a, upper_b, len(result) + 1)
-                    result.append(board)
+                    upper_a = upper_b = top + reveal
+                board = _board_strip(
+                    a, b, outside[i], outside[i + 1], lower_z,
+                    upper_a, upper_b, len(result) + 1)
+                result.append(board)
     for spec in step_returns:
         result.extend(_board_outer_step_return_fragments(
             *spec, len(result) + 1))
