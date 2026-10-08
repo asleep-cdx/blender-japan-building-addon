@@ -1501,8 +1501,17 @@ class _SlopedOuterEnvelope:
     outgoing_at_exit: float
     outgoing_pitch: float
     global_fallback: bool
+    outgoing_join_station: float | None = None
+    incoming_transition_station: float | None = None
 
     def upper_z(self, station):
+        if self.outgoing_join_station is not None:
+            if station <= self.join_station:
+                return self.incoming_at_entry + self.incoming_pitch * station
+            if station <= self.outgoing_join_station:
+                return self.corner_z
+            return (self.outgoing_at_exit + self.outgoing_pitch
+                    * (station - self.length))
         if self.global_fallback:
             return (self.incoming_at_entry
                     + (self.outgoing_at_exit - self.incoming_at_entry)
@@ -1577,16 +1586,123 @@ def _resolve_winder_outer_sloped_envelope(
         global_fallback)
 
 
+def _resolve_outer_tread_clearance(
+        layout, turn_index, first_event_count, incoming, outgoing, reveal,
+        envelope):
+    """Repair a deficient two-cell outer upper line using physical treads.
+
+    Move the two ends of the one level bridge to analytical line crossings.
+    The Straight principal lines remain unchanged unless an early physical
+    tread requires one local incoming transition.  Its plan still follows
+    the canonical corner.  Other subdivisions retain their r6 shape.
+    """
+    # BF_1 also has two cells, but its visually accepted r6 shape is frozen.
+    # This compatibility guard limits r7 to the two approved patterns; their
+    # actual physical deficit, rather than their name, still drives the edit.
+    pattern = layout.turn_specs[turn_index].winder_pattern
+    if pattern not in (WINDER_EQUAL_2, WINDER_BF_2):
+        return envelope
+    cells = layout.turn_cells[turn_index]
+    if len(cells) != 2:
+        raise ValueError("Winder outer Side Boardの2-cell patternが不正です。")
+    frame = layout.turns[turn_index]
+    if layout.ascent_direction == "REVERSE":
+        cells = tuple(reversed(cells))
+    constraints = []
+    for cell_index, cell in enumerate(cells):
+        event = layout.rise_events[first_event_count + cell_index]
+        if event.owner != "WINDER_TREAD":
+            raise ValueError("Winder outer Side BoardのRiseEventが不正です。")
+        boundary = physical_cell_boundaries(
+            cell, layout.ascent_direction, frame.inner_pivot).front[1]
+        station = _board_outer_distance(frame, boundary, layout.ascent_direction)
+        constraints.append((station, event.top_z))
+    if all(envelope.upper_z(station) >= top - EPS_LENGTH
+           for station, top in constraints):
+        return envelope
+
+    outgoing_at_corner = (envelope.outgoing_at_exit
+                          + envelope.outgoing_pitch
+                          * (envelope.corner_station - envelope.length))
+    minimum = max(envelope.corner_z, outgoing_at_corner,
+                  *(top for _station, top in constraints))
+    preferred = max(envelope.corner_z, outgoing_at_corner,
+                    *(top + reveal for _station, top in constraints))
+    incoming_at_corner = (envelope.incoming_at_entry
+                          + envelope.incoming_pitch * envelope.corner_station)
+    # The outgoing principal line must be reached before its accepted rear
+    # cap.  A join inside its front overlap is resolved on that Straight too.
+    outgoing_at_cap = (envelope.outgoing_at_exit + envelope.outgoing_pitch
+                       * (outgoing.run_length - reveal))
+    if minimum > outgoing_at_cap + EPS_LENGTH:
+        raise ValueError("Winder outer Side Boardの物理踏板clearanceを連続勾配で解決できません。")
+    def incoming_clears(corner_z, allowance):
+        return (corner_z <= incoming_at_corner + EPS_LENGTH
+                and all(min(corner_z, envelope.incoming_at_entry
+                            + envelope.incoming_pitch * station)
+                        >= top + allowance - EPS_LENGTH
+                        for station, top in constraints
+                        if station <= envelope.corner_station))
+
+    if (preferred <= outgoing_at_cap + EPS_LENGTH
+            and incoming_clears(preferred, reveal)):
+        corner_z, allowance = preferred, reveal
+    elif incoming_clears(minimum, 0.0):
+        corner_z, allowance = minimum, 0.0
+    else:
+        # A physical event can precede the incoming principal/bridge join.
+        # Keep the accepted main run to its last Straight going and derive
+        # one local pitch from that semantic station through the Turn.
+        corner_z = (preferred if preferred <= outgoing_at_cap + EPS_LENGTH
+                    else minimum)
+        allowance = reveal if corner_z == preferred else 0.0
+    anchor_station = -incoming.going
+    anchor_z = (envelope.incoming_at_entry
+                + envelope.incoming_pitch * anchor_station)
+    incoming_pitch = envelope.incoming_pitch
+    if not incoming_clears(corner_z, allowance):
+        incoming_pitch = max(
+            incoming_pitch,
+            (corner_z - anchor_z)
+            / (envelope.corner_station - anchor_station),
+            *((top + allowance - anchor_z) / (station - anchor_station)
+              for station, top in constraints
+              if station <= envelope.corner_station))
+    incoming_at_entry = anchor_z - incoming_pitch * anchor_station
+    join_station = (corner_z - incoming_at_entry) / incoming_pitch
+    outgoing_join_station = (envelope.length
+                             + (corner_z - envelope.outgoing_at_exit)
+                             / envelope.outgoing_pitch)
+    if (join_station > envelope.corner_station + EPS_LENGTH
+            or outgoing_join_station < envelope.corner_station - EPS_LENGTH):
+        raise ValueError("Winder outer Side Boardの水平接続区間が不正です。")
+    repaired = replace(
+        envelope, join_station=join_station, corner_z=corner_z,
+        incoming_at_entry=incoming_at_entry, incoming_pitch=incoming_pitch,
+        global_fallback=False, outgoing_join_station=outgoing_join_station,
+        incoming_transition_station=(
+            anchor_station if incoming_pitch > envelope.incoming_pitch
+            + EPS_INTERSECTION else None))
+    if any(repaired.upper_z(station) < top - EPS_LENGTH
+           for station, top in constraints):
+        raise ValueError("Winder outer Side Boardの物理踏板clearanceが不足しています。")
+    return repaired
+
+
 def _board_outer_sloped_points(frame, points, ascent_direction, envelope):
-    """Split at the bridge join or the global line's physical Turn exit."""
+    """Split at analytical bridge joins or the global line's Turn exit."""
     stations = tuple(_board_outer_distance(frame, point, ascent_direction)
                      for point in points)
-    split_station = (envelope.length if envelope.global_fallback
-                     else envelope.join_station)
+    if envelope.outgoing_join_station is not None:
+        splits = (envelope.join_station, envelope.outgoing_join_station)
+    else:
+        splits = (envelope.length if envelope.global_fallback
+                  else envelope.join_station,)
     result = [points[0]]
     for start, end, point in zip(stations, stations[1:], points[1:]):
-        if start + EPS_LENGTH < split_station < end - EPS_LENGTH:
-            result.append(envelope.point_at(split_station))
+        for split_station in splits:
+            if start + EPS_LENGTH < split_station < end - EPS_LENGTH:
+                result.append(envelope.point_at(split_station))
         result.append(point)
     return tuple(result)
 
@@ -1725,7 +1841,17 @@ def _winder_outer_sloped_straight_fragment(
     start, pitch = _sloped_board_principal_line(local, fields)
     rear = local.run_length + local.riser_thickness
     upper = list(profile.outer[:2])
-    if start_envelope is not None and start_envelope.global_fallback:
+    if (start_envelope is not None
+            and start_envelope.outgoing_join_station is not None
+            and start_envelope.outgoing_join_station
+            > start_envelope.length + upper[1][0] + EPS_LENGTH):
+        front_x = upper[1][0]
+        upper[1] = (front_x, start_envelope.upper_z(
+            start_envelope.length + front_x))
+        join_x = (start_envelope.outgoing_join_station
+                  - start_envelope.length)
+        upper.append((join_x, start[1] + pitch * (join_x - start[0])))
+    elif start_envelope is not None and start_envelope.global_fallback:
         # The outgoing board starts reveal downhill of the physical exit.
         # Its overlap follows the global Turn line through the accepted rear
         # body support. A local transition then rejoins the unchanged main
@@ -1746,6 +1872,16 @@ def _winder_outer_sloped_straight_fragment(
                       start[1] + pitch * (recover_x - start[0])))
     if end_envelope is None:
         upper.extend(profile.outer[2:])
+    elif end_envelope.incoming_transition_station is not None:
+        anchor_x = local.run_length + end_envelope.incoming_transition_station
+        upper.append((anchor_x, start[1] + pitch * (anchor_x - start[0])))
+        join_x = local.run_length + end_envelope.join_station
+        if join_x < rear - EPS_LENGTH:
+            upper.extend(((join_x, end_envelope.corner_z),
+                          (rear, end_envelope.corner_z)))
+        else:
+            upper.append((rear, end_envelope.upper_z(local.riser_thickness)))
+        upper.append(profile.outer[-1])
     elif end_envelope.global_fallback:
         # Preserve the incoming principal pitch to physical Turn entry.
         # The existing rear support extends riser_thickness into the Turn.
@@ -1890,13 +2026,20 @@ def build_winder_side_board_fragments(layout, fields):
                             end_envelope = _resolve_winder_outer_sloped_envelope(
                                 layout.turns[next_turn], layout.ascent_direction,
                                 local, outgoing, fields)
+                            end_envelope = _resolve_outer_tread_clearance(
+                                layout, next_turn, event_count + count, local,
+                                outgoing, reveal, end_envelope)
                             sloped_envelopes[next_position] = end_envelope
                     board = (_winder_outer_sloped_straight_fragment(
                         local, side, fields, start_envelope=start_envelope,
                         end_envelope=end_envelope)
                         if end_envelope is not None
                         or (start_envelope is not None
-                            and start_envelope.global_fallback) else
+                            and (start_envelope.global_fallback
+                                 or (start_envelope.outgoing_join_station is not None
+                                     and start_envelope.outgoing_join_station
+                                     > start_envelope.length - reveal
+                                     + EPS_LENGTH))) else
                         build_side_board_fragment(local, side, fields))
                 result.append(replace(board, ordinal=len(result) + 1))
             event_count += count

@@ -27,6 +27,7 @@ from japanese_house_modeler.stair_turn import (
     ScopeUnsupportedError, TurnSpec, _board_outer_distance,
     _board_outer_points,
     _canonical_outer_station,
+    _winder_board_straight_local,
     physical_cell_boundaries, prepare_turn_residential_geometry,
     winder_tread_rear_outer_authority, winder_underbody_support_footprint,
 )
@@ -34,6 +35,7 @@ from japanese_house_modeler.stair_turn import (
 
 L = ((0.0, 0.0), (0.0, 2.2), (-2.2, 2.2))
 LONG_L = ((0.0, 0.0), (0.0, 3.6), (-3.6, 3.6))
+RUNTIME_L = ((0.0, 0.0), (3.0154, 0.0), (3.0154, 2.9448))
 COMPACT_U = ((0.0, 0.0), (0.0, 2.2), (0.9, 2.2), (0.9, 0.0))
 ORDINARY_U = ((0.0, 0.0), (0.0, 2.2), (2.0, 2.2), (2.0, 0.0))
 OFF = ResidentialFields(left_side_board_enabled=False,
@@ -991,6 +993,36 @@ class FreshStage3CSlopedOuterContinuityTests(unittest.TestCase):
         expected = (lambda s: in_z(0.0) + global_pitch * s) if fallback else (
             lambda s: (in_z(s) if s <= join_s else
                        corner_z if s <= corner_s else out_z(s)))
+        if (layout.turn_specs[0].winder_pattern in ("EQUAL_2", "BF_2")
+                and len(layout.turn_cells[0]) == 2):
+            cells = (layout.turn_cells[0] if direction == "FORWARD" else
+                     tuple(reversed(layout.turn_cells[0])))
+            first = layout.straight_allocation[
+                0 if direction == "FORWARD" else 1]
+            physical = tuple((
+                _board_outer_distance(
+                    layout.turn, physical_cell_boundaries(
+                        cell, direction, layout.turn.inner_pivot).front[1],
+                    direction),
+                layout.rise_events[first + index].top_z)
+                for index, cell in enumerate(cells))
+            if any(expected(station) < top - 1.0e-6
+                   for station, top in physical):
+                # The accepted r6 analytical bridge was too low at a real
+                # RiseEvent. Keep the same principal pitches and move only
+                # the two intersections of its single horizontal section.
+                self.assertFalse(fallback)
+                corner_z = max(bridge_corner_z,
+                               *(top + reveal_mm / 1000.0
+                                 for _station, top in physical))
+                join_s = (corner_z - in_z(0.0)) / in_line[2]
+                outgoing_join = (total_s
+                                 + (corner_z - out_z(total_s)) / out_line[2])
+                self.assertLessEqual(join_s, corner_s)
+                self.assertGreaterEqual(outgoing_join, corner_s)
+                expected = lambda s: (in_z(s) if s <= join_s else
+                                      corner_z if s <= outgoing_join else
+                                      out_z(s))
         samples = []
         for board in turn_boards:
             self.assertEqual(len(board.vertices), 8)
@@ -1249,6 +1281,384 @@ class FreshStage3CSlopedOuterContinuityTests(unittest.TestCase):
                             right_side_board_enabled=False),
                     points=points, specs=specs, direction=direction,
                     riser_count=18)[1]))
+
+
+class FreshStage3CTwoCellOuterClearanceTests(unittest.TestCase):
+    """Physical two-cell tread clearance without changing r6 accepted shapes."""
+
+    def case(self, pattern="EQUAL_2", direction="FORWARD", points=RUNTIME_L,
+             *, underside="SLOPED_CLOSED", reveal_mm=40,
+             thickness_mm=18, riser_thickness_mm=12,
+             floor_to_floor_mm=2800, riser_count=16,
+             board_mode="SLOPED", enabled="outer", width_mm=750):
+        a = tuple(points[1][i] - points[0][i] for i in range(2))
+        b = tuple(points[2][i] - points[1][i] for i in range(2))
+        left_turn = a[0] * b[1] - a[1] * b[0] > 0.0
+        outer_right = left_turn == (direction == "FORWARD")
+        left_on = enabled == "both" or (enabled == "outer" and not outer_right)
+        left_on |= enabled == "inner" and outer_right
+        right_on = enabled == "both" or (enabled == "outer" and outer_right)
+        right_on |= enabled == "inner" and not outer_right
+        fields = replace(
+            OFF, underside_mode=underside, side_board_mode=board_mode,
+            left_side_board_enabled=left_on,
+            right_side_board_enabled=right_on,
+            side_board_reveal_mm=reveal_mm,
+            side_board_thickness_mm=thickness_mm)
+        layout, parts, _mesh = prepare(
+            fields, points, direction, pattern, width_mm=width_mm,
+            floor_to_floor_mm=floor_to_floor_mm, riser_count=riser_count,
+            riser_thickness_mm=riser_thickness_mm)
+        return layout, parts, fields
+
+    def physical_constraints(self, layout):
+        cells = (layout.turn_cells[0] if layout.ascent_direction == "FORWARD"
+                 else tuple(reversed(layout.turn_cells[0])))
+        first = layout.straight_allocation[
+            0 if layout.ascent_direction == "FORWARD" else 1]
+        result = []
+        for index, cell in enumerate(cells):
+            event = layout.rise_events[first + index]
+            self.assertEqual(event.owner, "WINDER_TREAD")
+            boundary = physical_cell_boundaries(
+                cell, layout.ascent_direction, layout.turn.inner_pivot).front[1]
+            result.append((_board_outer_distance(
+                layout.turn, boundary, layout.ascent_direction), event.top_z))
+        self.assertEqual(len(result), 2)
+        self.assertEqual(len(layout.rise_events),
+                         sum(layout.straight_allocation) + 3)
+        return tuple(result)
+
+    def turn_upper_segments(self, layout, parts):
+        segments = []
+        for board in boards(parts)[1:-1]:
+            edge = tuple((_board_outer_distance(
+                layout.turn, vertex[:2], layout.ascent_direction), vertex[2])
+                for vertex in board.vertices[4:]
+                if _canonical_outer_station(layout.turn, vertex[:2]) is not None)
+            self.assertEqual(len(edge), 2)
+            segments.append(tuple(sorted(edge)))
+        self.assertTrue(segments)
+        return tuple(segments)
+
+    def upper_at(self, segments, station):
+        values = []
+        for (a, za), (b, zb) in segments:
+            if a - 2.0e-8 <= station <= b + 2.0e-8:
+                values.append(za + (zb - za) * (station - a) / (b - a))
+        self.assertTrue(values, f"outer board has no upper at s={station}")
+        for value in values[1:]:
+            self.assertAlmostEqual(value, values[0], delta=2.0e-8)
+        return values[0]
+
+    def test_runtime_equal2_bf2_physical_clearance_and_profile(self):
+        for pattern, event_station in (("EQUAL_2", .75),
+                                       ("BF_2", math.sqrt(3) / 4)):
+            with self.subTest(pattern=pattern):
+                layout, parts, fields = self.case(pattern)
+                self.assertTrue(validate_mesh_fragments(boards(parts)))
+                constraints = self.physical_constraints(layout)
+                station, top = constraints[1]
+                self.assertAlmostEqual(station, event_station, delta=2.0e-9)
+                self.assertAlmostEqual(top, 1.575, delta=2.0e-9)
+                samples = self.turn_upper_segments(layout, parts)
+                corrected = self.upper_at(samples, station)
+                self.assertAlmostEqual(corrected, top + .04, delta=2.0e-9)
+                self.assertGreaterEqual(corrected, top)
+                self.assertTrue(has_xy(boards(parts), layout.turn.outer_corner))
+
+                incoming, outgoing = analytical_sloped_lines(layout, fields)
+                corner_s = math.dist(layout.turn.entry_outer,
+                                     layout.turn.outer_corner)
+                total_s = corner_s + math.dist(
+                    layout.turn.outer_corner, layout.turn.exit_outer)
+                entry_z = (incoming[1][1] + incoming[2]
+                           * (incoming[0] - incoming[1][0]))
+                exit_z = outgoing[1][1] - outgoing[2] * outgoing[1][0]
+                old_b = exit_z + outgoing[2] * (corner_s - total_s)
+                self.assertAlmostEqual(old_b, 1.4998996031, delta=2.0e-8)
+                self.assertAlmostEqual(top - old_b, .0751003969,
+                                       delta=2.0e-8)
+                cells = layout.turn_cells[0]
+                support = winder_underbody_support_footprint(
+                    layout, 0, cells[1], winder_tread_rear_outer_authority(
+                        layout, 0, cells, 1))
+                support_s = _board_outer_distance(
+                    layout.turn, _board_outer_points(
+                        layout.turn, support, "FORWARD")[0], "FORWARD")
+                old_support_z = (old_b if support_s <= corner_s else
+                                 exit_z + outgoing[2] * (support_s - total_s))
+                if pattern == "EQUAL_2":
+                    # Blender's 68.16 mm sample is after Stage 3B's riser
+                    # setback, while the physical divider itself is at B.
+                    self.assertAlmostEqual(old_support_z, 1.5068338,
+                                           delta=2.0e-7)
+                else:
+                    self.assertAlmostEqual(old_support_z, old_b,
+                                           delta=2.0e-8)
+                self.assertAlmostEqual(self.upper_at(samples, support_s),
+                                       corrected, delta=2.0e-8)
+                join_in = (corrected - entry_z) / incoming[2]
+                join_out = total_s + (corrected - exit_z) / outgoing[2]
+                self.assertLess(join_in, station + 2.0e-8)
+                self.assertLess(join_in, corner_s)
+                self.assertGreater(join_out, corner_s)
+                self.assertLess(join_out, total_s - .04)
+                self.assertAlmostEqual(self.upper_at(samples, join_in),
+                                       corrected, delta=2.0e-8)
+                self.assertAlmostEqual(self.upper_at(samples, join_out),
+                                       corrected, delta=2.0e-8)
+                self.assertAlmostEqual(self.upper_at(samples, corner_s),
+                                       corrected, delta=2.0e-8)
+                for (a, za), (b, zb) in samples:
+                    self.assertGreaterEqual(zb + 2.0e-9, za)
+                    slope = (zb - za) / (b - a)
+                    self.assertTrue(any(abs(slope - target) < 2.0e-8
+                                        for target in (incoming[2], 0.0,
+                                                       outgoing[2])))
+
+                # The incoming r6 terminal and outgoing residential Straight
+                # remain exact; only Winder strips change for this fixture.
+                path = layout.canonical_path
+                count_in, count_out = layout.straight_allocation
+                out_direction = (0.0, 1.0)
+                outgoing_start = (path[1].xy[0],
+                                  path[1].xy[1] + layout.turn.cutback)
+                outgoing_local = _winder_board_straight_local(
+                    layout, (outgoing_start, out_direction,
+                             layout.straight_runs[1], count_out),
+                    count_in + 2)
+                actual = boards(parts)
+                self.assertEqual(fragment_digest((actual[0],)),
+                    "83c3590e93061f4564da75f099202c6d7bf9a2a357671ee630f0705ebb3deff0")
+                straight_shapes = tuple((board.vertices, board.faces)
+                                        for board in (actual[0], actual[-1]))
+                self.assertEqual(hashlib.sha256(repr(straight_shapes).encode()).hexdigest(),
+                    "4bdf6d37fcd208fe310c38f47e7d716ae29eb2472c28d9aab930a3c71d195841")
+                accepted = build_side_board_fragment(
+                    outgoing_local, "RIGHT", fields)
+                self.assertEqual((actual[-1].vertices, actual[-1].faces),
+                                 (accepted.vertices, accepted.faces))
+
+    def test_r6_frozen_patterns_and_deferred_equal4(self):
+        frozen = {
+            "EQUAL_3": (
+                "0d3fe6e4f521911561eba4fbfdbc1d36574c8031e49bfa7e1a74aeb98b4640bc",
+                "79839da8fa3096bae1940d0c9d07a63cda1cf5caaa607ec09a57425096328750",
+                "47f7bfbd00d836301ce58e887d7430822063f38ae849d4d65249c063f4683410"),
+            "BF_1": (
+                "e76a7724875efe4b9650653c922174635776c1c8becf6118de5c415e4de7f790",
+                "6b877cd6f6e70b34a8078d8fc8d7243d17a5658f71a9349049c704952e2aa878",
+                "75f83a25ea95d652d22346214ed8c0399827a2363bba5ff5ef23c23f208657bb"),
+            "EQUAL_4": (
+                "95d7282db58a037bb799040a709566b6a4fd3c722d5b1ca61a8df0a4ac09305a",
+                "27c3efaa948005fc44811d44af6171cd26babdf9b4a42eba7ee3964851b5178f",
+                "49669d44850083e5888802e1db041b53ea9e46f7e81b6959669a63943ad4a962"),
+        }
+        for pattern, digests in frozen.items():
+            for enabled, expected in zip(("outer", "inner", "both"), digests):
+                with self.subTest(pattern=pattern, enabled=enabled):
+                    _layout, parts, _fields = self.case(
+                        pattern, enabled=enabled)
+                    self.assertEqual(fragment_digest(boards(parts)), expected)
+        frozen_nonboard = {
+            "EQUAL_3": "54f38db8ee141d6e70c463f245ec8451eff5f0ae0b42a45b9ba48bd328f0484b",
+            "BF_1": "cad19557b91cc872407290da06113cfc81bad0fd2bd22788c32dc4d35a24c5a4",
+            "EQUAL_4": "0ea1ac18fecf3849fdefdbe5f4dc33aab93e06744854060cbdd49f04028a218f",
+        }
+        for pattern, expected in frozen_nonboard.items():
+            _layout, parts, _fields = self.case(pattern, enabled="both")
+            self.assertEqual(fragment_digest(
+                p for p in parts if p.part_type != "SIDE_BOARD"), expected)
+
+        # BF_1 is also a two-cell pattern. Even this valid variant with an
+        # r6 physical deficit remains frozen outside the approved r7 targets.
+        bf1_points = ((0.0, 0.0), (2.2, 0.0), (2.2, 3.0))
+        layout, parts, _fields = self.case(
+            "BF_1", "REVERSE", bf1_points)
+        station, top = self.physical_constraints(layout)[1]
+        self.assertAlmostEqual(station, math.sqrt(3) / 4, delta=2.0e-9)
+        self.assertAlmostEqual(top, 1.75, delta=2.0e-9)
+        self.assertEqual(fragment_digest(boards(parts)),
+            "e8c07a4c6ad64cd498144e804b16fbde29136db1c418c49ee2d60b1d554f4a45")
+
+    def test_nonboard_stepped_and_inner_signatures_are_frozen(self):
+        frozen = {
+            "EQUAL_2": (
+                "7c8a4c530b2218409bb941fe33cb3a3f93b70588b3e06ea2771b941190c64219",
+                "6f81662b68360a4098b9fe5f625e5d9f7cff50d90dbf74ea5ef5926a89290f03",
+                "da462c936b9b23301b6a091b01cf0a3d85a77691d982c115f68d604c5dcab565"),
+            "BF_2": (
+                "649d9702ea6d1805ec6615c81d44c74ea65430c48b9168b52b3bb6bbd951a5ff",
+                "2648781cf095b06fd93381b0aff20cad65641264f834a6acc364d346dfe6f7d4",
+                "c280ba1e4e0346319d0897d822e5adca96ee38cd62ca8eae4231754a6cf2f7fa"),
+        }
+        for pattern, (sloped_body, stepped_body, stepped_board) in frozen.items():
+            for underside, expected_body in (
+                    ("SLOPED_CLOSED", sloped_body),
+                    ("STEPPED_CLOSED", stepped_body)):
+                with self.subTest(pattern=pattern, underside=underside):
+                    layout, parts, _fields = self.case(
+                        pattern, underside=underside, enabled="both")
+                    self.assertEqual(fragment_digest(
+                        p for p in parts if p.part_type != "SIDE_BOARD"),
+                        expected_body)
+                    self.assertEqual(layout.straight_allocation, (7, 6))
+                    self.assertEqual(len(layout.rise_events), 16)
+                    self.assertEqual(layout.turn.outer_corner,
+                                     (3.3904, -0.375))
+                    arrival_riser = tuple(p for p in parts
+                                          if p.part_type == "RISER"
+                                          and p.ordinal == 31)
+                    arrival_cap = tuple(p for p in parts
+                                        if p.part_type == "TREAD"
+                                        and p.ordinal == 32)
+                    self.assertEqual(fragment_digest(arrival_riser),
+                        "d46f0f22e2455b6380ef70d6041003c0cb6f5776a5edb2ca58c1be315162e732")
+                    self.assertEqual(fragment_digest(arrival_cap),
+                        "0c302887d4b432a26f967f0387c6fd414677e67cdf67c57b7070ea69ea7d62fb")
+            _layout, inner, _fields = self.case(pattern, enabled="inner")
+            self.assertEqual(fragment_digest(boards(inner)),
+                             "6b877cd6f6e70b34a8078d8fc8d7243d17a5658f71a9349049c704952e2aa878")
+            _layout, stepped, _fields = self.case(
+                pattern, underside="STEPPED_CLOSED", board_mode="STEPPED")
+            self.assertEqual(fragment_digest(boards(stepped)), stepped_board)
+
+    def test_parameters_modes_and_board_enable_matrix(self):
+        for pattern in ("EQUAL_2", "BF_2"):
+            for direction in ("FORWARD", "REVERSE"):
+                for reveal in (20, 40, 60):
+                    for thickness in (12, 18, 24):
+                        for riser_thickness in (12, 20):
+                            for height, count in ((2800, 16), (3000, 17)):
+                                for underside in ("STEPPED_CLOSED",
+                                                  "SLOPED_CLOSED"):
+                                    with self.subTest(pattern=pattern,
+                                            direction=direction, reveal=reveal,
+                                            thickness=thickness,
+                                            riser_thickness=riser_thickness,
+                                            height=height, count=count,
+                                            underside=underside):
+                                        layout, parts, _fields = self.case(
+                                            pattern, direction,
+                                            underside=underside,
+                                            reveal_mm=reveal,
+                                            thickness_mm=thickness,
+                                            riser_thickness_mm=riser_thickness,
+                                            floor_to_floor_mm=height,
+                                            riser_count=count)
+                                        self.assertTrue(validate_mesh_fragments(
+                                            boards(parts)))
+                                        station, top = self.physical_constraints(
+                                            layout)[1]
+                                        actual = self.upper_at(
+                                            self.turn_upper_segments(layout, parts),
+                                            station)
+                                        self.assertGreaterEqual(actual + 2.0e-8,
+                                                                top)
+        for pattern in ("EQUAL_2", "BF_2"):
+            variants = {}
+            for enabled in ("both", "outer", "inner", "off"):
+                layout, parts, _fields = self.case(pattern, enabled=enabled)
+                variants[enabled] = parts
+                self.assertTrue(validate_mesh_fragments(boards(parts)))
+                self.assertEqual(len(layout.rise_events), 16)
+            base = signature(variants["off"])
+            self.assertTrue(all(signature(parts) == base
+                                for parts in variants.values()))
+            self.assertFalse(boards(variants["off"]))
+            both_shapes = Counter((p.vertices, p.faces)
+                                  for p in boards(variants["both"]))
+            for enabled in ("outer", "inner"):
+                for part in boards(variants[enabled]):
+                    self.assertGreaterEqual(
+                        both_shapes[(part.vertices, part.faces)], 1)
+
+    def test_rotation_mirror_and_arbitrary_angle(self):
+        angle = math.radians(63.0)
+        arbitrary = ((0.0, 0.0), (0.0, 2.2),
+                     (-2.2 * math.sin(angle),
+                      2.2 + 2.2 * math.cos(angle)))
+        mirrored = tuple((-x, y) for x, y in RUNTIME_L)
+        turn = math.radians(17.0)
+        for points, patterns, width in (
+                (RUNTIME_L, ("EQUAL_2", "BF_2"), 750),
+                (mirrored, ("EQUAL_2", "BF_2"), 750),
+                (arbitrary, ("EQUAL_2",), 900)):
+            for pattern in patterns:
+                for direction in ("FORWARD", "REVERSE"):
+                    with self.subTest(points=points, pattern=pattern,
+                                      direction=direction):
+                        original_layout, original, _ = self.case(
+                            pattern, direction, points, width_mm=width)
+                        turned_layout, transformed, _ = self.case(
+                            pattern, direction,
+                            tuple(rotate_xy(point, turn) for point in points),
+                            width_mm=width)
+                        self.assertEqual(original_layout.rise_events,
+                                         turned_layout.rise_events)
+                        before, after = boards(original), boards(transformed)
+                        self.assertEqual(len(before), len(after))
+                        for first, second in zip(before, after):
+                            self.assertEqual(first.faces, second.faces)
+                            for vertex, rotated in zip(first.vertices,
+                                                       second.vertices):
+                                restored = rotate_xy(rotated[:2], -turn)
+                                self.assertAlmostEqual(restored[0], vertex[0],
+                                                       delta=2.0e-8)
+                                self.assertAlmostEqual(restored[1], vertex[1],
+                                                       delta=2.0e-8)
+                                self.assertAlmostEqual(rotated[2], vertex[2],
+                                                       delta=2.0e-9)
+                        station, top = self.physical_constraints(
+                            original_layout)[1]
+                        self.assertGreaterEqual(self.upper_at(
+                            self.turn_upper_segments(original_layout, original),
+                            station) + 2.0e-8, top)
+
+    def test_unequal_legs_local_incoming_transition(self):
+        points = ((0.0, 0.0), (3.0154, 0.0), (3.0154, 5.0))
+        layout, parts, fields = self.case(
+            "BF_2", points=points, reveal_mm=20)
+        self.assertTrue(validate_mesh_fragments(boards(parts)))
+        constraints = self.physical_constraints(layout)
+        self.assertAlmostEqual(constraints[0][0], 0.0, delta=2.0e-8)
+        station, top = constraints[1]
+        self.assertGreaterEqual(self.upper_at(
+            self.turn_upper_segments(layout, parts), station) + 2.0e-8, top)
+        incoming_line = analytical_sloped_lines(layout, fields)[0]
+        run = layout.straight_runs[0]
+        original_entry = (incoming_line[1][1] + incoming_line[2]
+                          * (run - incoming_line[1][0]))
+        self.assertLess(original_entry + incoming_line[2] * station, top)
+        straight = boards(parts)[0]
+        ring = straight.vertices[:len(straight.vertices) // 2]
+        upper_by_x = {}
+        for x, _y, z in ring:
+            upper_by_x[x] = max(z, upper_by_x.get(x, -math.inf))
+        anchor_x = run - layout.straight_runs[0] / layout.straight_allocation[0]
+        rear_x = run + layout.riser_thickness
+        anchor_z = upper_by_x[anchor_x]
+        rear_z = upper_by_x[rear_x]
+        local_pitch = (rear_z - anchor_z) / (rear_x - anchor_x)
+        self.assertGreater(local_pitch, incoming_line[2])
+        new_entry = anchor_z + local_pitch * (run - anchor_x)
+        self.assertGreaterEqual(new_entry + local_pitch * station + 2.0e-8,
+                                top + .02)
+
+    def test_hard_clearance_without_forcing_extra_incoming_bend(self):
+        points = ((0.0, 0.0), (2.2, 0.0), (2.2, 5.0))
+        layout, parts, fields = self.case(
+            "BF_2", points=points, reveal_mm=20)
+        station, top = self.physical_constraints(layout)[1]
+        actual = self.upper_at(self.turn_upper_segments(layout, parts), station)
+        self.assertAlmostEqual(actual, top, delta=2.0e-8)
+        self.assertTrue(validate_mesh_fragments(boards(parts)))
+        incoming = analytical_sloped_lines(layout, fields)[0]
+        run = layout.straight_runs[0]
+        original_entry = (incoming[1][1] + incoming[2]
+                          * (run - incoming[1][0]))
+        self.assertGreaterEqual(original_entry + incoming[2] * station, top)
 
 
 if __name__ == "__main__":
