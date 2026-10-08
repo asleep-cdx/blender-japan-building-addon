@@ -1487,6 +1487,110 @@ def _board_outer_distance(frame, point, ascent_direction):
     return distance if ascent_direction == "FORWARD" else first + second - distance
 
 
+@dataclass(frozen=True)
+class _SlopedOuterEnvelope:
+    """Straight-owned upper lines on the ascent-local Turn exterior."""
+
+    chain: tuple
+    corner_station: float
+    length: float
+    join_station: float
+    corner_z: float
+    incoming_at_entry: float
+    incoming_pitch: float
+    outgoing_at_exit: float
+    outgoing_pitch: float
+    global_fallback: bool
+
+    def upper_z(self, station):
+        if self.global_fallback:
+            return (self.incoming_at_entry
+                    + (self.outgoing_at_exit - self.incoming_at_entry)
+                    * station / self.length)
+        if station <= self.join_station:
+            return self.incoming_at_entry + self.incoming_pitch * station
+        if station <= self.corner_station:
+            return self.corner_z
+        return self.outgoing_at_exit + self.outgoing_pitch * (station - self.length)
+
+    def point_at(self, station):
+        if station == self.corner_station:
+            return self.chain[1]
+        if station == self.length:
+            return self.chain[2]
+        if station <= self.corner_station:
+            a, b = self.chain[:2]
+            fraction = station / self.corner_station
+        else:
+            a, b = self.chain[1:]
+            fraction = ((station - self.corner_station)
+                        / (self.length - self.corner_station))
+        return _add(a, _scale(_sub(b, a), fraction))
+
+
+def _sloped_board_principal_line(local, fields):
+    """Return the analytical run between front closure and rear cap."""
+    from .stair_residential_geometry import sloped_side_board_profile
+
+    upper = sloped_side_board_profile(local, fields).outer
+    # The accepted residential profile has a front vertical closure, then
+    # exactly one principal sloped run, followed by rear cap/closure.
+    start, end = upper[1:3]
+    if end[0] - start[0] <= EPS_LENGTH:
+        raise ValueError("Winder outer SLOPED Side BoardのStraight勾配が不正です。")
+    return start, (end[1] - start[1]) / (end[0] - start[0])
+
+
+def _resolve_winder_outer_sloped_envelope(
+        frame, ascent_direction, incoming, outgoing, fields):
+    """Join the adjacent Straight slopes through a level canonical corner."""
+    chain = ((frame.entry_outer, frame.outer_corner, frame.exit_outer)
+             if ascent_direction == "FORWARD" else
+             (frame.exit_outer, frame.outer_corner, frame.entry_outer))
+    corner_station = math.hypot(*_sub(chain[1], chain[0]))
+    length = corner_station + math.hypot(*_sub(chain[2], chain[1]))
+    in_start, in_pitch = _sloped_board_principal_line(incoming, fields)
+    out_start, out_pitch = _sloped_board_principal_line(outgoing, fields)
+    if in_pitch <= EPS_INTERSECTION or out_pitch <= EPS_INTERSECTION:
+        raise ValueError("Winder outer SLOPED Side Boardの勾配が正ではありません。")
+    incoming_at_entry = (in_start[1] + in_pitch
+                         * (incoming.run_length - in_start[0]))
+    outgoing_at_exit = out_start[1] - out_pitch * out_start[0]
+    corner_z = outgoing_at_exit + out_pitch * (corner_station - length)
+    join_station = (corner_z - incoming_at_entry) / in_pitch
+    earliest_station = in_start[0] - incoming.run_length
+    global_fallback = (join_station < earliest_station - EPS_LENGTH
+                       or join_station > corner_station + EPS_LENGTH)
+    if global_fallback:
+        # The horizontal bridge cannot end at the canonical corner. Use one
+        # ascent-local line across the whole Turn, anchored to both Straights.
+        corner_z = (incoming_at_entry
+                    + (outgoing_at_exit - incoming_at_entry)
+                    * corner_station / length)
+    else:
+        # Only numerical drift at a true endpoint is permitted here. A
+        # negative station is a real join on the incoming Straight.
+        join_station = max(earliest_station, min(corner_station, join_station))
+    return _SlopedOuterEnvelope(
+        chain, corner_station, length, join_station, corner_z,
+        incoming_at_entry, in_pitch, outgoing_at_exit, out_pitch,
+        global_fallback)
+
+
+def _board_outer_sloped_points(frame, points, ascent_direction, envelope):
+    """Split at the bridge join or the global line's physical Turn exit."""
+    stations = tuple(_board_outer_distance(frame, point, ascent_direction)
+                     for point in points)
+    split_station = (envelope.length if envelope.global_fallback
+                     else envelope.join_station)
+    result = [points[0]]
+    for start, end, point in zip(stations, stations[1:], points[1:]):
+        if start + EPS_LENGTH < split_station < end - EPS_LENGTH:
+            result.append(envelope.point_at(split_station))
+        result.append(point)
+    return tuple(result)
+
+
 def _board_offsets(points, thickness, outward_sign):
     """Miter a short outward strip without changing the walking boundary."""
     directions = tuple(_unit(_sub(b, a), "Side Board edge")[0]
@@ -1611,9 +1715,93 @@ def _winder_inner_straight_board_fragment(
     return result
 
 
+def _winder_outer_sloped_straight_fragment(
+        local, side, fields, *, start_envelope=None, end_envelope=None):
+    """Join one outer Straight profile to adjacent analytical Turn envelopes."""
+    from .stair_geometry import extrude_xz_profile, validate_simple_polygon
+    from .stair_residential_geometry import sloped_side_board_profile
+
+    profile = sloped_side_board_profile(local, fields)
+    start, pitch = _sloped_board_principal_line(local, fields)
+    rear = local.run_length + local.riser_thickness
+    upper = list(profile.outer[:2])
+    if start_envelope is not None and start_envelope.global_fallback:
+        # The outgoing board starts reveal downhill of the physical exit.
+        # Its overlap follows the global Turn line through the accepted rear
+        # body support. A local transition then rejoins the unchanged main
+        # Straight principal slope before its rear cap.
+        front_x = upper[1][0]
+        upper[1] = (front_x,
+                    start_envelope.upper_z(start_envelope.length + front_x))
+        upper.append((0.0, start_envelope.outgoing_at_exit))
+        support_x = local.riser_thickness
+        upper.append((support_x,
+                      start_envelope.upper_z(start_envelope.length + support_x)))
+        main_end = profile.outer[2][0]
+        if main_end - support_x <= EPS_LENGTH:
+            raise ValueError("Winder outer SLOPED Side Boardのoutgoing support区間が不足しています。")
+        recover_x = support_x + min(
+            -front_x, (main_end - support_x) / 2.0)
+        upper.append((recover_x,
+                      start[1] + pitch * (recover_x - start[0])))
+    if end_envelope is None:
+        upper.extend(profile.outer[2:])
+    elif end_envelope.global_fallback:
+        # Preserve the incoming principal pitch to physical Turn entry.
+        # The existing rear support extends riser_thickness into the Turn.
+        upper.extend((profile.outer[2],
+                      (local.run_length, end_envelope.incoming_at_entry),
+                      (rear, end_envelope.upper_z(local.riser_thickness)),
+                      profile.outer[-1]))
+    elif end_envelope.join_station < local.riser_thickness - EPS_LENGTH:
+        # The level bridge starts before this board's rear support plane.
+        join_x = local.run_length + end_envelope.join_station
+        upper.extend(((join_x, end_envelope.corner_z),
+                      (rear, end_envelope.corner_z), profile.outer[-1]))
+    else:
+        rear_z = start[1] + pitch * (rear - start[0])
+        upper.extend((profile.outer[2], (rear, rear_z), profile.outer[-1]))
+    upper = tuple(upper)
+    polygon = validate_simple_polygon(upper + tuple(reversed(profile.lower)))
+    thickness = float(fields.side_board_thickness_mm) / _MM_PER_METRE
+    half = local.width / 2.0
+    if side == "LEFT":
+        y_min, y_max, ordinal = half, half + thickness, 1
+    elif side == "RIGHT":
+        y_min, y_max, ordinal = -half - thickness, -half, 2
+    else:
+        raise ValueError("Side Board sideはLEFTまたはRIGHTである必要があります。")
+    fragment = extrude_xz_profile(
+        polygon, y_min, y_max, part_type="SIDE_BOARD", ordinal=ordinal)
+    forward, left = local.axes.forward, local.axes.left
+    vertices = tuple((local.lower_xy[0] + forward[0] * x + left[0] * y,
+                      local.lower_xy[1] + forward[1] * x + left[1] * y, z)
+                     for x, y, z in fragment.vertices)
+    result = MeshFragment("SIDE_BOARD", ordinal, vertices, fragment.faces)
+    validate_mesh_fragments((result,))
+    return result
+
+
+def _winder_board_straight_local(layout, payload, event_count):
+    """Build the accepted ascent-local Straight context for a board."""
+    from .stair_geometry import StairAxes, StairLayout
+
+    start, direction, run, count = payload
+    if not count:
+        raise ValueError("Winder outer SLOPED Side Boardに隣接するStraightがありません。")
+    return StairLayout(
+        (), start, _add(start, _scale(direction, run)),
+        StairAxes((*direction, 0.0),
+                  (-direction[1], direction[0], 0.0)),
+        layout.base_z + event_count * layout.actual_riser,
+        (count + 1) * layout.actual_riser,
+        layout.base_z + (event_count + count + 1) * layout.actual_riser,
+        run, count + 1, count, layout.actual_riser, run / count,
+        layout.width, layout.tread_thickness, layout.riser_thickness)
+
+
 def build_winder_side_board_fragments(layout, fields):
     """Add ordinary boards after the accepted top and body have been prepared."""
-    from .stair_geometry import StairAxes, StairLayout
     from .stair_residential import validate_side_board_reveal
     from .stair_residential_geometry import build_side_board_fragment
 
@@ -1641,6 +1829,7 @@ def build_winder_side_board_fragments(layout, fields):
             for kind, index, payload in components]
 
     result, event_count, step_returns = [], 0, []
+    sloped_envelopes = {}
     enabled = tuple(side for side, on in (
         ("LEFT", fields.left_side_board_enabled),
         ("RIGHT", fields.right_side_board_enabled)) if on)
@@ -1654,15 +1843,7 @@ def build_winder_side_board_fragments(layout, fields):
             start, direction, run, count = payload
             if not count:
                 continue
-            local = StairLayout(
-                (), start, _add(start, _scale(direction, run)),
-                StairAxes((*direction, 0.0),
-                          (-direction[1], direction[0], 0.0)),
-                layout.base_z + event_count * layout.actual_riser,
-                (count + 1) * layout.actual_riser,
-                layout.base_z + (event_count + count + 1) * layout.actual_riser,
-                run, count + 1, count, layout.actual_riser, run / count,
-                layout.width, layout.tread_thickness, layout.riser_thickness)
+            local = _winder_board_straight_local(layout, payload, event_count)
             for side in enabled:
                 start_inner = (position > 0
                                and components[position - 1][0] == TURN_WINDER
@@ -1676,11 +1857,47 @@ def build_winder_side_board_fragments(layout, fields):
                     terminal_z = (layout.base_z + (event_count + count
                                   + len(layout.turn_cells[next_turn]))
                                   * layout.actual_riser)
-                board = (_winder_inner_straight_board_fragment(
-                    local, side, fields, clip_start=start_inner,
-                    terminal_z=terminal_z)
-                    if start_inner or end_inner else
-                    build_side_board_fragment(local, side, fields))
+                end_outer_sloped = (
+                    fields.side_board_mode == "SLOPED"
+                    and position + 1 < len(components)
+                    and components[position + 1][0] == TURN_WINDER
+                    and side != inner_side(components[position + 1][1]))
+                start_outer_sloped = (
+                    fields.side_board_mode == "SLOPED"
+                    and position > 0
+                    and components[position - 1][0] == TURN_WINDER
+                    and side != inner_side(components[position - 1][1]))
+                if start_inner or end_inner:
+                    board = _winder_inner_straight_board_fragment(
+                        local, side, fields, clip_start=start_inner,
+                        terminal_z=terminal_z)
+                else:
+                    start_envelope = (sloped_envelopes[position - 1]
+                                      if start_outer_sloped else None)
+                    end_envelope = None
+                    if end_outer_sloped:
+                        next_position = position + 1
+                        next_turn = components[next_position][1]
+                        if (next_position + 1 == len(components)
+                                or components[next_position + 1][0] != "STRAIGHT"):
+                            raise ValueError("Winder outer SLOPED Side Boardのoutgoing Straightがありません。")
+                        end_envelope = sloped_envelopes.get(next_position)
+                        if end_envelope is None:
+                            following = components[next_position + 1][2]
+                            outgoing = _winder_board_straight_local(
+                                layout, following, event_count + count
+                                + len(layout.turn_cells[next_turn]))
+                            end_envelope = _resolve_winder_outer_sloped_envelope(
+                                layout.turns[next_turn], layout.ascent_direction,
+                                local, outgoing, fields)
+                            sloped_envelopes[next_position] = end_envelope
+                    board = (_winder_outer_sloped_straight_fragment(
+                        local, side, fields, start_envelope=start_envelope,
+                        end_envelope=end_envelope)
+                        if end_envelope is not None
+                        or (start_envelope is not None
+                            and start_envelope.global_fallback) else
+                        build_side_board_fragment(local, side, fields))
                 result.append(replace(board, ordinal=len(result) + 1))
             event_count += count
             continue
@@ -1691,6 +1908,9 @@ def build_winder_side_board_fragments(layout, fields):
         ascent_theta = frame.theta * (1 if layout.ascent_direction == "FORWARD" else -1)
         outer_side = "RIGHT" if ascent_theta > 0.0 else "LEFT"
         outward_sign = -1.0 if ascent_theta > 0.0 else 1.0
+        envelope = None
+        if outer_side in enabled and fields.side_board_mode == "SLOPED":
+            envelope = sloped_envelopes[position]
         for cell_index, cell in enumerate(cells):
             event_count += 1
             top = layout.base_z + event_count * layout.actual_riser
@@ -1710,6 +1930,9 @@ def build_winder_side_board_fragments(layout, fields):
                 continue
             points = _board_outer_points(
                 frame, footprint, layout.ascent_direction)
+            if envelope is not None:
+                points = _board_outer_sloped_points(
+                    frame, points, layout.ascent_direction, envelope)
             outside = _board_offsets(points, thickness, outward_sign)
             if fields.side_board_mode == "STEPPED" and cell_index:
                 step_returns.append((
@@ -1717,17 +1940,11 @@ def build_winder_side_board_fragments(layout, fields):
                     thickness, outward_sign, layout.ascent_direction,
                     top - layout.actual_riser + reveal, top + reveal))
             for i, (a, b) in enumerate(zip(points, points[1:])):
-                if fields.side_board_mode == "SLOPED":
-                    first = top - layout.actual_riser + reveal
-                    delta = layout.actual_riser
-                    fraction_a = (_board_outer_distance(
-                        frame, a, layout.ascent_direction) - front_station
-                        ) / (rear_station - front_station)
-                    fraction_b = (_board_outer_distance(
-                        frame, b, layout.ascent_direction) - front_station
-                        ) / (rear_station - front_station)
-                    upper_a = first + delta * min(1.0, max(0.0, fraction_a))
-                    upper_b = first + delta * min(1.0, max(0.0, fraction_b))
+                if envelope is not None:
+                    upper_a = envelope.upper_z(_board_outer_distance(
+                        frame, a, layout.ascent_direction))
+                    upper_b = envelope.upper_z(_board_outer_distance(
+                        frame, b, layout.ascent_direction))
                 else:
                     upper_a = upper_b = top + reveal
                 board = _board_strip(
