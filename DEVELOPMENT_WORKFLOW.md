@@ -598,6 +598,28 @@ git archive --format=zip --output=C:\AI-Blender\Build_Archives\Build_06_C\Japane
 `ACCEPTED.zip` はBlenderへ導入可能なaddon packageを保存する。
 `ACCEPTED_REPO.zip` はSpecification、Acceptance Record、tests等を含むrepository全体を保存する。
 
+## Merge完了後の必須引き継ぎ（Windows CMD）
+
+GPTがAcceptance Record / PR / merge / main HEAD・treeの照合を行った場合、**その回答の最後に、ユーザー側で実行するCMDコマンドを一式まとめて案内すること**。GPT側のGitHub更新だけでユーザーのWindows local repositoryやlocal archivesが更新されたとは扱わない。
+
+順序：
+
+```text
+1. Windows側 main を fetch + ff-only pull で同期
+2. git status --short / main HEAD / main tree を確認
+3. Blender実機テスト済み Candidate Addon ZIP の同一バイト列を Accepted archive にコピー
+4. runtime-tested production commitからStage単位 ACCEPTED_REPO ZIPを git archive で作成
+5. 両ZIPの実在 / サイズ / certutil SHA256 を確認
+```
+
+Add-on ZIPはユーザーが実際にBlenderへ導入して合格した`Candidate_rN.zip`を保存する。ドキュメントのみ更新後の`main`から再圧縮してもバイト列の同一性を当然視しない。Copy後はCandidateとAcceptedのSize・SHA256が一致することを確認する。
+
+REPO ZIPはユーザー指定のruntime-tested production revision（exact commit SHA）を入力として生成する。Production revisionがDocumentation-only commitより前である場合、REPO ZIPには受け入れ文書の後日更新分が含まれないことを明示する。README・Acceptance Record入りの別archiveが必要なら、必要性を分けて扱う。
+
+`git pull --ff-only` / `git archive` / `certutil` のいずれかが失敗した場合は作成・確認済みと記録せず、後続の工程を止めて診断する。`git reset --hard` や `git clean -fd` を無条件に勧めない。
+
+保存先、段階名、SHA256期待値、ソースproduction SHAは各Stage Acceptance Recordを正とし、作成前に存在しない実測ハッシュを推測して記録しない。
+
 ## Stage単位のAccepted archive
 
 必要に応じてStage単位でも同じ命名規則を使用する。

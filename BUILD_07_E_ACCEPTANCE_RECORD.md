@@ -1,13 +1,18 @@
 # BUILD 07-E ACCEPTANCE RECORD
 ## Japanese House Modeler — Winder + Arbitrary-angle Turn / Landing
 
-Date: 2026-10-03
+Date: 2026-10-08 (Stage 3C status update; Stage 1/2 historical results preserved)
 
 ## 1. Status
 
 - Build 07-E Stage 1 — **ACCEPTED**
 - Build 07-E Stage 2 — **ACCEPTED**
-- Build 07-E Stage 3 — **NEXT**
+- Build 07-E Stage 2.5 — **ACCEPTED**
+- Build 07-E Fresh Stage 3A — **ACCEPTED**
+- Build 07-E Fresh Stage 3B — **ACCEPTED**
+- Build 07-E Fresh Stage 3C — **ACCEPTED at r7 (EQUAL_4 SLOPED outer-board visual caveat)**
+- Build 07-E Fresh Stage 3D — **NEXT**
+- Build 07-E Fresh Stage 3E — **PENDING**
 - Build 07-E Stage 4 — **PENDING**
 - Build 07-E overall — **NOT YET ACCEPTED**
 
@@ -17,7 +22,7 @@ Stage 1 established the schema-5 generalized Turn / Winder foundation, RiseEvent
 
 Stage 2 accepted BF_1 / BF_2, per-Turn U / Compact U, arbitrary-angle Landing / EQUAL Winder, full schema-5 AUTO / MANUAL allocation, and Stage-2 physical Winder finish authority including constant-distance nosing, exact shared TREAD/RISER boundaries, and the Turn-local common inner finish chord `K_finish`.
 
-Stage 3+ scope remains deferred exactly as defined by the final specification.
+Fresh Stage 3A/3B/3C are separately accepted under their own records. The old Stage-3 attempt PR #33 was abandoned. Fresh Stage 3D/3E and Build Stage 4 remain pending. For Stage-3C exact production revision, artifacts, ten runtime groups and the EQUAL_4 limitation, see `BUILD_07_E_STAGE_3C_ACCEPTANCE_RECORD.md`.
 
 ## 2. Stage 1 implementation / merge identity
 
@@ -651,4 +656,30 @@ SHA256  15d48e9230b5a7e7f0b59954ccbe56acc7fb99bce3d26b39481f969f75c7b1d4
 
 The merged main tree includes the documentation acceptance commit; documentation-only changes do not replace the accepted runtime-tested production tree above.
 
-Build 07-E overall remains **NOT YET ACCEPTED**. Next implementation stage is **Build 07-E Stage 3**.
+Build 07-E overall remains **NOT YET ACCEPTED**. The historical Stage-2 conclusion above is superseded for *current stage status* by the Fresh Stage 3C acceptance section below. Next scope is Fresh Stage 3D.
+
+## 15. Fresh Stage 3A–3C acceptance status (2026-10-08)
+
+The Stage-1 and Stage-2 evidence above is retained as historical acceptance documentation. Later accepted Fresh Stage-3 work is documented in independent stage records:
+
+- Stage 2.5: `BUILD_07_E_STAGE_2_5_ACCEPTANCE_RECORD.md`
+- Fresh Stage 3A: `BUILD_07_E_STAGE_3A_ACCEPTANCE_RECORD.md`
+- Fresh Stage 3B: `BUILD_07_E_STAGE_3B_ACCEPTANCE_RECORD.md`
+- **Fresh Stage 3C**: `BUILD_07_E_STAGE_3C_ACCEPTANCE_RECORD.md` — **ACCEPTED, Candidate r7**.
+
+Fresh Stage 3C production identity:
+
+```text
+PR #48
+commit d88d5c597fafb49ac8b0debeedd048ce2bd8e648
+tree   9ab5eadb8ee3fe1524a5e627a3ce7768a7932dbd
+runtime Candidate Japanese_House_Modeler_Build_07_E_Stage3_Candidate_r7.zip
+size   172684 bytes
+SHA256 2a0cbd92cd91f076243744ef1df83ad01d29e38098582c5209c24c287685a455
+```
+
+Codex-reported automated regression: **980 tests PASS** on r7 production; Blender 5.2 LTS Test 1–10 runtime suite accepted by the user, subject to the qualifications recorded in the Stage-3C dedicated record.
+
+**Known Stage-3C visual exception:** EQUAL_4 with SLOPED outer Side Board has a visible upper-edge slope change that is intentionally left for potential later improvement. This stage accepts the current usable silhouette; the defect is **not claimed fixed**. Compact-U shared-center Side Board remains Stage 3D, and extended lifecycle remains Stage 3E/Stage 4.
+
+Documentation-only acceptance commits after runtime verification do not supersede the exact production commit/tree. **Build 07-E overall remains NOT YET ACCEPTED.**

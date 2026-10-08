@@ -625,11 +625,13 @@ class FreshStage3BSlopedBodyTests(unittest.TestCase):
             digest,
             "b22bd0b5bda2f0f0969ab132bd9ff5e41f0973b59b2d467a4b3282a2d4021b22")
 
-    def test_side_boards_remain_stage3c_deferred(self):
-        with self.assertRaisesRegex(ValueError, "Stage 3C"):
-            prepare_turn_residential_geometry(
-                fields=ResidentialFields(underside_mode="SLOPED_CLOSED"),
-                **_kwargs())
+    def test_stage3c_boards_preserve_stage3b_body(self):
+        _layout, parts, _mesh = prepare_turn_residential_geometry(
+            fields=ResidentialFields(underside_mode="SLOPED_CLOSED"),
+            **_kwargs())
+        self.assertTrue(any(part.part_type == "SIDE_BOARD" for part in parts))
+        self.assertEqual(_signature(parts, ("UNDERBODY",)),
+                         _signature(self.prepare()[1], ("UNDERBODY",)))
 
 
 if __name__ == "__main__":

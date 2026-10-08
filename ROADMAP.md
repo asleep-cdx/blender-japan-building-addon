@@ -62,13 +62,14 @@
 - **Build 07-E Stage 3 first attempt / PR #33 — ABANDONED / CLOSED / NOT MERGED**
 - **Build 07-E Fresh Stage 3A — ACCEPTED at Candidate r2**
 - **Build 07-E Fresh Stage 3B — ACCEPTED at runtime r9**
-- **Build 07-E Fresh Stage 3C — CURRENT**
+- **Build 07-E Fresh Stage 3C — ACCEPTED at Candidate r7 (EQUAL_4 SLOPED visual caveat)**
+- **Build 07-E Fresh Stage 3D — NEXT**
 - **Build 07-E overall — NOT YET ACCEPTED**
 - **Build 07-F — HOLD after 07-E**
 - **Build 07-G — HOLD / OPTIONAL BACKLOG**
 - Current accepted add-on version: **0.7.4**
 
-Current accepted `main` before the Stage-3B merge:
+Historical accepted `main` before the Stage-3B merge (retained as an old checkpoint, **not current main**):
 
 ```text
 commit c60a3205a7c0a8dce2afc30a28feb841ca379bf1
@@ -90,9 +91,21 @@ tree   3154653ca6b608b1ae7b11e42a40d497b7c50b99
 PR     #47
 ```
 
-Stage-3B acceptance covers Winder `SLOPED_CLOSED` with Side Boards OFF, the retained corrected `STEPPED_CLOSED` body, shared rear/exterior authority, and canonical outer-corner preservation. Fresh Stage 3C ordinary Winder Side Board continuation is now the CURRENT implementation stage. Focused authority: `BUILD_07_E_STAGE_3C_PLAN.md`.
+Stage-3B acceptance covers Winder `SLOPED_CLOSED` with Side Boards OFF, the retained corrected `STEPPED_CLOSED` body, shared rear/exterior authority, and canonical outer-corner preservation.
 
-Detailed acceptance authority: `BUILD_07_E_STAGE_3B_ACCEPTANCE_RECORD.md`.
+Fresh Stage 3C ordinary Winder Side Board continuation has now passed Blender 5.2 LTS runtime acceptance at Candidate r7:
+
+```text
+PR     #48
+commit d88d5c597fafb49ac8b0debeedd048ce2bd8e648
+tree   9ab5eadb8ee3fe1524a5e627a3ce7768a7932dbd
+Candidate size 172684 bytes
+Candidate SHA256 2a0cbd92cd91f076243744ef1df83ad01d29e38098582c5209c24c287685a455
+```
+
+Stage 3C acceptance explicitly defers the visible EQUAL_4 SLOPED outer Side Board slope change; this is **not claimed resolved**. Compact-U shared-center Side Board is Stage 3D (NEXT).
+
+Acceptance authority: `BUILD_07_E_STAGE_3B_ACCEPTANCE_RECORD.md` and `BUILD_07_E_STAGE_3C_ACCEPTANCE_RECORD.md`. Implementation scope: `BUILD_07_E_STAGE_3C_PLAN.md`.
 
 ---
 
@@ -114,8 +127,8 @@ Detailed acceptance authority: `BUILD_07_E_STAGE_3B_ACCEPTANCE_RECORD.md`.
 | **07-E Stage 2.5** | Pre-Stage-3 Winder geometry simplification / r1-equivalent top restoration | **DONE / ACCEPTED** |
 | **07-E Fresh Stage 3A** | Winder STEPPED_CLOSED / Side Boards OFF | **DONE / ACCEPTED at Candidate r2** |
 | **07-E Fresh Stage 3B** | Winder SLOPED_CLOSED / Side Boards OFF + outer-chain corrections | **DONE / ACCEPTED at runtime r9** |
-| **07-E Fresh Stage 3C** | ordinary Winder Side Board continuation | **CURRENT** |
-| **07-E Fresh Stage 3D** | Compact-U shared-center Side Board | **PENDING** |
+| **07-E Fresh Stage 3C** | ordinary Winder Side Board continuation | **DONE / ACCEPTED at runtime r7 (EQUAL_4 known limitation)** |
+| **07-E Fresh Stage 3D** | Compact-U shared-center Side Board | **NEXT** |
 | **07-E Fresh Stage 3E** | Material / Reverse / lifecycle regression | **PENDING** |
 | **07-E Stage 4** | Lifecycle / full regression / practical acceptance | **PENDING** |
 | **07-F** | Open / Support Variants | **HOLD after 07-E** |
@@ -304,7 +317,7 @@ Canonical Stair → Resolved Path → riser/tread placement → Tread/Riser/Unde
 
 ## 12.12 Build 07-E
 
-**Status: STAGE 1 ACCEPTED / STAGE 2 ACCEPTED / STAGE 2.5 ACCEPTED / FRESH STAGE 3A ACCEPTED / FRESH STAGE 3B ACCEPTED / STAGE 3C NEXT**
+**Status: STAGE 1/2/2.5 ACCEPTED / FRESH STAGE 3A/3B/3C ACCEPTED / STAGE 3D NEXT / BUILD 07-E OVERALL NOT YET ACCEPTED**
 
 Authority：
 
@@ -313,6 +326,7 @@ Authority：
 - `BUILD_07_E_STAGE_2_5_ACCEPTANCE_RECORD.md`
 - `BUILD_07_E_STAGE_3A_ACCEPTANCE_RECORD.md`
 - `BUILD_07_E_STAGE_3B_ACCEPTANCE_RECORD.md`
+- `BUILD_07_E_STAGE_3C_ACCEPTANCE_RECORD.md`
 - `BUILD_07_E_ACCEPTANCE_RECORD.md`
 - `BUILD_07_D_ACCEPTANCE_RECORD.md`
 
@@ -326,7 +340,7 @@ Fresh Stage 3A：Winder `STEPPED_CLOSED` visible body / Side Boards OFF — **AC
 
 Fresh Stage 3B：Winder `SLOPED_CLOSED` visible body / Side Boards OFF、shared rear/exterior authority、canonical outer-corner preservation — **ACCEPTED at runtime r9**。
 
-Fresh Stage 3C：ordinary Winder Side Board continuation — **CURRENT**。
+Fresh Stage 3C：ordinary Winder Side Board continuation — **ACCEPTED at runtime Candidate r7**。EQUAL_4/SLOPEDの外板勾配変化は既知の保留事項。Next = Fresh Stage 3D。
 
 Old PR #33はABANDONEDであり、Fresh Stage 3のbaselineではない。
 
@@ -431,7 +445,8 @@ Integration Coreは07-E/08-A/08-B/8.5 correction後、Door/Windowを待たず主
 - **07-E Stage 2.5**：r1-equivalent Winder top geometryをnarrowly restoreし、runtime ACCEPTED / merged。
 - **Fresh Stage 3A**：Winder STEPPED_CLOSED / Side Boards OFF — runtime ACCEPTED / merged。
 - **Fresh Stage 3B**：Winder SLOPED_CLOSED / Side Boards OFF + canonical outer-chain corrections — runtime ACCEPTED at r9。
-- **Fresh Stage 3C CURRENT**：ordinary Winder Side Board continuation。
+- **Fresh Stage 3C ACCEPTED**：ordinary Winder Side Board continuation at runtime r7（EQUAL_4 SLOPED外側側板の勾配変化は既知の保留事項）。
+- **Fresh Stage 3D NEXT**：Compact-U shared-center Side Board。
 - **Stage 2.5完了**：Acceptance Record作成 → main merge → fresh Stage-3 branch作成。
 - **Restarted Stage 3**：visual-first CLOSED underbody + Side Board。
 - **07-E完了**：practical checkpoint後07-F/07-GをHOLDして08へ。
@@ -471,30 +486,27 @@ UX、Save compatibility、migration、dependency repair、performance、full reg
 # 23. Current next decision
 
 ```text
-07-D              ACCEPTED
-07-E Stage 1      ACCEPTED
-07-E Stage 2      ACCEPTED (Candidate r3)
-PR #33 Stage 3    ABANDONED / CLOSED / NOT MERGED
-07-E Stage 2.5    CURRENT
+07-D                 ACCEPTED
+07-E Stage 1/2/2.5  ACCEPTED
+07-E Fresh Stage 3A ACCEPTED
+07-E Fresh Stage 3B ACCEPTED (runtime r9)
+07-E Fresh Stage 3C ACCEPTED (runtime r7; EQUAL_4 SLOPED caveat)
+07-E Fresh Stage 3D NEXT
+07-E overall        NOT YET ACCEPTED
 ```
 
-次：
+Next:
 
 ```text
-Stage 2.5 implementation
+Stage-3C Acceptance Record and PR #48 merge
     ↓
-restore Candidate-r1-equivalent visible Winder TREAD/RISER production path
-while preserving current Stage-2 r3 feature foundation
+Windows main sync + accepted r7 Addon copy and runtime-revision REPO archive
     ↓
-automated regression
+Fresh Stage 3D — Compact-U shared-center Side Board
     ↓
-Blender runtime comparison / 07-D Landing regression
+Fresh Stage 3E — Material / Reverse / lifecycle regression
     ↓
-Stage 2.5 Acceptance Record
-    ↓
-merge Stage 2.5 to main
-    ↓
-create fresh Stage-3 branch
+Stage 4 — overall acceptance
 ```
 
 ---
@@ -520,9 +532,15 @@ Baseboard / Crown
     ↓
 07-E Stage 2 Candidate r3 [ACCEPTED]
     ↓
-07-E Stage 2.5 [CURRENT — r1-equivalent Winder top simplification]
+07-E Stage 2.5 [ACCEPTED — r1-equivalent Winder top simplification]
     ↓
-07-E fresh Stage 3 [visual-first CLOSED underbody / Side Board]
+07-E Fresh Stage 3A [ACCEPTED]
+    ↓
+07-E Fresh Stage 3B [ACCEPTED r9]
+    ↓
+07-E Fresh Stage 3C [ACCEPTED r7; EQUAL_4 SLOPED caveat]
+    ↓
+07-E Fresh Stage 3D [NEXT] / 3E [PENDING]
     ↓
 07-E Stage 4 / overall Acceptance
     ↓
